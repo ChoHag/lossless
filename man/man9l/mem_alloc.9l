@@ -1,0 +1,46 @@
+.Dd $Mdocdate$
+.Dt MEM_MALLOC 9l
+.Os
+.Sh NAME
+.Nm mem_malloc ,
+.Nm mem_free
+.Nd memory allocation and deallocation
+.Sh SYNOPSIS
+.Ft void *
+.Fn mem_alloc "void *ptr" "size_t length" "sigjmp_buf *failure"
+.Ft void
+.Fn mem_free "void *ptr"
+.Sh DESCRIPTION
+The functions
+.Fn mem_alloc
+and
+.Fn mem_free
+are simple wrappers around the standard functions
+.Xr realloc 3
+and
+.Xr free 3
+which trap out-of-memory conditions and have hooks to facilitate testing
+memory allocation.
+.Sh RETURN VALUES
+If successful then
+.Fn mem_alloc
+returns a pointer to newly-allocated memory (if
+.Vt ptr
+is
+.Dv NULL )
+or to memory which has been resized and possibly moved in which case the
+old address
+.Vt ptr
+becomes invalid.
+.Pp
+If allocation was not successful then control jumps to the location established at
+.Vt *failure
+with error code
+.Dv LERR_OOM .
+The memory at
+.Vt ptr ,
+if any, will not have been affected.
+.Sh SEE ALSO
+.Xr heap_alloc 9l ,
+.Xr malloc 3 ,
+.Xr free 3

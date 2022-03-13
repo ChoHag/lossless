@@ -1,0 +1,48 @@
+.Dd $Mdocdate$
+.Dt MEMORY 9l
+.Os
+.Sh NAME
+.Nm memory
+.Nd an overview of lossless' memory model
+.Sh DESCRIPTION
+Memory in lossless is either atoms (including pairs) or everything else.
+Allocations which are not on the heap are called segments.
+.Pp
+Each heap is a singly-linked list of pages with each page linking directly
+back to the root page.
+Segments on the other hand are stored in a global doubly-linked
+list with no formal head although the global
+.Va Allocations
+will point to one of the list's elements (or
+.Dv NULL ) .
+.Pp
+The garbage collector uses
+.Va Registers
+to determine which
+.Vt Oatom Ns s
+are live and which are garbage.
+.Pp
+A segment atom is represented with the tag
+.Dv FORM_SEGMENT_INTERN
+if permitted and short enough or
+.Dv FORM_SEGMENT
+which points to the allocated segment including a
+.Vt cell
+pointing back to the atom.
+The garbage collector sets this back-link of any segment in the pages
+being collected to
+.Dv NIL
+before marking the live atoms and any live segments have it restored.
+Segments which aren't so restored (the back-link is still
+.Dv NIL )
+are freed and removed from the
+.Va Allocations
+list.
+.Pp
+Moving garbage collection occurs when an allocation is requested
+from the heap none is available.
+An explanation of the garbage collector is available in
+.Xr gc 9l .
+.Sh SEE ALSO
+.Xr gc 9l ,
+.Xr heap 9l .

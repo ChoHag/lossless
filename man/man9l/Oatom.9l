@@ -1,0 +1,16 @@
+.Dd $Mdocdate$
+.Dt OATOM 9l
+.Os
+.Sh NAME
+.Nm Oatom
+.Nd the contents of a heap atom
+.Sh INTRODUCTION
+The heap is an array of
+.Vt Oatom
+structures each consisting of two cells:
+.Bd -literal -offset indent
+struct Oatom {
+        cell sin; /* Sinister cell \(em the CAR of a pair. */
+        cell dex; /* Dexter cell \(em the CDR of a pair. */
+};
+.Ed

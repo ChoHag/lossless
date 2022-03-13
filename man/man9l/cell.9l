@@ -1,0 +1,69 @@
+.Dd $Mdocdate$
+.Dt CELL 9l
+.Os
+.Sh NAME
+.Nm cell ,
+.Nm NIL ,
+.Nm LFALSE ,
+.Nm LTRUE ,
+.Nm VOID ,
+.Nm LEOF ,
+.Nm UNDEFINED ,
+.Nm FIXED
+.Nd cells values
+.Sh INTRODUCTION
+A
+.Vt cell
+is an integer
+.Vt ( intptr_t )
+large enough to fit a pointer
+.Vt ( Oatom * ) .
+Elsewhere in the heap every atom has an associated
+.Vt Otag
+identifying which type of object the atom represents.
+.Pp
+Owing to the size of an
+.Vt Oatom
+object of two full addresses the numeric value of a pointer which will
+be saved in a
+.Vt cell
+is a multiple of this size \(em 4, 8 or 16 if addresses are 16, 32 or 64
+bits wide respectively. In particular the address will always be
+.Em even .
+.Pp
+Taking advantage of this fact the following special
+.Vt cell
+values are defined.
+.Pp
+.Bl -column "UNDEFINED" "-value-" -compact -offset indent
+.It Em Symbol Ta Em Value Ta Em Description
+.It Dv NIL       Ta \ 0 (0000) Ta () \(em the empty list
+.It Dv LFALSE    Ta \ 1 (0001) Ta (#f/#F) \(em false
+.It Dv LTRUE     Ta \ 3 (0011) Ta (#t/#T) \(em true
+.It Dv VOID      Ta \ 5 (0101) Ta no representation \(em
+.Dq returned
+by procedures; can be stored but not used
+.It Dv LEOF      Ta \ 7 (0111) Ta no representation \(em read after end or close
+.It -            Ta \ 9 (1001) Ta unused
+.It -            Ta 11  (1011) Ta unused
+.It Dv UNDEFINED Ta 13  (1101) Ta never seen \(em returned when a symbol
+is not bound in an environment
+.It Dv FIXED     Ta 15  (1111) Ta the upper 32/24/8 (depending on machine
+size) bits represent a fixed-size integer
+.El
+.Pp
+Predicates test for the presence of one of these in a
+.Vt cell .
+.Bl -column "UNDEFINED" "predicate_p" "(predicate?)" -compact -offset indent
+.It Em Special Ta Em C predicate Ta Em Lossless
+.It Dv NIL Ta Fn null_p "O" Ta ( Ot null? O )
+.It Dv LFALSE Ta Fn false_p "O" Ta ( Ot false? O )
+.It Dv LTRUE Ta Fn true_p "O" Ta ( Ot true? O )
+.It Either Dv LFALSE or Dv LTRUE Ta Fn boolean_p "O" Ta ( Ot boolean? O )
+.It Dv LVOID Ta Fn void_p "O" Ta ( Ot void? O )
+.It Dv LEOF Ta Fn eof_p "O" Ta ( Ot eof? O )
+.It Dv FIXED Ta Fn fixed_p "O" Ta -
+.It Dv UNDEFINED Ta Fn undefined_p "O" Ta -
+.It Dv Any of the above Ta Fn special_p "O" Ta -
+.It Anything except Dv UNDEFINED Ta Fn defined_p "O" Ta -
+.El

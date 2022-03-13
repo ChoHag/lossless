@@ -1,0 +1,62 @@
+.Dd $Mdocdate$
+.Dt HEAP 9l
+.Os
+.Sh NAME
+.Nm heap_init_compacting ,
+.Nm heap_init_sweeping ,
+.Nm heap_enlarge ,
+.Nm heap_alloc
+.Nd an overview of lossless' heap
+.Sh SYNOPSIS
+.In lossless.h
+.Ft void
+.Fn heap_init_collecting "Oheap *heap" "Oheap *previous" "Oheap *pair"
+.Ft void
+.Fn heap_init_sweeping "Oheap *heap" "Oheap *previous"
+.Ft Oheap *
+.Fn heap_enlarge "Oheap *heap" "sigjmp_buf *failure"
+.Ft cell
+.Fn heap_alloc "Oheap *heap" "sigjmp_buf *failure"
+.Sh DESCRIPTION
+Heap memory is where pairs and atoms are stored.
+There is one global shared heap and one private heap for each thread.
+Each heap consists of one or more memory
+.Dq pages
+linked together in a list, two pages is the heap uses a compacting
+garbage collector.
+.Pp
+The first or root page of the heap is the one from which atoms are
+allocated.
+When no more space is available garbage collection marks live atoms
+within the heap and moves them or sweeps up the unused atoms into
+a free list.
+.Pp
+.Fn heap_enlarge
+is called by the allocator when the garbage collector cannot find
+any unused atoms.
+The new page will be inserted at the end of list.
+The root page is allocated during initialisation.
+.Pp
+Whether enlarging a heap or preparing its initial page the allocated
+memory is presented to
+.Fn heap_init
+with the heap page(s) to attach it to.
+This function takes care of initialising the heap page's header and
+body.
+.Pp
+An
+.Vt Oatom
+is allocated by calling
+.Fn heap_alloc .
+It's normally called with the root page of the shared or thread-local heap
+except by the garbage collector.
+An
+.Vt Oatom
+is allocated by incrementing the page's free pointer if it uses compacting
+garbage collection or by taking the next
+.Vt Oatom
+from the free list.
+.Sh SEE ALSO
+.Xr atom 3l ,
+.Xr gc 9l ,
+.Xr memory 9l .

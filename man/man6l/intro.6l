@@ -1,0 +1,9 @@
+.Dd $Mdocdate$
+.Dt INTRO 6l
+.Os
+.Sh NAME
+.Nm intro
+.Nd introduction to lossless references
+.Sh DESCRIPTION
+The manual pages in section 6l contain various Lossless references and
+trivia.

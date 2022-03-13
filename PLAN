@@ -1,0 +1,43 @@
+Short term goals:
+
+Complete description of vm
+implement primitive_eval
+Review/edit text
+REPL
+
+
+Medium term goals:
+
+Integers
+Continuations
+Tail call whateveritscalleding
+Threads
+
+
+Long term goals:
+
+Complete implementation of r4rs, r5rs &// r7rs sans some things like
+        modules, exceptions that lossless will do differently.
+I/O
+Graphics
+BASIC
+Relations via postgres
+Floating point
+
+
+Distant goals:
+
+Editor/debugger
+Integrate with other runtimes:
+        r[4567]rs - complete
+        perl - easy, I know it, some hard parts done already
+        python - common, lots of shitty but useful libraries
+        javascript - web shite
+        emacs - need at least 1 lisp, comes with a shitty editor
+        sbcl - better lisp
+        java - fucking java
+        ksh - a shell for fun and fuck bash
+        c
+Truly integrated relations
+Begrudged grimace of approval from William Kahan with at least 1 limb intact
+

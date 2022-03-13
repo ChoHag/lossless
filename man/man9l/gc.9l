@@ -1,0 +1,11 @@
+.Dd $Mdocdate$
+.Dt GC 9l
+.Os
+.Sh NAME
+.Nm gc
+.Nd lossless garbage collection
+.Sh DESCRIPTION
+Write me.
+.Sh SEE ALSO
+.Xr heap 9l ,
+.Xr memory 9l .

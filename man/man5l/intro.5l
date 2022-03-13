@@ -1,0 +1,9 @@
+.Dd $Mdocdate$
+.Dt INTRO 5l
+.Os
+.Sh NAME
+.Nm intro
+.Nd introduction to lossless library functions
+.Sh DESCRIPTION
+The manual pages in section 5l provide an overview of Lossless
+interfaces and protocols.

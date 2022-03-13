@@ -1,0 +1,9 @@
+.Dd $Mdocdate$
+.Dt INTRO 3l
+.Os
+.Sh NAME
+.Nm intro
+.Nd introduction to lossless library functions
+.Sh DESCRIPTION
+The manual pages in section 3l provide an overview of the Lossless
+library API.

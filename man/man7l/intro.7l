@@ -1,0 +1,9 @@
+.Dd $Mdocdate$
+.Dt INTRO 7l
+.Os
+.Sh NAME
+.Nm intro
+.Nd introduction to lossless miscellanea
+.Sh DESCRIPTION
+The manual pages in section 7l are an assorted grab-bag of whatever's
+left.

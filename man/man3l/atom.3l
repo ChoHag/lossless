@@ -1,0 +1,62 @@
+.Dd $Mdocdate$
+.Dt ATOM 3l
+.Os
+.Sh NAME
+.Nm atom ,
+.Nm cons
+.Nd allocate and initialise an atom or pair
+.Sh SYNOPSIS
+.Ft cell
+.Fn atom "Oheap *heap" "cell sin" "cell dex" "Otag tag" "sigjmp_buf *failure"
+.Ft cell
+.Fn cons "cell car" "cell cdr" "sigjmp_buf *failure"
+.Sh DESCRIPTION
+The function
+.Fn atom
+allocates a new atom on the specified
+.Fa heap
+and initialises its tag and contents.
+The type of atom which is created, and thus the meaning of the contents of
+.Fa sin
+and
+.Fa dex ,
+are determined by the
+.Fa tag .
+.Fn cons
+is a macro which calls
+.Fn atom
+with the
+.Fa heap
+argument set to the thread-local heap
+.Va ( Theap )
+and the tag
+.Dv FORM_PAIR
+which defines a normal pair or lisp-like "cons" cell.
+A complete list of format tags is available in
+.Xr intro 4l .
+.Pp
+If the
+.Fa tag
+indicates that either the new
+.Fa sin
+or
+.Fa dex
+values is a pointer to another atom then they are saved in the registers
+.Va Tmp_SIN
+and
+.Va Tmp_DEX
+prior to the call to
+.Fn heap_alloc ,
+which could carry out garbage collection and obliterate the values
+before they are saved.
+.Sh RETURN VALUES
+By itself
+.Fn atom
+always succeeds and returns a new initialised atom however
+.Fn heap_alloc
+may abort if memory is exhausted.
+.Sh SEE ALSO
+.Xr intro 4l ,
+.Xr heap 9l ,
+.Xr mem_alloc 9l ,
+.Xr gc 9l .

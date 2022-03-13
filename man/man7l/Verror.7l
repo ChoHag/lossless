@@ -1,0 +1,87 @@
+.Dd $Mdocdate$
+.Dt VERROR 7l
+.Os
+.Sh NAME
+.Nm Verror
+.Nd Lossless error codes
+.Sh DESCRIPTION
+Functions which can fail or call those which can include as their final
+argument a
+.Vt sigjmp_buf *
+pointer.
+Upon failure the long-jump destination is jumped back into with one of
+the error conditions listed here and the function never returns.
+.Pp
+These error conditions are defined:
+.Bl -tag -width "LERR_INTERRUPTXXXXX" -offset indent -compact
+.It Dv LERR_AMBIGUOUS
+constant etc. incorrectly terminated
+.It Dv LERR_DOUBLE_TAIL
+two
+.Dq \&.
+operators
+.It Dv LERR_EMPTY_TAIL
+a
+.Dq \&.
+without a tail expression
+.It Dv LERR_EOF
+end of file or stream
+.It Dv LERR_EXISTS
+new binding conflicts
+.It Dv LERR_HEAVY_TAIL
+a
+.Dq \&.
+with more than one tail expression
+.It Dv LERR_IMPROPER
+a list operation encountered an improper list
+.It Dv LERR_INCOMPATIBLE
+operation on incompatible operand
+.It Dv LERR_INTERNAL
+bug in Lossless
+.It Dv LERR_INTERRUPT
+an operation was interrupted
+.It Dv LERR_LIMIT
+a software-defined limit has been reached
+.It Dv LERR_LISTLESS_TAIL
+list tail-syntax
+.Dq ( \&. )
+not in a list
+.It Dv LERR_MISMATCH
+closing bracket did not match open bracket
+.It Dv LERR_MISSING
+a keytable or environment lookup failed
+.It Dv LERR_NONCHARACTER
+scanning UTF-8 encoding failed
+.It Dv LERR_OOM
+out of memory
+.It Dv LERR_SYNTAX
+unrecognisable syntax (insufficient alone)
+.It Dv LERR_UNCLOSED_OPEN
+missing
+.Dq \&) ,
+.Dq \]
+or
+.Dq \&}
+.It Dv LERR_UNCOMBINABLE
+attempted to combine a non-program
+.It Dv LERR_UNDERFLOW
+a stack was popped too far
+.It Dv LERR_UNIMPLEMENTED
+a feature is not implemented
+.It Dv LERR_UNOPENED_CLOSE
+premature
+.Dq \&( ,
+.Dq \[
+or
+.Dq \&{
+.It Dv LERR_UNSCANNABLE
+parser encountered an invalid lexeme
+.El
+.Pp
+.Pp
+The constant
+.Dv LERR_NONE
+is also defined to be zero (0) and
+.Dv LERR_LENGTH
+the total number of error conditions (including
+.Dv LERR_NONE ) .

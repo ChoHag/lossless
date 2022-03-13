@@ -1,0 +1,9 @@
+.Dd $Mdocdate$
+.Dt INTRO 1l
+.Os
+.Sh NAME
+.Nm intro
+.Nd introduction to the lossless distribution
+.Sh DESCRIPTION
+The manual pages in section 1l provide an overview of building,
+installing and using Lossless.

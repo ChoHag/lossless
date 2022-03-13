@@ -1,0 +1,80 @@
+.Dd $Mdocdate$
+.Dt PAIR 4l
+.Os
+.Sh NAME
+.Nm pair_p ,
+.Nm cons ,
+.Nm lcar ,
+.Nm lcdr ,
+.Nm lcar_set_m ,
+.Nm lcdr_set_m ,
+.Nm (pair?) ,
+.Nm (cons) ,
+.Nm (car) ,
+.Nm (cdr) ,
+.Nm (car/set!) ,
+.Nm (cdr/set!)
+.Nd pair objects (
+.Dq cons
+cells)
+.Sh SYNOPSIS
+.Ss C
+.In lossless.h
+.Ft bool
+.Fn pair_p "cell O"
+.Ft cell
+.Fn cons "cell car" "cell cdr" "sigjmp_buf *failure"
+.Ft lcar
+.Fn cons "cell pair"
+.Ft lcdr
+.Fn cons "cell pair"
+.Ft lcar_set_m
+.Fn cons "cell pair" "cell atom"
+.Ft lcdr_set_m
+.Fn cons "cell pair" "cell atom"
+.Ss Lossless
+.Po
+.Ot pair? "O"
+.Pc => boolean
+.Pp
+.Po
+.Ot cons "x" "y"
+.Pc => pair
+.Pp
+.Po
+.Ot car "pair"
+.Pc => atom
+.Pp
+.Po
+.Ot cdr "pair"
+.Pc => atom
+.Pp
+.Po
+.Ot car/set! "pair" "O"
+.Pc => void
+.Pp
+.Po
+.Ot cdr/set! "pair" "O"
+.Pc => void
+.Sh DESCRIPTION
+A
+.Vt pair
+is a fully transparent
+.Vt Oatom
+object who's
+.Va sin
+(named
+.Va car )
+and
+.Va dex
+(named
+.Va cdr )
+both point to another
+.Vt Oatom .
+.Pp
+A new pair is constructed with
+.Fn cons
+or
+.Po
+.Ot cons
+.Pc .

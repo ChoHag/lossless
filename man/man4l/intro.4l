@@ -1,0 +1,138 @@
+.Dd $Mdocdate$
+.Dt INTRO 4l
+.Os
+.Sh NAME
+.Nm intro
+.Nd introduction to lossless library functions
+.Sh DESCRIPTION
+The manual pages in section 4l provide an overview of Lossless objects.
+.Pp
+Apart from special values (see
+.Xr special_p 3l )
+Lossless objects are represented by an
+.Vt Oatom
+consisting of two
+.Vt pair Ns s
+.Va sin
+&
+.Va dex .
+Each atom is additionally
+.Em tagged
+to describe the format of the data held in the atom's pairs.
+.Pp
+In general the tag can be considered an arbitrary number without any
+meaning but in order to scan objects during garbage collection the
+values are grouped into categories defined by whether the
+.Va sin
+half, the
+.Va dex
+half, neither or both points to another
+.Vt Oatom .
+.Pp
+These object formats are defined starting with atoms which are entirely
+opaque to the garbage collector (neither half is a pointer to an
+.Vt Oatom ) :
+.Bl -column "FORM_COLLECTED" "array(4l)" "..." -compact -offset indent
+.It Em Symbol Ta Em Manual Ta Em Description
+.It Dv FORM_NONE Ta - Ta
+unitialised atom in the free list
+.It Dv FORM_ARRAY Ta Xr array 4l Ta
+zero or more sequential
+.Vt cell Ns s
+.It Dv FORM_RUNE Ta Xr rune 4l Ta
+a packed unicode code-point
+.It Dv FORM_COLLECTED Ta Xr gc 9l Ta
+an atom which has been moved by the garbage collector, also known as a
+.Dq tombstone .
+.It Dv FORM_FIX Ta Xr fixed 4l Ta
+A small signed integer
+.It Dv FORM_KEYTABLE Ta Xr keytable 4l Ta
+.It Dv FORM_RECORD Ta Xr record 4l Ta
+.It Dv FORM_SEGMENT_INTERN Ta Xr segment 4l Ta
+A segment that fits within an
+.Vt Oatom .
+.It Dv FORM_SYMBOL Ta Xr symbol 4l Ta
+a symbol
+.It Dv FORM_SYMBOL_INTERN Ta Ta
+"" "" that fits within an
+.Vt Oatom .
+.El
+.Pp
+Atoms which are entirely transparent (both halves point to an
+.Vt Oatom ) :
+.Bl -column "FORM_COLLECTED" "array(4l)" "..." -compact -offset indent
+.It Em Symbol Ta Em Manual Ta Em Description
+.It Dv FORM_PAIR Ta Xr pair 4l Ta
+a normal pair \(em
+.Vt cell Ns s
+named
+.Va car
+&
+.Va cdr
+.It Dv FORM_APPLICATIVE Ta Xr closure 4l Ta
+an applicative closure (function)
+.It Dv FORM_ENVIRONMENT Ta Xr environment 4l Ta
+a mapping of symbols to values
+.It Dv FORM_NOTE Ta Xr evaluate 3l Ta
+.It Dv FORM_OPERATIVE Ta Xr closure 4l Ta
+an operative closure (operator)
+.It Dv FORM_ROPE Ta Xr rope 4l Ta
+rope \(em a tree structure for strings
+.It Dv FORM_TROPE_SIN Ta Ta
+"" "" threaded in the
+.Va sin
+.Vt cell Ns s
+.It Dv FORM_TROPE_DEX Ta Ta
+"" "" threaded in the
+.Va dex
+.Vt cell Ns s.Vt cell Ns s
+.It Dv FORM_TROPE_BOTH Ta Ta
+"" "" threaded in a both
+.Vt cell Ns s
+.It Dv FORM_TREE Ta Xr tree 4l Ta
+an unadorned tree \(em an atom and two pointers
+.It Dv FORM_TTREE_SIN Ta Ta
+"" "" threaded in the
+.Va sin
+.Vt cell Ns s
+.It Dv FORM_TTREE_DEX Ta Ta
+"" "" threaded in the
+.Va dex
+.Vt cell Ns s
+.It Dv FORM_TTREE_BOTH Ta Ta
+"" "" threaded in a both cells
+.El
+.Pp
+Only two objects are transparent on only one half and both use the
+.Va sin
+half privately and the
+.Va dex
+half points to another
+.Vt Oatom :
+.Bl -column "FORM_COLLECTED" "array(4l)" "..." -compact -offset indent
+.It Em Symbol Ta Em Manual Ta Em Description
+.It Dv FORM_PRIMITIVE Ta Xr evaluate 3l Ta
+a primitive operation performed by the evaluator
+.It Dv FORM_SEGMENT Ta Xr segment 4l Ta
+.El
+.Pp
+Five more objects are built within a
+.Dv FORM_RECORD
+framework:
+.Bl -column "FORM_COLLECTED" "array(4l)" "..." -compact -offset indent
+.It Em Symbol Ta Em Manual Ta Em Description
+.It Dv RECORD_ENVIRONMENT_ITERATOR Ta Xr environment 4l Ta
+iteration through all bound symbols
+.It Dv RECORD_LEXAR Ta Xr lex 3l Ta
+lexical analyser state
+.It Dv RECORD_LEXEME Ta Xr lexeme 4l Ta
+a lexical token
+.It Dv RECORD_ROPE_ITERATOR Ta Xr rope 4l Ta
+iteration through bytes or runes in a rope
+.It Dv RECORD_SYNTAX Ta Xr parse 3l Ta
+parsed sequence of lexemes
+.El
+.Sh SEE ALSO
+.Xr atom 3l ,
+.Xr heap 9l .
+

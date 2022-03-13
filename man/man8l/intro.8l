@@ -1,0 +1,9 @@
+.Dd $Mdocdate$
+.Dt INTRO 8l
+.Os
+.Sh NAME
+.Nm intro
+.Nd introduction to lossless continuity
+.Sh DESCRIPTION
+The manual pages in section 8l relate to 3rd party dealings in Lossless
+such as compatibility, Unicode tables and the build system.

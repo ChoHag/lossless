@@ -1,0 +1,30 @@
+.Dd $Mdocdate$
+.Dt SEGMENT 4l
+.Os
+.Sh NAME
+.Nm segment_p ,
+.Nm segment_new ,
+.Nm segment_resize_m ,
+.Nm segment_release_m ,
+.Nm (segment?)
+.Nd segment objects
+.Sh SYNOPSIS
+.Ss C
+.In lossless.h
+.Ft bool
+.Fn segment_p "cell O"
+.Ft cell
+.Fn segment_new "long header" "long length" "long stride" \
+"sigjmp_buf *failure"
+.Ft cell
+.Fn segment_resize_m "cell segment" "long header" "long delta" \
+"sigjmp_buf *failure"
+.Ft void
+.Fn segment_release_m "cell segment"
+.Ss Lossless
+.Po
+.Ot segment? "O"
+.Pc => boolean
+.Pp
+.Sh DESCRIPTION
+Segments are arbitrarily-sized memory allocations.
