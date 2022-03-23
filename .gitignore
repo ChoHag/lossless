@@ -13,6 +13,7 @@
 *.core
 core
 *.idx
+*.idx-in
 *.log
 *.o
 *.scn
@@ -27,6 +28,9 @@ lossless.tex
 t/
 tmp/
 man/mandoc.db
+repl.c
+repl.tex
+repl.pdf
 
 ffi.c
 ffi.perl

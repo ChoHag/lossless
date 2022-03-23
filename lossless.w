@@ -10,11 +10,14 @@
 
 \def\<{$\langle$}
 \def\>{$\rangle$}
+\def\J{}
+\let\K=\leftarrow
 \def\Ls/{\.{LossLess}}
 \def\Lt{{\char124}}
 \def\L{{$\char124$}}
 \def\ditto{--- \lower1ex\hbox{''} ---}
 \def\ft{{\tt\char13}}
+\def\hex{\hbox{${\scriptstyle 0x}$\tt\aftergroup}}
 \def\iIII{\hskip3em}
 \def\iII{\hskip2em}
 \def\iIV{\hskip4em}
@@ -32,6 +35,7 @@
 @s shared static
 @s unique static
 @s sigjmp_buf void
+@s siglongjmp return
 %
 @s cell int
 @s digit int
@@ -106,81 +110,6 @@ in this library, starting with this one.
 @<Type definitions@>@;
 @<Function declarations@>@;
 @<Global variables@>@;
-
-@ These ugly and temporary debugging utilities are included here
-to make them fully available with little fuss. Do not look at the
-man behind the curtain.
-
-@d ps(O) printbuf(symbol_buffer(O), symbol_length(O))
-@c
-void
-printbuf (char *b, int l) {
-        while (l--)
-                printf("%c", *b++);
-}
-
-@ @c
-void
-pv (cell o)
-{
-        int i;
-
-        if (pair_p(o)) {
-                printf("(");
-                while (pair_p(o)) {
-                        pv(lcar(o));
-                        o = lcdr(o);
-                        if (!null_p(o))
-                                printf(" ");
-                }
-                if (!null_p(o)) {
-                        printf(". ");
-                        pv(o);
-                }
-                printf(")");
-        }
-        else if (environment_p(o)) {
-                printf("|<");
-                pv(env_layer(o));
-                printf(" || ");
-                pv(env_previous(o));
-                printf("|>");
-        }
-        else if (note_p(o)) {
-                pv(note(o));
-                printf(":(");
-                pv(note_car(o));
-                printf(" ");
-                pv(note_cdr(o));
-                printf(":)");
-        }
-        else if (null_p(o))
-                printf("()");
-        else if (true_p(o))
-                printf("#t");
-        else if (false_p(o))
-                printf("#f");
-        else if (symbol_p(o))
-                ps(o);
-        else if (syntax_p(o)) {
-                printf("{");
-                pv(syntax_datum(o));
-                printf("}");
-        } else if (arraylike_p(o)) {
-                printf("[");
-                if (keytable_p(o) && !null_array_p(o))
-                        printf("- ");
-                else if (record_p(o))
-                        printf("%d ", fix_value(record_id(o)));
-                for (i = 0; i < array_length(o); i++) {
-                        pv(array_ref(o, i));
-                        if (i < array_length(o) - 1)
-                                printf(" ");
-                }
-                printf("]");
-        } else
-                printf("¿%8p=%2lx?", (void*) (o & 0xffffff), special_p(o) ? -o : TAG(o));
-}
 
 @ Consumers of the library include this header file of the same
 type and function declarations, and global variables with an |extern|
@@ -265,10 +194,14 @@ envision dealing with half a word than 15 16$^{th}$s of a word.
 #define CELL_SHIFT 4
 #define WIDE_BITS  128
 #define WIDE_BYTES 16
-#define FIX_MIN    (-0x7fffffffll - 1) /* 32 bits. */
+#define FIX_MIN    (-0x7fffffffll - 1) /* 32 bits */
 #define FIX_MAX    0x7fffffffll
 #define FIX_MASK   0xffffffffll
 #define FIX_SHIFT  32
+#define FIX_BASE2  32
+#define FIX_BASE8  11
+#define FIX_BASE10 10
+#define FIX_BASE16 8
 typedef union {
         struct {
                 cell low;
@@ -291,10 +224,14 @@ to fixed integers in a 32-bit envionment use 24 (of the presently-available
 #define CELL_SHIFT 3
 #define WIDE_BITS  64
 #define WIDE_BYTES 8
-#define FIX_MIN    (-0x7fffffl - 1) /* 24 bits. */
+#define FIX_MIN    (-0x7fffffl - 1) /* 24 bits */
 #define FIX_MAX    0x7fffffl
 #define FIX_MASK   0xffffffl
 #define FIX_SHIFT  8
+#define FIX_BASE2  24
+#define FIX_BASE8  8
+#define FIX_BASE10 8
+#define FIX_BASE16 6
 typedef union {
         struct {
                 cell low;
@@ -302,7 +239,7 @@ typedef union {
         };
         int64_t value;
 } wide;
-typedef int32_t fixed; /* $32-24=8$ unused bits. */
+typedef int32_t fixed; /* $32-24=8$ unused bits */
 typedef int16_t half;
 
 @ This section is here because it was easy to write. It remains to
@@ -314,10 +251,14 @@ be seen how practical it is.
 #define CELL_SHIFT 2
 #define WIDE_BITS  32
 #define WIDE_BYTES 4
-#define FIX_MIN    (-0x7f - 1) /* 8 bits. */
+#define FIX_MIN    (-0x7f - 1) /* 8 bits */
 #define FIX_MAX    0x7f
 #define FIX_MASK   0xff
 #define FIX_SHIFT  8
+#define FIX_BASE2  8
+#define FIX_BASE8  3
+#define FIX_BASE10 3
+#define FIX_BASE16 2
 typedef union {
         struct {
                 cell low;
@@ -375,12 +316,14 @@ typedef enum {
         LERR_MISSING,        /* A keytable or environment lookup failed. */
         LERR_NONCHARACTER,   /* Scanning UTF-8 encoding failed. */
         LERR_OOM,            /* Out of memory. */
+        LERR_OVERFLOW,       /* Attempt to access past the end of a buffer. */
         LERR_SYNTAX,         /* Unrecognisable syntax (insufficient alone). */
         LERR_UNCLOSED_OPEN,  /* Missing \.), \.] or \.\}. */
         LERR_UNCOMBINABLE,   /* Attempted to combine a non-program. */
         LERR_UNDERFLOW,      /* A stack was popped too far. */
         LERR_UNIMPLEMENTED,  /* A feature is not implemented. */
         LERR_UNOPENED_CLOSE, /* Premature \.), \.] or \.\}. */
+        LERR_UNPRINTABLE,    /* Failed serialisation attempt. */
         LERR_UNSCANNABLE,    /* Parser encountered |LEXICAT_INVALID|. */
         LERR_LENGTH
 } Verror;
@@ -412,6 +355,7 @@ Oerror Ierror[LERR_LENGTH] = {@|
         [LERR_NONE]           = { "no-error" },@|
         [LERR_LISTLESS_TAIL]  = { "non-list-tail" },@|
         [LERR_OOM]            = { "out-of-memory" },@|
+        [LERR_OVERFLOW]       = { "overflow" },@|
         [LERR_LIMIT]          = { "software-limit" },@|
         [LERR_SYNTAX]         = { "syntax-error" },@|
         [LERR_HEAVY_TAIL]     = { "tail-mid-list" },@|
@@ -420,6 +364,7 @@ Oerror Ierror[LERR_LENGTH] = {@|
         [LERR_UNDERFLOW]      = { "underflow" },@|
         [LERR_UNIMPLEMENTED]  = { "unimplemented" },@|
         [LERR_UNOPENED_CLOSE] = { "unopened-brackets" },@|
+        [LERR_UNPRINTABLE]    = { "unprintable" },@|
         [LERR_UNSCANNABLE]    = { "unscannable-lexeme" },@|
         [LERR_EMPTY_TAIL]     = { "unterminated-tail" },@/
 };
@@ -638,24 +583,24 @@ heap storage (in which it's located) is introduced.
 @d LTAG_DDEX 0x10 /* Atom's dex half points to an atom. */
 @d LTAG_BOTH (LTAG_DSIN | LTAG_DDEX)
 @d LTAG_FORM (LTAG_BOTH | 0x0f)
-@d LTAG_TDEX 0x02 /* A tree is threaded in its dex halves. */
-@d LTAG_TSIN 0x01 /* A tree is threaded in its sin halves. */
+@d LTAG_TDEX 0x02 /* A tree is threadable in its dex halves. */
+@d LTAG_TSIN 0x01 /* A tree is threadable in its sin halves. */
 @d LTAG_NONE 0x00
 @#
 @d TAG(O)         (ATOM_TO_TAG((O)))
 @d TAG_SET_M(O,V) (ATOM_TO_TAG((O)) = (V))
 @#
-@d ATOM_LIVE_P(O)         (TAG(O) & LTAG_LIVE)
-@d ATOM_CLEAR_LIVE_M(O)   (TAG_SET_M((O), TAG(O) & ~LTAG_LIVE))
-@d ATOM_SET_LIVE_M(O)     (TAG_SET_M((O), TAG(O) | LTAG_LIVE))
-@d ATOM_MORE_P(O)         (TAG(O) & LTAG_DONE)
-@d ATOM_CLEAR_MORE_M(O)   (TAG_SET_M((O), TAG(O) & ~LTAG_DONE))
-@d ATOM_SET_MORE_M(O)     (TAG_SET_M((O), TAG(O) | LTAG_DONE))
-@d ATOM_FORM(O)           (TAG(O) & LTAG_FORM)
-@d ATOM_SIN_DATUM_P(O)    (TAG(O) & LTAG_DSIN)
-@d ATOM_DEX_DATUM_P(O)    (TAG(O) & LTAG_DDEX)
-@d ATOM_SIN_THREADED_P(O) (TAG(O) & LTAG_TSIN)
-@d ATOM_DEX_THREADED_P(O) (TAG(O) & LTAG_TDEX)
+@d ATOM_LIVE_P(O)           (TAG(O) & LTAG_LIVE)
+@d ATOM_CLEAR_LIVE_M(O)     (TAG_SET_M((O), TAG(O) & ~LTAG_LIVE))
+@d ATOM_SET_LIVE_M(O)       (TAG_SET_M((O), TAG(O) | LTAG_LIVE))
+@d ATOM_MORE_P(O)           (TAG(O) & LTAG_DONE)
+@d ATOM_CLEAR_MORE_M(O)     (TAG_SET_M((O), TAG(O) & ~LTAG_DONE))
+@d ATOM_SET_MORE_M(O)       (TAG_SET_M((O), TAG(O) | LTAG_DONE))
+@d ATOM_FORM(O)             (TAG(O) & LTAG_FORM)
+@d ATOM_SIN_DATUM_P(O)      (TAG(O) & LTAG_DSIN)
+@d ATOM_DEX_DATUM_P(O)      (TAG(O) & LTAG_DDEX)
+@d ATOM_SIN_THREADABLE_P(O) (TAG(O) & LTAG_TSIN)
+@d ATOM_DEX_THREADABLE_P(O) (TAG(O) & LTAG_TDEX)
 @<Type def...@>=
 typedef unsigned char Otag;
 typedef struct {
@@ -674,14 +619,15 @@ atoms' tags will be one of the other values here.
 
 @d FORM_NONE              (LTAG_NONE | 0x00)
 @d FORM_ARRAY             (LTAG_NONE | 0x01)
-@d FORM_RUNE              (LTAG_NONE | 0x02)
-@d FORM_COLLECTED         (LTAG_NONE | 0x03)
-@d FORM_FIX               (LTAG_NONE | 0x04)
+@d FORM_COLLECTED         (LTAG_NONE | 0x02)
+@d FORM_FIX               (LTAG_NONE | 0x03)
+@d FORM_HEAP              (LTAG_NONE | 0x04)
 @d FORM_KEYTABLE          (LTAG_NONE | 0x05)
 @d FORM_RECORD            (LTAG_NONE | 0x06)
-@d FORM_SEGMENT_INTERN    (LTAG_NONE | 0x07)
-@d FORM_SYMBOL            (LTAG_NONE | 0x08)
-@d FORM_SYMBOL_INTERN     (LTAG_NONE | 0x09)
+@d FORM_RUNE              (LTAG_NONE | 0x07)
+@d FORM_SEGMENT_INTERN    (LTAG_NONE | 0x08)
+@d FORM_SYMBOL            (LTAG_NONE | 0x09)
+@d FORM_SYMBOL_INTERN     (LTAG_NONE | 0x0a)
 @#
 @d FORM_PRIMITIVE         (LTAG_DDEX | 0x00)
 @d FORM_SEGMENT           (LTAG_DDEX | 0x01)
@@ -738,7 +684,7 @@ somewhat compensate for this the format of any |cell| arguments to
 @#
 @d character_p(O)         (eof_p(O) || rune_p(O))
 @d arraylike_p(O)         (array_p(O) || keytable_p(O) || record_p(O))
-@d pointer_p(O)           (segment_stored_p(O) || arraylike_p(O))
+@d pointer_p(O)           (segment_stored_p(O) || arraylike_p(O) || form_p((O), HEAP))
 @#
 @d primitive_p(O)         (form_p((O), PRIMITIVE))
 @d closure_p(O)           (form_p((O), APPLICATIVE) || form_p((O), OPERATIVE))
@@ -747,27 +693,6 @@ somewhat compensate for this the format of any |cell| arguments to
         primitive_applicative_p(O))
 @d operative_p(O)         ((closure_p(O) && form_p((O), OPERATIVE)) ||
         primitive_operative_p(O))
-
-@ Due to the myriad formats which are based on a tree and to avoid
-some confusion there is no |tree_p|. |ptree_p| and |dlist_p| identify
-Plain trees and doubly-linked lists respectively; |ttree_p| identifies
-any sort of threaded tree and |trope_p| any threaded rope. Threaded
-or plain trees and doubly-linked lists are all |treeish_p|. These
-and ropes are all also |dryadic_p|.
-
-@d treeish_p(O)           (!special_p(O) &&
-        (form(O) & FORM_TREE) == FORM_TREE) /* Any tree. */
-@d rope_p(O)              (!special_p(O) &&
-        (form(O) & FORM_ROPE) == FORM_ROPE) /* Any rope. */
-@d dryadic_p(O)           (treeish_p(O) || rope_p(O)) /* Any of either. */
-@d tree_sin_p(O)          (!null_p(tree_sin(O))) /* Is there a link or thread sinward? */
-@d tree_dex_p(O)          (!null_p(tree_dex(O))) /* Is there a link or thread dexward? */
-@d tree_p_imp(O)          (form_p(O, TREE))
-@d ptree_p(O)             (tree_p_imp(O) && tree_p_imp(tree_links(O))) /* Plain tree. */
-@d dlist_p(O)             (tree_p_imp(O) && pair_p(tree_links(O))) /* Doubly-linked list. */
-@d ttree_sinward_p(O)     (treeish_p(O) && ATOM_SIN_THREADED_P(O))
-@d ttree_dexward_p(O)     (treeish_p(O) && ATOM_DEX_THREADED_P(O))
-@d ttree_p(O)             (ttree_sinward_p(O) || ttree_dexward_p(O)) /* Threaded tree. */
 
 @ A record is an array of named cells and optionally a segment.
 Records for internal use are identified by a (negative) integer,
@@ -865,7 +790,7 @@ halves active and the active halves dormant (and empty).
 @d ATOM_TO_SEGMENT(O) ((Osegment *) (((intptr_t) (O)) & ~HEAP_MASK))
 @d HEAP_TO_SEGMENT(O) (ATOM_TO_SEGMENT(O))
 @d SEGMENT_TO_HEAP(O) ((Oheap *) (O)->address)
-@d HEAP_TO_LAST(O)    ((Oatom *) (((intptr_t) HEAP_TO_SEGMENT(heap)) + HEAP_CHUNK))
+@d HEAP_TO_LAST(O)    ((Oatom *) (((intptr_t) HEAP_TO_SEGMENT(O)) + HEAP_CHUNK))
 @#
 @d ATOM_TO_TAG(O)     (ATOM_TO_HEAP(O)->tag[ATOM_TO_INDEX(O)])
 @<Type def...@>=
@@ -1025,7 +950,7 @@ heap_enlarge (Oheap      *heap,
                 new = SEGMENT_TO_HEAP(snew);
                 heap_init_sweeping(new, heap);
                 owner = heap_alloc(new, failure);
-                ATOM_TO_TAG(owner) = FORM_SEGMENT;
+                ATOM_TO_TAG(owner) = FORM_HEAP;
                 pointer_set_m(owner, snew);
                 segment_set_owner_m(owner, owner);
         } else {
@@ -1035,11 +960,11 @@ heap_enlarge (Oheap      *heap,
                 pair = SEGMENT_TO_HEAP(spair);
                 heap_init_compacting(new, heap, pair);
                 owner = heap_alloc(new, failure);
-                ATOM_TO_TAG(owner) = FORM_SEGMENT;
+                ATOM_TO_TAG(owner) = FORM_HEAP;
                 pointer_set_m(owner, snew);
                 segment_set_owner_m(owner, owner);
                 owner = heap_alloc(new, failure);
-                ATOM_TO_TAG(owner) = FORM_SEGMENT;
+                ATOM_TO_TAG(owner) = FORM_HEAP;
                 pointer_set_m(owner, spair);
                 segment_set_owner_m(owner, owner);
         }
@@ -1079,7 +1004,7 @@ allocate_incrementing:
                 }
                 assert(failure != NULL);
                 /* UNREACHABLE during collection. */
-                if (gc_compacting(heap) > 0)
+                if (gc_compacting(heap, true) > 0)
                         next = heap;
                 else
                         next = heap_enlarge(h, failure); /* Will succeed
@@ -1099,7 +1024,7 @@ allocate_listwise:
                 }
                 assert(failure != NULL);
                 /* UNREACHABLE during collection. */
-                if ((r = (cell) gc_sweeping(heap)) > 0)
+                if (gc_sweeping(heap, true) > 0)
                         next = heap;
                 else
                         next = heap_enlarge(h, failure); /* Will succeed
@@ -1140,6 +1065,7 @@ atom (Oheap      *heap,
         sigjmp_buf cleanup;
         Verror reason = LERR_NONE;
 
+        assert(ntag != FORM_NONE);
         if (ntag & LTAG_DSIN)
                 Tmp_SIN = nsin;
         if (ntag & LTAG_DDEX)
@@ -1276,7 +1202,7 @@ necessary or helpful.
 @d segbuf_header(O)   (segbuf_base(O)->header)
 @d segbuf_length(O)   (segbuf_base(O)->length)
 @d segbuf_next(O)     (segbuf_base(O)->next)
-@d segbuf_owner(O)    (segbuf_base(O)->owner) /* |== O|. */
+@d segbuf_owner(O)    (segbuf_base(O)->owner) /* |== O| */
 @d segbuf_prev(O)     (segbuf_base(O)->prev)
 @d segbuf_stride(O)   (segbuf_base(O)->stride ? segbuf_base(O)->stride : 1)
 @#
@@ -1315,8 +1241,8 @@ shared Osegment *Allocations = NULL;
 Osegment *segment_alloc_imp (Osegment *, long, long, long, sigjmp_buf *);
 cell segment_init (Osegment *, cell);
 cell segment_new_imp (Oheap *, long, long, long, Otag, sigjmp_buf *);
-void segment_release_imp (Osegment *);
-void segment_release_m (cell);
+void segment_release_imp (Osegment *, bool);
+void segment_release_m (cell, bool);
 cell segment_resize_m (cell, long, long, sigjmp_buf *);
 
 @ The memory underlying an allocated segment is obtained through
@@ -1369,14 +1295,14 @@ segment_alloc_imp (Osegment     *old,
         if (old == NULL) {
                 r->stride = stride;
                 r->owner = NIL;
-                if (Allocations == NULL)
-                        Allocations = r->next = r->prev = r;
-                else {
-                        r->next = Allocations;
-                        r->prev = Allocations->prev;
-                        Allocations->prev->next = r;
-                        Allocations->prev = r;
-                }
+        }
+        if (Allocations == NULL)
+                Allocations = r->next = r->prev = r;
+        else {
+                r->next = Allocations;
+                r->prev = Allocations->prev;
+                Allocations->prev->next = r;
+                Allocations->prev = r;
         }
         return r;
 }
@@ -1400,6 +1326,7 @@ segment_new_imp (Oheap      *heap,
         Osegment *s;
 
         assert(stride >= 0);
+        assert(ntag != FORM_NONE);
         if (ckd_add(&total, header, length))
                 siglongjmp(*failure, LERR_LIMIT);
         if (stride == 0 && total <= INTERN_BYTES) {
@@ -1408,8 +1335,12 @@ segment_new_imp (Oheap      *heap,
                 segint_set_length_m(r, length);
                 return r;
         }
+        Tmp_ier = atom(heap, NIL, NIL, FORM_PAIR, failure);
         s = segment_alloc(header, length, stride, failure);
-        s->owner = atom(heap, (cell) s, NIL, ntag, failure);
+        TAG_SET_M(Tmp_ier, ntag);
+        ATOM_TO_ATOM(Tmp_ier)->sin = (cell) s;
+        s->owner = Tmp_ier;
+        Tmp_ier = NIL;
         return s->owner;
 }
 
@@ -1425,7 +1356,7 @@ segment_init (Osegment *seg,
 {
         assert(!special_p(container));
         seg->owner = container;
-        ATOM_TO_TAG(container) = FORM_SEGMENT;
+        ATOM_TO_TAG(container) = FORM_HEAP;
         ATOM_TO_ATOM(container)->sin = (cell) seg;
         ATOM_TO_ATOM(container)->dex = NIL;
         return container;
@@ -1446,23 +1377,25 @@ segment_resize_m (cell        o,
                   long        delta,
                   sigjmp_buf *failure)
 {
-        Osegment *new;
-        long i, nlength;
+        Osegment *new, *old;
+        long i, nlength, nstride;
         cell r = NIL;
         sigjmp_buf cleanup;
         Verror reason = LERR_NONE;
 
-        assert(segment_p(o));
+        assert(segment_p(o) || arraylike_p(o));
         assert(delta >= -segment_length(o));
         if (ckd_add(&nlength, segment_length(o), delta))
                 siglongjmp(*failure, LERR_OOM);
         if (segment_intern_p(o) && nlength <= INTERN_BYTES) {
                 segint_set_length_m(o, nlength);
                 return o;
-        } else if (segment_stored_p(o) && (segbuf_base(o)->stride ||
-                    nlength > INTERN_BYTES)) {
-                new = segment_alloc_imp(segbuf_base(o), header,
-                        nlength, segment_stride(o), failure);
+        } else if ((arraylike_p(o) || segment_stored_p(o)) &&
+                    (segbuf_base(o)->stride || nlength > INTERN_BYTES)) {
+                old = segbuf_base(o);
+                nstride = segment_stride(o);
+                segment_release_m(o, false);
+                new = segment_alloc_imp(old, header, nlength, nstride, failure);
                 pointer_set_m(o, new);
                 return o;
         }
@@ -1487,11 +1420,12 @@ deallocated memory.
 
 @c
 void
-segment_release_m (cell o)
+segment_release_m (cell o,
+                   bool reclaim)
 {
         assert(pointer_p(o)); /* Useful objects piggy-back on segments. */
-        segment_release_imp(pointer(o));
-        pointer_erase_m(o); /* Safety. */
+        segment_release_imp(pointer(o), reclaim);
+        pointer_erase_m(o); /* For safety. */
 }
 
 @ When a segment is released by the garbage collector its heap atom
@@ -1501,7 +1435,8 @@ storage.
 
 @c
 void
-segment_release_imp (Osegment *o)
+segment_release_imp (Osegment *o,
+                     bool      reclaim)
 {
         if (o == Allocations)
                 Allocations = o->next;
@@ -1510,8 +1445,9 @@ segment_release_imp (Osegment *o)
         else
                 o->prev->next = o->next,
                 o->next->prev = o->prev;
-        o->next = o->prev = o; /* Safety. */
-        free(o);
+        o->next = o->prev = o; /* For safety. */
+        if (reclaim)
+                free(o);
 }
 
 @* Registers. To collect unused memory the garbage collector
@@ -1578,17 +1514,19 @@ up outside the garbage collector.
 @d collected_datum(O)         (lcar(O))
 @d collected_set_datum_m(O,V) (lcar_set_m((O), (V)))
 @<Fun...@>=
-size_t gc_compacting (Oheap *);
+size_t gc_compacting (Oheap *, bool);
 void gc_disown_segments (Oheap *);
-cell gc_mark (Oheap  *, cell, bool, size_t *);
-size_t gc_release_segments (Oheap *);
-size_t gc_sweeping (Oheap *);
+cell gc_mark (Oheap  *, cell, bool, cell *, size_t *);
+size_t gc_reclaim_heap (Oheap *);
+void gc_release_segments (Oheap *);
+size_t gc_sweeping (Oheap *, bool);
 
-@ To collect a heap by sweeping up the unused atoms 
+@ To collect a heap by sweeping up the unused atoms
 
 @c
 size_t
-gc_sweeping (Oheap *heap)
+gc_sweeping (Oheap *heap,
+             bool   segments)
 {
         size_t count, remain;
         int i;
@@ -1603,10 +1541,12 @@ gc_sweeping (Oheap *heap)
                 remain += HEAP_LENGTH;
                 p = p->next;
         }
-        gc_disown_segments(heap);
+        if (segments)
+                gc_disown_segments(heap);
         for (i = 0; i < LGCR_COUNT; i++)
-                if (!special_p(Registers[i]))
-                        *Registers[i] = gc_mark(heap, *Registers[i], true, &count);
+                if (!special_p(*Registers[i]))
+                        *Registers[i] = gc_mark(heap, *Registers[i],
+                                false, NULL, &count);
         p = heap;
         while (p != NULL) {
                 a = HEAP_TO_LAST(p);
@@ -1624,13 +1564,16 @@ gc_sweeping (Oheap *heap)
                 }
                 p = p->next;
         }
-        count += gc_release_segments(heap);
+        count += gc_reclaim_heap (heap);
+        if (segments)
+                gc_release_segments(heap);
         return remain - count;
 }
 
 @ @c
 size_t
-gc_compacting (Oheap *heap)
+gc_compacting (Oheap *heap,
+               bool   segments)
 {
         size_t count, remain;
         int i;
@@ -1645,11 +1588,15 @@ gc_compacting (Oheap *heap)
                 p->pair->pair = NULL;
                 p = p->next;
         }
-        gc_disown_segments(heap);
+        if (segments)
+                gc_disown_segments(heap);
         for (i = 0; i < LGCR_COUNT; i++)
                 if (!special_p(Registers[i]))
-                        *Registers[i] = gc_mark(last, *Registers[i], false, &count);
-        count += gc_release_segments(heap);
+                        *Registers[i] = gc_mark(last, *Registers[i],
+                                true, NULL, &count);
+        count += gc_reclaim_heap (heap);
+        if (segments)
+                gc_release_segments(heap);
         p = last;
         while (p != NULL) {
                 p->pair->free = HEAP_TO_LAST(p->pair);
@@ -1666,6 +1613,26 @@ gc_compacting (Oheap *heap)
         else
                 Sheap = last;
         return remain - count;
+}
+
+@ @c
+size_t
+gc_reclaim_heap (Oheap *heap)
+{
+        size_t count = 0;
+        Oheap *h;
+
+        do {
+                h = heap;
+                while (1) {
+                        segment_init(HEAP_TO_SEGMENT(h), heap_alloc(heap, NULL));
+                        count++;
+                        if (h->next == NULL)
+                                break;
+                        h = h->next;
+                }
+        } while (h->pair != NULL && (h == Theap || h == Sheap));
+        return count;
 }
 
 @ TODO: Use |heap| to determine whether this segment might be owned by another heap.
@@ -1692,33 +1659,20 @@ gc_disown_segments (Oheap *heap @[Lunused@])
 
 @.TODO@>
 @c
-size_t
-gc_release_segments (Oheap *heap)
+void
+gc_release_segments (Oheap *heap @[Lunused@])
 {
-        Oheap *h;
         Osegment *s, *n;
-        size_t count = 0;
 
-        do {
-                h = heap;
-                while (1) {
-                        segment_init(HEAP_TO_SEGMENT(h), heap_alloc(heap, NULL));
-                        count++;
-                        if (h->next == NULL)
-                                break;
-                        h = h->next;
-                }
-        } while (h->pair != NULL && (h == Theap || h == Sheap));
         s = Allocations;
         while (1) {
                 n = s->next;
                 if (null_p(s->owner))
-                        segment_release_imp(s);
+                        segment_release_imp(s, true);
                 if (n == Allocations)
                         break;
                 s = n;
         }
-        return count;
 }
 
 @ @d atom_saved_p(O) (ATOM_TO_HEAP(O)->pair == NULL)
@@ -1726,24 +1680,29 @@ gc_release_segments (Oheap *heap)
 cell
 gc_mark (Oheap  *heap,
          cell    next,
-         bool    sweep,
+         bool    compacting,
+         cell   *cycles,
          size_t *remain)
 {
+        bool remember;
         cell copied, parent, tmp;
         long i;
 
+        remember = (cycles != NULL && !null_p(*cycles));
         parent = tmp = NIL;
         while (1) {
                 if (!special_p(next) && !ATOM_LIVE_P(next)) {
                         (*remain)++;
                         ATOM_SET_LIVE_M(next);
-                        if (sweep)
+                        if (!compacting)
                                 copied = next;
                         else {
                                 @<Move the atom to a new heap@>
                         }
                         if (pointer_p(next))
                                 segment_set_owner_m(next, copied);
+                        else if (primitive_p(next))
+                                Iprimitive[primitive(next)].box = next;
                         next = copied;
 @#
                         if (ATOM_SIN_DATUM_P(next) &&@|
@@ -1794,7 +1753,9 @@ collected_set_datum_m(next, copied);
 TAG_SET_M(next, FORM_COLLECTED);
 
 @ @<Begin marking a sin-ward atom@>=
-tmp = ATOM_TO_ATOM(next)->sin;
+tmp = ATOM_TO_ATOM(next)->sin; /* Unlive or recursive. */
+if (remember && !special_p(tmp) && ATOM_LIVE_P(tmp))
+        gc_serial(*cycles, tmp);
 ATOM_TO_ATOM(next)->sin = parent;
 parent = next;
 next = tmp;
@@ -1808,7 +1769,9 @@ ATOM_TO_ATOM(tmp)->sin = next;
 next = tmp;
 
 @ @<Begin marking a dex-ward atom@>=
-tmp = ATOM_TO_ATOM(next)->dex;
+tmp = ATOM_TO_ATOM(next)->dex; /* Unlive or recursive. */
+if (remember && !special_p(tmp) && ATOM_LIVE_P(tmp))
+        gc_serial(*cycles, tmp);
 ATOM_TO_ATOM(next)->dex = parent;
 parent = next;
 next = tmp;
@@ -1823,7 +1786,9 @@ next = tmp;
 
 @ @<Mark the car of a pair-like atom@>=
 ATOM_SET_MORE_M(next);
-tmp = ATOM_TO_ATOM(next)->sin;
+tmp = ATOM_TO_ATOM(next)->sin; /* Unlive or recursive. */
+if (remember && !special_p(tmp) && ATOM_LIVE_P(tmp))
+        gc_serial(*cycles, tmp);
 ATOM_TO_ATOM(next)->sin = parent;
 parent = next;
 next = tmp;
@@ -1833,7 +1798,9 @@ next = tmp;
 
 @<Continue marking a pair-like atom@>=
 ATOM_CLEAR_MORE_M(parent);
-tmp = ATOM_TO_ATOM(parent)->dex;
+tmp = ATOM_TO_ATOM(parent)->dex; /* Unlive or recursive. */
+if (remember && !special_p(tmp) && ATOM_LIVE_P(tmp))
+        gc_serial(*cycles, tmp);
 ATOM_TO_ATOM(parent)->dex = ATOM_TO_ATOM(parent)->sin;
 if (collected_p(next))
         next = collected_datum(next);
@@ -1853,7 +1820,9 @@ i = 0;
 if (array_length(next) > 0) {
         ATOM_SET_MORE_M(next);
         array_set_progress_m(next, i);
-        tmp = array_ref(next, i);
+        tmp = array_ref(next, i); /* Unlive or recursive. */
+        if (remember && !special_p(tmp) && ATOM_LIVE_P(tmp))
+                gc_serial(*cycles, tmp);
         array_set_m(next, i, parent);
         parent = next;
         next = tmp;
@@ -1862,7 +1831,9 @@ if (array_length(next) > 0) {
 @ @<Continue marking an array@>=
 assert(ATOM_MORE_P(parent)); /* Not actually useful for arrays. */
 i++;
-tmp = array_ref(parent, i);
+tmp = array_ref(parent, i); /* Unlive or recursive. */
+if (remember && !special_p(tmp) && ATOM_LIVE_P(tmp))
+        gc_serial(*cycles, tmp);
 array_set_m(parent, i, array_ref(parent, i - 1));
 if (collected_p(next))
         next = collected_datum(next);
@@ -1917,7 +1888,7 @@ void array_set_m (cell, long, cell);
 cell
 array_new_imp (long        length,
                cell        fill,
-               Otag        form,
+               Otag        ntag,
                sigjmp_buf *failure)
 {
         cell r;
@@ -1930,7 +1901,7 @@ array_new_imp (long        length,
         if (failure_p(reason = sigsetjmp(cleanup, 1)))
                 unwind(failure, reason, true, 0);
         Tmp_ier = fill; /* Safe because |segment_new_imp| won't use |Tmp_ier|. */
-        r = segment_new_imp(Theap, 0, length, sizeof (cell), form, &cleanup);
+        r = segment_new_imp(Theap, 0, length, sizeof (cell), ntag, &cleanup);
         if (defined_p(Tmp_ier) && length > 0) {
                 array_set_m(r, 0, Tmp_ier);
                 for (i = 1; i < length; i++)
@@ -2429,108 +2400,269 @@ for (i = 0; i < length; i++)
 
 @* Trees \AM\ Double-Linked Lists.
 
-@d tree_datum(O)       (lcar(O))
-@d tree_links(O)       (lcdr(O))
-@d tree_sin(O)         (lcar(tree_links(O)))
-@d tree_dex(O)         (lcdr(tree_links(O)))
-@#
-@d ttree_datum(O)      (tree_datum(O))
-@d ttree_sin(O)        (tree_sin(O))
-@d ttree_dex(O)        (tree_dex(O))
-@d ttree_sin_p(O)      (tree_sin_p(O))
-@d ttree_dex_p(O)      (tree_dex_p(O))
-@d ttree_sin_live_p(O) (ttree_sinward_p(tree_links(O)))
-@d ttree_dex_live_p(O) (ttree_dexward_p(tree_links(O)))
-@<Fun...@>=
-cell tree_new_imp (bool, bool, bool, cell, sigjmp_buf *);
-cell tree_edgemost_imp (cell, bool, sigjmp_buf *);
-cell ttree_next_sin (cell, sigjmp_buf *);
-cell ttree_next_dex (cell, sigjmp_buf *);
+Basic structure: An |LTAG_BOTH| atom with a datum in sin and link
+pair in dex. Link pair is another |LTAG_BOTH| atom who's contents are
+|NIL| or an object with the same form (ie.~same threading attributes).
 
-@ @d tree_new(O,F)     tree_new_imp(true, false, false, (O), (F))
-@d ttree_new_sin(O,F)  tree_new_imp(true, true, false, (O), (F))
-@d ttree_new_dex(O,F)  tree_new_imp(true, false, true, (O), (F))
-@d ttree_new(O,F)      tree_new_imp(true, true, true, (O), (F))
+The actual format of the link pair is irrelevant to structure
+provided it's |LTAG_BOTH| so its a |FORM_TREE| with the {\it lower\/}
+sin and dex bits (which do not affect the garbage collecter) raised
+with the link in question is a thread.
+
+A doubly-linked list looks identical and is distinguished by having
+its link pair atom be formatted as a |FORM_PAIR|.
+
+The three formats tree, rope and doubly-linked list are identified
+by |tree_p|, |rope_p| and |dlist_p| respectively. Threading can be
+identified by {\it sin\_threadable\/} or {\it dex\_threadable\/}
+inserted into the predicate name as for example |tree_sin_threadable_p|
+(doubly-linked lists cannot be threaded). The shared accessors
+|treeish_p| (et al.) and |dryadic_p| identify an object as either
+a tree or a rope, or as one of all three.
+
+Accessors which work on any of these objects use the {\it dryad\/}
+namespace while specific accessors use {\it tree\/} or {\it rope\/}.
+
+NOT TRUE:
+Accessors to the threads themselves are within the {\it tree\_thread\/}
+namespace (except for the predicates). After an atom has been
+identified as a rope or a tree the way they process their threads
+is the same so there is no need for a {\it rope\_thread\/} namespace.
+
+A rope's link pair atom is always a tree variant even though |dlist_p|
+will treat a rope who's link pair is a plain |FORM_PAIR| pair as a
+doubly-linked list. This arrangement is unintentional and not used.
+
+@d dryad_datum(O)         (lcar(O))
+@d dryad_link(O)          (lcdr(O))
+@d dryad_sin(O)           (lcadr(O))
+@d dryad_dex(O)           (lcddr(O))
+@d dryad_sin_p(O)         (!null_p(dryad_sin(O)))
+@d dryad_dex_p(O)         (!null_p(dryad_dex(O)))
+@d dryad_set_sin_m(O,V)   (lcar_set_m(lcdr(O), (V)))
+@d dryad_set_dex_m(O,V)   (lcdr_set_m(lcdr(O), (V)))
+@#
+@d dryadic_p(O)           (!special_p(O) &&
+        (form(O) & FORM_ROPE) == FORM_ROPE)
+@d dlist_p(O)             (dryadic_p(O) && pair_p(dryad_link(O)))
+@d treeish_p(O)           (dryadic_p(O) && !dlist_p(O)) /* Any tree or rope. */
+@d tree_p(O)              (treeish_p(O) &&
+        (form(O) & FORM_TREE) == FORM_TREE) /* Any tree. */
+@d plain_tree_p(O)        (treeish_p(O) && form_p((O), TREE))
+@d rope_p(O)              (treeish_p(O) &&
+        (form(O) & FORM_TREE) == FORM_ROPE) /* Any rope. */
+@d plain_rope_p(O)        (treeish_p(O) && form_p((O), ROPE))
+
+@ The link of a threaded tree which is not |NIL| may be a descendent
+link or a thread to a sinward or dexward peer. The format of the
+link atom indicates whether a non-|NIL| link is real or a thread.
+
+@d treeish_sin_threadable_p(O) (treeish_p(O) && (form(O) & LTAG_TSIN))
+@d treeish_dex_threadable_p(O) (treeish_p(O) && (form(O) & LTAG_TDEX))
+@d tree_sin_threadable_p(O)    (tree_p(O) && treeish_sin_threadable_p(O))
+@d tree_dex_threadable_p(O)    (tree_p(O) && treeish_dex_threadable_p(O))
+@d tree_threadable_p(O)        (tree_sin_threadable_p(O) && tree_dex_threadable_p(O))
+@d rope_sin_threadable_p(O)    (rope_p(O) && treeish_sin_threadable_p(O))
+@d rope_dex_threadable_p(O)    (rope_p(O) && treeish_dex_threadable_p(O))
+@d rope_threadable_p(O)        (rope_sin_threadable_p(O) && rope_dex_threadable_p(O))
+@#
+@d treeish_sin_has_thread_p(O) (treeish_sin_threadable_p(O) && dryad_sin_p(O) &&@|
+        (form(dryad_link(O)) & LTAG_TSIN))
+@d treeish_dex_has_thread_p(O) (treeish_dex_threadable_p(O) && dryad_dex_p(O) &&@|
+        (form(dryad_link(O)) & LTAG_TDEX))
+@d tree_sin_has_thread_p(O)    (tree_p(O) && treeish_sin_has_thread_p(O))
+@d tree_dex_has_thread_p(O)    (tree_p(O) && treeish_dex_has_thread_p(O))
+@d rope_sin_has_thread_p(O)    (rope_p(O) && treeish_sin_has_thread_p(O))
+@d rope_dex_has_thread_p(O)    (rope_p(O) && treeish_dex_has_thread_p(O))
+@#
+@d tree_thread_set_sin_thread_m(O) (TAG_SET_M(dryad_link(O),
+        form(dryad_link(O) | LTAG_TSIN)))
+@d tree_thread_set_sin_live_m(O)   (TAG_SET_M(dryad_link(O),
+        form(dryad_link(O) & ~LTAG_TSIN)))
+@d tree_thread_set_dex_thread_m(O) (TAG_SET_M(dryad_link(O),
+        form(dryad_link(O) | LTAG_TDEX)))
+@d tree_thread_set_dex_live_m(O)   (TAG_SET_M(dryad_link(O),
+        form(dryad_link(O) & ~LTAG_TDEX)))
+@#
+@d tree_thread_live_sin(O)     (treeish_sin_has_thread_p(O) ? NIL : dryad_sin(O))
+@d tree_thread_live_dex(O)     (treeish_dex_has_thread_p(O) ? NIL : dryad_dex(O))
+@d tree_thread_next_sin(O,F)   (anytree_next_sin((O), (F)))
+@d tree_thread_next_dex(O,F)   (anytree_next_dex((O), (F)))
+
+@ @<Fun...@>=
+cell anytree_next_sin (cell, sigjmp_buf *);
+cell anytree_next_dex (cell, sigjmp_buf *);
+cell dryad_node_new (bool, bool, bool, cell, cell, cell, sigjmp_buf *);
+cell treeish_clone (cell, sigjmp_buf *failure);
+cell treeish_edge_imp (cell, bool, sigjmp_buf *);
+
+@ Construction is the same process for all variants of dryad.
+
 @c
 cell
-tree_new_imp (bool        tree,
-              bool        sinward,
-              bool        dexward,
-              cell        datum,
-              sigjmp_buf *failure)
+dryad_node_new (bool        tree,
+                bool        sinward,
+                bool        dexward,
+                cell        datum,
+                cell        nsin,
+                cell        ndex,
+                sigjmp_buf *failure)
 {
-        static int Sdatum = 0;
-        Otag ntag = tree ? FORM_TREE : FORM_ROPE;
+        static int Sdatum = 2, Snsin = 1, Sndex = 0;
+        Otag ntag;
         cell r;
         sigjmp_buf cleanup;
         Verror reason = LERR_NONE;
 
+        ntag = tree ? FORM_TREE : FORM_ROPE;
         if (sinward)
                 ntag |= LTAG_TSIN;
         if (dexward)
                 ntag |= LTAG_TDEX;
-        stack_protect(1, datum, failure);
-        if (failure_p(reason = sigsetjmp(cleanup, 1)))
-                unwind(failure, reason, false, 1);
-        r = atom(Theap, NIL, NIL, FORM_TREE, &cleanup); /* Never used as a tree. */
+        assert(null_p(nsin) || form(nsin) == ntag);
+        assert(null_p(ndex) || form(ndex) == ntag);
+        stack_protect(3, datum, nsin, ndex, failure);
+        if (failure_p(reason = sigsetjmp(cleanup, 2)))
+                unwind(failure, reason, false, 3);
+        r = atom(Theap, SO(Snsin), SO(Sndex), FORM_TREE, &cleanup);
         r = atom(Theap, SO(Sdatum), r, ntag, &cleanup);
-        stack_clear(1);
+        stack_clear(3);
         return r;
 }
 
-@
-@d tree_sinmost(O,F) tree_edgemost_imp((O), true, (F))
-@d tree_dexmost(O,F) tree_edgemost_imp((O), false, (F))
-@d ttree_sinmost(O,F) tree_edgemost_imp((O), true, (F))
-@d ttree_dexmost(O,F) tree_edgemost_imp((O), false, (F))
+@ Finding the edge of a tree is the same regardless of threading:
+walk down a tree's links until the next node in the indicated
+direction is |NIL|.
+
+@d treeish_sinmost(O,F) treeish_edge_imp((O), true, (F))
+@d treeish_dexmost(O,F) treeish_edge_imp((O), false, (F))
 @c
 cell
-tree_edgemost_imp (cell        o,
-                   bool        sinward,
-                   sigjmp_buf *failure)
+treeish_edge_imp (cell        o,
+                  bool        sinward,
+                  sigjmp_buf *failure)
 {
         cell r;
 
-        assert(dryadic_p(o) && !dlist_p(o));
+        assert(treeish_p(o));
         r = o;
-        while (sinward ? tree_sin_p(r) : tree_dex_p(r))
+        while (sinward ? dryad_sin_p(r) : dryad_dex_p(r))
                 if (Interrupt)
                         siglongjmp(*failure, LERR_INTERRUPT);
-                else if (null_p((o = sinward ? tree_sin(r) : tree_dex(r))))
+                else if (null_p((o = sinward ? dryad_sin(r) : dryad_dex(r))))
                         return r;
                 else
                         r = o;
         return r;
 }
 
+@ @d anytree_next_imp(IN, OTHER)@/
+cell
+anytree_next_ ##IN (cell        o,
+                    sigjmp_buf *failure)
+{
+        cell r;
+
+        assert(dryadic_p(o));
+        r = dryad_ ##IN(o);
+        if (!treeish_ ##IN## _threadable_p(o) ||
+                    !treeish_ ##IN## _has_thread_p(o))
+                return r;
+        return treeish_ ##OTHER## most(r, failure);
+}
+@c
+@:anytree\_next\_sin@>
+@:anytree\_next\_dex@>
+anytree_next_imp(sin, dex)@;
+anytree_next_imp(dex, sin)@;
+
+@ @<Fun...@>=
+void treeish_rethread_imp (cell, cell, Otag, cell);
+cell treeish_rethread_m (cell, bool, bool, sigjmp_buf *);
+
 @ @c
 cell
-ttree_next_sin (cell        o,
-                sigjmp_buf *failure)
+treeish_rethread_m (cell        o,
+                    bool        sinward,
+                    bool        dexward,
+                    sigjmp_buf *failure)
 {
-        assert(ttree_p(o));
-        if (!ttree_sinward_p(o) || ttree_sin_live_p(o) || null_p(ttree_sin(o)))
-                return ttree_sin(o);
-        return tree_dexmost(ttree_sin(o), failure);
+        cell head, next, prev, remember;
+        Otag ntag;
+
+        assert(treeish_p(o));
+        ntag = form(o) & FORM_TREE;
+        head = dryad_node_new(ntag == FORM_TREE, treeish_sin_threadable_p(o),
+                treeish_dex_threadable_p(o), NIL, o, NIL, failure);
+        if (sinward)
+                ntag |= LTAG_TSIN;
+        if (dexward)
+                ntag |= LTAG_TDEX;
+
+        next = head;
+        remember = NIL;
+        while (1) {
+                if (null_p(next))
+                        break;
+                prev = tree_thread_live_sin(next);
+                if (!null_p(prev)) {
+                        while (!(prev == remember || null_p(tree_thread_live_dex(prev))))
+                                prev = tree_thread_live_dex(prev);
+                        if (prev != remember) { /* Insert or remove stack */
+                                dryad_set_dex_m(prev, next);
+                                tree_thread_set_dex_live_m(prev);
+                                next = tree_thread_live_sin(next); /* Go to left */
+                                continue;
+                        } else {
+                                dryad_set_dex_m(prev, NIL);
+                                tree_thread_set_dex_live_m(prev);
+                        }
+                }
+                if (treeish_sin_has_thread_p(next)) {
+                        dryad_set_sin_m(next, NIL);
+                        tree_thread_set_sin_live_m(next);
+                }
+                treeish_rethread_imp(next, prev, ntag, head);
+                remember = next; /* Go to the right or up */
+                next = tree_thread_live_dex(next);
+        }
+        return dryad_sin(head);
 }
 
 @ @c
-cell
-ttree_next_dex (cell        o,
-                sigjmp_buf *failure)
+void
+treeish_rethread_imp (cell current,
+                      cell previous,
+                      Otag ntag,
+                      cell head)
 {
-        assert(ttree_p(o));
-        if (!ttree_dexward_p(o) || ttree_dex_live_p(o) || null_p(ttree_dex(o)))
-                return ttree_dex(o);
-        return tree_sinmost(ttree_dex(o), failure);
+        TAG_SET_M(current, ntag);
+        if (null_p(previous)) {
+                dryad_set_sin_m(current, NIL);
+                tree_thread_set_sin_live_m(current);
+        } else if (current == head) {
+                dryad_set_dex_m(previous, NIL);
+                tree_thread_set_dex_live_m(previous);
+        } else {
+                if (ntag & LTAG_TSIN && !dryad_sin_p(current)) {
+                        dryad_set_sin_m(current, previous);
+                        tree_thread_set_sin_thread_m(current);
+                }
+                if (ntag & LTAG_TDEX && !dryad_dex_p(previous)) {
+                        dryad_set_dex_m(previous, current);
+                        tree_thread_set_dex_thread_m(previous);
+                }
+        }
 }
 
-@ Storage like a tree, used slightly differently.
+@*1 Doubly-linked lists. These piggy-pack on top of plain unthreaded
+trees. The list loops around on itself so the link nodes will never
+be |NIL| and care is taken to ensure a loop is not inserted ``into''
+itself.
 
-@d dlist_datum(o) (tree_datum(o))
-@d dlist_links(o) (tree_links(o))
-@d dlist_prev(o)  (tree_sin(o))
-@d dlist_next(o)  (tree_dex(o))
+@d dlist_datum(o) (dryad_datum(o))
+@d dlist_prev(o)  (dryad_sin(o))
+@d dlist_next(o)  (dryad_dex(o))
 @<Fun...@>=
 cell dlist_new (cell, sigjmp_buf *);
 cell dlist_append_datum_m (cell, cell, sigjmp_buf *);
@@ -2549,9 +2681,10 @@ dlist_new (cell        datum,
 {
         cell r;
 
-        r = tree_new(datum, failure);
-        TAG_SET_M(tree_links(r), FORM_PAIR);
-        ATOM_TO_ATOM(tree_links(r))->sin = ATOM_TO_ATOM(tree_links(r))->dex = r;
+        r = dryad_node_new(true, false, false, datum, NIL, NIL, failure);
+        TAG_SET_M(dryad_link(r), FORM_PAIR);
+        dryad_set_sin_m(r, r);
+        dryad_set_dex_m(r, r);
         return r;
 }
 
@@ -2564,19 +2697,21 @@ dlist_set_m (cell o,
         lcar_set_m(o, datum);
 }
 
-@ @d macfn_dlist_set(DIRECTION, YIN, YANG)@/
+@ @d dlist_set(DIRECTION, YIN, YANG)@/
 void
 dlist_set_ ##DIRECTION## _m (cell hither,
                              cell yon)
 {
         assert(dlist_p(hither));
         assert(dlist_p(yon));
-        YIN## _set_m(dlist_links(hither), yon);
-        YANG## _set_m(dlist_links(yon), hither);
+        YIN## _set_m(dryad_link(hither), yon);
+        YANG## _set_m(dryad_link(yon), hither);
 }
 @c
-macfn_dlist_set(prev, lcar, lcdr)@;
-macfn_dlist_set(next, lcdr, lcar)@;
+@:dlist\_set\_next\_m@>
+@:dlist\_set\_prev\_m@>
+dlist_set(next, lcdr, lcar)@;
+dlist_set(prev, lcar, lcdr)@;
 
 @ @d dlist_prepend_m(O,L) dlist_append_m(dlist_prev(O), (L))
 @c
@@ -2655,9 +2790,10 @@ optionally point to an arbitrary segment in the first array slot
 and this segment itself has a spare slot which is not wasted (it
 uses the pseudo-index -1).
 
+@.TODO@>
 @d RECORD_MAXLENGTH     (INT_MAX >> 1)
 @d record_next(O)       (array_ref((O), 0))
-@d record_next_p(O)     (segment_p(record_next(O)))
+@d record_next_p(O)     (segment_p(record_next(O))) /* TODO: inadequate test! */
 @d record_id(O)         (record_next_p(O) ? pointer_datum(record_next(O)) :
         record_next(O))
 @d record_base(O)       (record_next_p(O) ? segment_address(record_next(O)) :
@@ -2952,14 +3088,16 @@ points the length is recorded (and the fact noted) in cplength.
 Likewise glength counts the number of whole glyphs. Neither of these
 features is implemented and so is liable to change.
 
-@d rope_segment(O)  (tree_datum(O))
+@d rope_segment(O)  (dryad_datum(O))
 @d rope_base(O)     ((Orope *) segment_address(rope_segment(O)))
 @d rope_blength(O)  ((long) segment_length(rope_segment(O)) - 1)
 @d rope_cplength(O) (rope_base(O)->cplength)
 @d rope_glength(O)  (rope_base(O)->glength)
 @d rope_buffer(O)   (rope_base(O)->buffer)
-@d rope_first(O,F)  (tree_edgemost_imp((O), true, (F)))
-@d rope_next(O,F)   (ttree_dexward_p(O) ? ttree_next_dex(O, (F)) : ttree_dex(O))
+@d rope_first(O,F)  (treeish_sinmost((O), (F)))
+@d rope_last(O,F)   (treeish_dexmost((O), (F)))
+@d rope_next(O,F)   (anytree_next_dex((O), (F)))
+@d rope_prev(O,F)   (anytree_next_sin((O), (F)))
 @d rope_byte(O,B)   (rope_buffer(O)[(B)])
 @<Type def...@>=
 typedef struct {
@@ -2969,9 +3107,10 @@ typedef struct {
 } Orope;
 
 @ @<Fun...@>=
+cell rope_node_new_clone (bool, bool, cell, cell, cell, sigjmp_buf *);
+cell rope_node_new_length (bool, bool, long, cell, cell, sigjmp_buf *);
 cell rope_new_ascii (bool, bool, char *, long, sigjmp_buf *);
-cell rope_new_buffer (bool, bool, char *, long, sigjmp_buf *);
-cell rope_new_length (bool, bool, long, sigjmp_buf *);
+cell rope_new_buffer (bool, bool, const char *, long, sigjmp_buf *);
 cell rope_new_utfo (bool, bool, char *, long, sigjmp_buf *);
 
 @ Always allocates one more byte than requested to be a |NULL|-terminator
@@ -2979,30 +3118,31 @@ in case the rope's buffer ever leaks into something expecting a
 \CEE/-string. This should never happen but the byte is there anyway
 as a safety-valve.
 
-@d rope_new_imp(S,D,O,F) tree_new_imp(false, (S), (D), (O), (F))
-@d rope_new_empty(S,D,F) rope_new_length((S), (D), 0, (F));
-@d rope_new_segment(S,D,O,C,F) ((C) ? rope_new_imp((S), (D), (O), (F)) :@|
-        rope_new_buffer((S), (D), segment_address((O)),
-                segment_length((O)), (F)))
+@d rope_node_new_empty(S,D,F) rope_node_new_length((S), (D), 0, NIL, NIL, (F))
 @c
 cell
-rope_new_length (bool        thread_sin,
-                 bool        thread_dex,
-                 long        length,
-                 sigjmp_buf *failure)
+rope_node_new_length (bool        sinward,
+                      bool        dexward,
+                      long        length,
+                      cell        nsin,
+                      cell        ndex,
+                      sigjmp_buf *failure)
 {
-        static int Sseg = 1, Sret = 0;
-        cell r = NIL, tmp;
+        static int Snsin = 1, Sndex = 0;
+        cell r;
         sigjmp_buf cleanup;
         Verror reason = LERR_NONE;
 
+        assert(null_p(nsin) || rope_p(nsin)); /* Threading checked by */
+        assert(null_p(nsin) || rope_p(ndex)); /* |dryad_node_new|. */
         if (ckd_add(&length, length, 1))
                 siglongjmp(*failure, LERR_LIMIT);
-        stack_reserve(2, failure);
+        stack_protect(2, nsin, ndex, failure);
         if (failure_p(reason = sigsetjmp(cleanup, 1)))
                 unwind(failure, reason, false, 2);
-        SS(Sseg, tmp = segment_new(sizeof (Orope), length, 0, &cleanup));
-        SS(Sret, r = rope_new_imp(thread_sin, thread_dex, tmp, &cleanup));
+        r = segment_new(sizeof (Orope), length, 0, &cleanup);
+        r = dryad_node_new(false, sinward, dexward, r, SO(Snsin),
+                SO(Sndex), &cleanup);
         rope_cplength(r) = rope_glength(r) = -1;
         rope_buffer(r)[length - 1] = '\0';
         stack_clear(2);
@@ -3011,9 +3151,40 @@ rope_new_length (bool        thread_sin,
 
 @ @c
 cell
+rope_node_new_clone (bool        sinward,
+                     bool        dexward,
+                     cell        o,
+                     cell        nsin,
+                     cell        ndex,
+                     sigjmp_buf *failure)
+{
+        static int Sobject = 2, Snsin = 1, Sndex = 0;
+        cell r;
+        sigjmp_buf cleanup;
+        Verror reason = LERR_NONE;
+
+        assert(rope_p(o));
+        assert(null_p(nsin) || rope_p(nsin)); /* Threading checked by */
+        assert(null_p(nsin) || rope_p(ndex)); /* |dryad_node_new|. */
+        stack_protect(3, o, nsin, ndex, failure);
+        if (failure_p(reason = sigsetjmp(cleanup, 1)))
+                unwind(failure, reason, false, 3);
+        r = dryad_node_new(false, sinward, dexward, rope_segment(SO(Sobject)),
+                SO(Snsin), SO(Sndex), &cleanup);
+        rope_buffer(r)[segment_length(rope_segment(SO(Sobject)))] = '\0';
+        stack_clear(3);
+        return r;
+}
+
+@ Some internal helpers: A rope can be created by copying the
+contents of a buffer.
+
+@d rope_new_length(S,D,L,F) rope_node_new_length((S), (D), (L), NIL, NIL, (F))
+@c
+cell
 rope_new_buffer (bool        thread_sin,
                  bool        thread_dex,
-                 char       *buffer,
+                 const char *buffer,
                  long        length,
                  sigjmp_buf *failure)
 {
@@ -3028,7 +3199,10 @@ rope_new_buffer (bool        thread_sin,
         return r;
 }
 
-@ @c
+@ TODO: check that no byte is |>= 0x80|?
+
+@.TODO@>
+@c
 cell
 rope_new_ascii (bool        thread_sin,
                 bool        thread_dex,
@@ -3598,9 +3772,9 @@ the flag value into a number 0 -- 3 and vice versa.
 @d LLF_COMPLEXK      0x05
 @d LLF_COMPLEX_P(O)  ((O) & 0x05)
 @d LLF_COMPLEXITY(O) (((O) & 1) | (LLF_COMPLEX_P(O) >> 1))
-        /* [\.{~IJK}] \to\ [\.{0123}]. */
+        /* [\.{~IJK}] \to\ [\.{0123}] */
 @d LLF_IMAGINATE(O)  (((O) & ~2) | (((O) & 2) << 1))
-@t\iIV@>/* [\.{0123}] \to\ [\.{~IJK}]. */
+@t\iIV@>/* [\.{0123}] \to\ [\.{~IJK}] */
 
 @ With the 4 lower bits in use the remaining 4 indicate whether a
 sign is present and which, and likewise a decimal point or slash.
@@ -3750,7 +3924,7 @@ syntax_new_imp (cell        datum,
 track of its partial work. The evaluator should probably be refactored
 to use syntax nodes instead. At least they should use a numeric
 identifier rather than a \Ls/ symbol to avoid this horrific API:
- 
+
 @.TODO@>
 @d Sym_APPLICATIVE      (symbol_new_const("APPLICATIVE"))
 @d Sym_COMBINE_APPLY    (symbol_new_const("COMBINE-APPLY"))
@@ -3759,6 +3933,11 @@ identifier rather than a \Ls/ symbol to avoid this horrific API:
 @d Sym_COMBINE_FINISH   (symbol_new_const("COMBINE-FINISH"))
 @d Sym_COMBINE_OPERATE  (symbol_new_const("COMBINE-OPERATE"))
 @d Sym_CONDITIONAL      (symbol_new_const("CONDITIONAL"))
+@d Sym_DEFINITION       (symbol_new_const("DEFINITION"))
+@d Sym_EVALUATE_DISPATCH       (symbol_new_const("EVALUATE-DISPATCH"))
+@d Sym_SAVE_AND_EVALUATE       (symbol_new_const("SAVE-ENVIRONMENT-AND-EVALUATE"))
+@d Sym_ENVIRONMENT_P    (symbol_new_const("ENVIRONMENT?"))
+@d Sym_ENVIRONMENT_M    (symbol_new_const("ENVIRONMENT!"))
 @d Sym_EVALUATE         (symbol_new_const("EVALUATE"))
 @d Sym_OPERATIVE        (symbol_new_const("OPERATIVE"))
 @<Prepare con...@>=
@@ -3769,7 +3948,9 @@ identifier rather than a \Ls/ symbol to avoid this horrific API:
 (void) Sym_COMBINE_FINISH;
 (void) Sym_COMBINE_OPERATE;
 (void) Sym_CONDITIONAL;
+(void) Sym_DEFINITION;
 (void) Sym_EVALUATE;
+(void) Sym_ENVIRONMENT_P;
 (void) Sym_OPERATIVE;
 
 @ @d note(O)           (lcar(O))
@@ -3799,6 +3980,123 @@ note_new (cell        label,
         r = atom(Theap, SO(Slabel), SO(Stmp), FORM_NOTE, &cleanup);
         stack_clear(4);
         return r;
+}
+
+@* Programs (Closures). Programs in \Ls/ are divided into two
+categories: {\it operative\/} and {\it applicative\/}. Programs are
+also and more formally known as {\it combiners\/} when they are the
+first expression in a list which is being evaluated, which is by
+{\it combining\/} the multiple expressions ({\it combiner\/} \AM\
+{\it arguments\/}) into a single expression (return value).
+
+A combiner is a program which condenses zero or more arguments into
+a single expression. Internally a combiner is further distinguished
+by whether it has been provided by the implementation or defined
+at run-time. A {\it closure\/} is a combiner which includes the
+environment that was in place when it was defined and it re-established
+when the closure program is evaluated.
+
+Given the astonishing compute capabilities which closures enable
+they have comically simple storage requirements. A list records the
+run-time environment they were created in with the expression to
+evaluate and its arguments ({\it formals\/}). Applicative and
+operative closures are identified by their tag.
+
+@d closure_formals(O)     (lcar(O))
+@d closure_environment(O) (lcadr(O))
+@d closure_body(O)        (lcaddr(O))
+@<Fun...@>=
+cell closure_new (bool, cell, cell, cell, sigjmp_buf *);
+
+@ Usually (always?) these arguments are actually in registers and
+the stack dancing is unnecessary.
+
+@c
+cell
+closure_new (bool        is_applicative,@/
+@t\iII@>     cell        formals,     /* From register: |Accumulator|, */
+@t\iII@>     cell        environment, /* ... |Environment|, */
+@t\iII@>     cell        body,        /* ... |Expression|. */
+@t\iII@>     sigjmp_buf *failure)
+{
+        static int Sformals = 3, Senv = 2, Sbody = 1, Sret = 0;
+        cell r;
+        sigjmp_buf cleanup;
+        Verror reason = LERR_NONE;
+
+        stack_protect(4, formals, environment, body, NIL, failure);
+        if (failure_p(reason = sigsetjmp(cleanup, 1)))
+                unwind(failure, reason, false, 4);
+        SS(Sret, cons(SO(Sbody), SO(Sret), &cleanup));
+        SS(Sret, cons(SO(Senv), SO(Sret), &cleanup));
+        SS(Sret, atom(Theap, SO(Sformals), SO(Sret),
+                is_applicative ? FORM_APPLICATIVE : FORM_OPERATIVE, &cleanup));
+        r = SO(Sret);
+        stack_clear(4);
+        return r;
+}
+
+@ Despite being an incredibly powerful abstraction tool closures
+cannot actually {\it do\/} anything on their own. Closures are built
+from closures built out of closures which, eventually, must use
+{\it primitive\/} tasks to perform actions --- closures are really
+little more than an elaborate means of structuring memory.
+
+The definition of primitives here is overly simplistic and has a
+number of deficiencies both in terms of time and space, which will
+be especially felt on the older and/or smaller architectures which
+are also being targetted. For now (2022) this is a ``temporary
+solution''\footnote{$^1$}{It's important only that primitives work
+and speed is not of the essence.} until the evaluation process
+(below) is ready to be considered some form of ``complete''.
+
+A primitive is a block of \CEE/ code identified by a |Vprimitive|,
+an integer offset into an array of |Oprimitive| objects, |Iprimitive|.
+
+@d primitive(O)               (fix_value(lcar(O)))
+@d primitive_label(O)         (lcdr(O))
+@d primitive_base(O)          (&Iprimitive[primitive(O)])
+@d primitive_applicative_p(O) (primitive_p(O) && primitive_base(O)->applicative)
+@d primitive_operative_p(O)   (primitive_p(O) && !primitive_base(O)->applicative)
+@<Type def...@>=
+typedef enum {@+
+        @<Symbolic primitive identifiers@>@;@+
+        PRIMITIVE_LENGTH@+
+} Vprimitive;
+
+typedef struct {
+        char *label; /* \Ls/ binding. */
+        cell  box; /* Heap storage. */
+        bool  applicative; /* Or operative? */
+        char  min, max; /* Minimum and/or maximum required arguments. */
+} Oprimitive;
+
+@#
+#if 0 /* Something like this to share segments between
+            raw string and rope/symbol storage? */
+        [PRIMITIVE_FOO] = { &Sym_FOO, NIL, ...},@;
+        shared Osegment Sym_FOO = @[{ .address = "foo" }@];
+#endif
+
+@ The |Iprimitive| array associates the internal numeric identifier
+with the \Ls/ symbol representing the primitive. During initialisation
+each primitive is bound to its symbol in a pair stored in |Root|,
+which is the initial environment the run-time is in prior to
+establishing any closures and is what's returned by \.{(root-environment)}.
+
+@<Global...@>=
+Oprimitive Iprimitive[] = {
+        @<Primitive definitions@>
+};
+
+shared cell Root = NIL;
+
+@ @<Register primitive operators@>=
+Root = env_empty(failure);
+for (i = 0; i < PRIMITIVE_LENGTH; i++) {
+        x = symbol_new_const(Iprimitive[i].label);
+        x = Iprimitive[i].box = atom(Theap, fix(i), x, FORM_PRIMITIVE, failure);
+        env_define(Root, primitive_label(x), x, failure);
 }
 
 @** Compute.
@@ -3900,10 +4198,12 @@ lexar_start (cell        o,
                 sizeof (Olexical_analyser), &cleanup));
         lexar_set_iterator_m(SO(Sret), rope_iterate_start(SO(Srope), -1,
                 &cleanup));
-        lexar_set_starter_m(SO(Sret), rope_iter_twine(SO(Sret)));
+        lexar_set_starter_m(SO(Sret), NIL);
         lexar_set_peeked_twine_m(SO(Sret), VOID);
         lexar_set_backput_twine_m(SO(Sret), VOID);
         r = SO(Sret);
+        lexar(r)->tbstart = lexar(r)->blength =
+                lexar(r)->cpstart = lexar(r)->cplength = 0;
         stack_clear(2);
         return r;
 }
@@ -3980,8 +4280,8 @@ lexar_peek (int         Silex,
                 lexar_set_backput_twine_m(ilex, VOID);
         } else if (void_p(lexar_peeked_twine(ilex))) { /* Nothing is pending. */
                 tmp = rope_iterate_next_utfo(irope, failure);
-                lexar_set_peeked_rune_m(ilex, tmp);
-                lexar_set_peeked_twine_m(ilex, rope_iter_twine(irope));
+                lexar_set_peeked_rune_m(SO(Silex), tmp);
+                lexar_set_peeked_twine_m(SO(Silex), rope_iter_twine(irope));
         } else
                 return lexar_peeked_rune(ilex); /* A rune is already being examined. */
 @#
@@ -4102,8 +4402,8 @@ uses the following variables.
 @c
 cell
 lexar_token (int         Silex,
-           int         Sret,
-           sigjmp_buf *failure)
+             int         Sret,
+             sigjmp_buf *failure)
 {
         static int Ssdelim = 3;      /* The opening-delimiter lexeme of a
                                                 raw string/symbol. */
@@ -4113,7 +4413,7 @@ lexar_token (int         Silex,
         static int Sditer = 0;       /* Rope iterator over an opening
                                                 delimiter. */
         cell c;                      /* Current rune. */
-        int32_t v, dv;               /* \ditto\ \AM\ opening delimiter's
+        int32_t d, v;                /* \ditto\ \AM\ opening delimiter's
                                                 value. */
         int base = 10;               /* The base of the number being scanned. */
         int has_imagination = 0;     /* The complexity of a number. */
@@ -4140,8 +4440,8 @@ it's known that the rune, if there is one, will be immediately
 taken.
 
 @d lexar_another(V,I,T,A,L,R,F) do {
-        /* Variable \L\ Iterator \L\ Take? \L\ Allow-Invalid? \L\ Label
-                \L\ Return \L\ Failure. */
+        /* Variable \L\ Iterator \L\ Take? \L\ Allow-invalid? \L\ Label
+                \L\ Return \L\ Failure */
         (V) = lexar_peek((I), (F));
         if (eof_p(V))
                 goto L;
@@ -4196,9 +4496,9 @@ same. It is the parser's job to consider the combination of an
 opening bracket, closing bracket and their contents.
 
 @<Look for a bracketing token@>=
-case '(':@; /* List. */
-case '[':@; /* Vector. */
-case '{':@; /* Relation. */
+case '(':@; /* List */
+case '[':@; /* Vector */
+case '{':@; /* Relation */
         return lexar_append(Silex, Sret, LEXICAT_OPEN, LLF_NONE, failure);
 case '.':@;
         return lexar_append(Silex, Sret, LEXICAT_DOT, LLF_NONE, failure);
@@ -4446,8 +4746,8 @@ while (1) {
                 goto LEXAR_raw_eof;
         else {
                 lexar(SO(Silex))->cplength++;
-                dv = rope_iterate_next_byte(SO(Sditer), &cleanup); /* Will not fail. */
-                if (v != dv) {
+                d = rope_iterate_next_byte(SO(Sditer), &cleanup); /* Will not fail. */
+                if (v != d) {
                         if (v == '$') {
                                 SS(Sedelim, SO(Srdelim));
                                 lexar(SO(Silex))->blength += lexar(SO(Silex))->cplength;
@@ -4848,7 +5148,7 @@ lex_rope (cell        src,
         if (failure_p(reason = sigsetjmp(cleanup, 1)))
                 unwind(failure, reason, false, 4);
         SS(Siter, tmp = lexar_start(SO(Ssource), &cleanup));
-        SS(Sret, tmp = dlist_new(NIL, &cleanup));
+                SS(Sret, tmp = dlist_new(NIL, &cleanup));
         SS(Snext, tmp);
         while (1) {
                 tmp = lexar_token(Siter, Snext, &cleanup);
@@ -4968,7 +5268,8 @@ if (!null_p(SO(Swork))) {
         parse_fail(Sfail, LERR_SYNTAX, x, &cleanup);
         SS(Sbuild, cons(x, SO(Stmp), &cleanup));
 }
-*valid = null_p(SO(Sfail));
+if (!null_p(SO(Sfail)))
+        *valid = false;
 
 @ The simplest lexemes to handle are spaces which are ignored and
 invalid lexemes which are also ignored but only recording the
@@ -5121,7 +5422,7 @@ into and braces \qo \.{\{ ... \}}\qc\ produce a relation, which is
 unimplemented.
 
 @<Complete parsing a list-like syntax@>=
-lex = dlist_datum(SO(Sllex)); /* ... Closer. */
+lex = dlist_datum(SO(Sllex)); /* ... Closer */
 assert(rope_p(lexeme_twine(lex)));
 a = lexeme_byte(x, 0); /* \.(, \.[ or \.\{. */
 a = ((a + 1) & ~1) + 1; /* ASCII tricks \to\ what we want. */
@@ -5183,7 +5484,7 @@ case LEXICAT_ESCAPED_STRING:
         SS(Stmp, llex);
 case LEXICAT_DELIMITER:
         if (cat == LEXICAT_DELIMITER) { /* [\.\#]\.{\$xxx\$...\$xxx\$} */
-                @<Validate the lexical tripled in a delimited string/symbol@>
+                @<Validate the lexical triplet in a delimited string/symbol@>
         } /* Sets |z| if there was an error. */
         if (null_p(lex))
                 SS(Sbuild, z);
@@ -5198,7 +5499,8 @@ case LEXICAT_DELIMITER:
                 else {
                         if (cat == LEXICAT_RAW_STRING ||
                                         cat == LEXICAT_ESCAPED_STRING)
-                                y = rope_new_segment(true, true, x, true,
+                                y = rope_new_buffer(true, true,
+                                        segment_address(x), segment_length(x),
                                         &cleanup);
                         else
                                 y = symbol_new_segment(x, &cleanup);
@@ -5223,7 +5525,7 @@ lexeme after an escapable or delimited string or symbol but is done
 for consistency with plain symbols and also to catch some ambiguous
 potential mistakes such as \qo\.{\Lt foreshort 4\Lt 2}\qc.
 
-@<Validate the lexical tripled in a delimited string/symbol@>=
+@<Validate the lexical triplet in a delimited string/symbol@>=
 SS(Sbuild, x = dlist_next(llex)); /* String/symbol content. */
 SS(Stmp, y = dlist_next(x)); /* Closing delimiter. */
 lex = dlist_datum(x);
@@ -5282,14 +5584,14 @@ transform_lexeme_segment (cell        o,
         if (failure_p(reason = sigsetjmp(cleanup, 1)))
                 unwind(failure, reason, false, 3);
         Sfail += 3;
-        SS(Sdst, segment_new(0, length, 0, &cleanup));
         SS(Siter, rope_iterate_start(lexeme_twine(SO(Ssrc)),
                 lexeme(SO(Ssrc))->tboffset, &cleanup));
-        buf = segment_address(SO(Sdst));
-        for (i = 0; i < offset; i++)
-                rope_iterate_next_byte(SO(Siter), &cleanup);
         if (offset)
                 length -= offset + 1;
+        while (offset--)
+                rope_iterate_next_byte(SO(Siter), &cleanup);
+        SS(Sdst, segment_new(0, length, 0, &cleanup));
+        buf = segment_address(SO(Sdst));
         @<Copy, transforming, |length| bytes after |offset|@>@;
         r = SO(Sdst);
         stack_clear(3);
@@ -5303,12 +5605,11 @@ prior to being returned.
 
 @<Copy, transforming, |length| bytes after |offset|@>=
 if (!escape)
-        for (; i < length; i++)
-                buf[i - offset] = rope_iterate_next_byte(SO(Siter), &cleanup);
+        for (i = 0; i < length; i++)
+                buf[i] = rope_iterate_next_byte(SO(Siter), &cleanup);
 else {
         j = 0;
-        while (i < length) {
-                i++;
+        for (i = 0; i < length; i++) {
                 b = rope_iterate_next_byte(SO(Siter), &cleanup);
                 if (b != '#')
                         buf[j++] = b;
@@ -5329,6 +5630,7 @@ digits into their numeric value.
 
 @d hexscii_to_int(O) (((O) >= 'a') ? (O) - 'a' :
         ((O) >= 'A') ? (O) - 'A' : (O) - '0')
+@d int_to_hexscii(O,C) ((O) < 10 ? (O) + '0' : ((C) ? (O) + 'A' : (O) + 'a'))
 @c
 char
 parse_ascii_hex (cell        o,
@@ -5417,60 +5719,10 @@ case LEXICAT_RECURSE_IS:
         SS(Swork, cons(z, SO(Swork), &cleanup));
         break;
 
-@* Evaluator. The evaluator is based on that presented by Steele
-and Sussman in ``Design of LISP-Based Processors'.
+@* Evaluator. The evaluator is based distantly on that presented
+by Steele and Sussman in ``Design of LISP-Based Processors'.
 
-Primitive combinators are distinct from closures and are implemented
-directly in \CEE/ within the evaluator. They too can be either
-applicative or operative.
-
-@d primitive(O)               (fix_value(lcar(O)))
-@d primitive_label(O)         (lcdr(O))
-@d primitive_base(O)          (&Iprimitive[primitive(O)])
-@d primitive_applicative_p(O) (primitive_p(O) && primitive_base(O)->applicative)
-@d primitive_operative_p(O)   (primitive_p(O) && !primitive_base(O)->applicative)
-@<Type def...@>=
-typedef struct {
-        char *label;
-        bool  applicative;
-} Oprimitive;
-
-@ With the addition of ``eval'' this would represent the critical
-operations required. The list is bound to grow beyond that.
-
-@<Type def...@>=
-typedef enum {@/
-        PRIMITIVE_DO,@/
-        PRIMITIVE_CONS,@/
-        PRIMITIVE_IF,@/
-        PRIMITIVE_VOV,@/
-        PRIMITIVE_LAMBDA,@/
-        PRIMITIVE_LENGTH
-} Vprimitive;
-
-@ This list associates each internal primitive with a symbol to
-bind it to in the root environment, also declared here.
-
-@<Global...@>=
-Oprimitive Iprimitive[] = {@|
-        [PRIMITIVE_DO]     = { "do",     false, },@|
-        [PRIMITIVE_CONS]   = { "cons",   true,  },@|
-        [PRIMITIVE_IF]     = { "if",     false, },@|
-        [PRIMITIVE_VOV]    = { "vov",    false, },@|
-        [PRIMITIVE_LAMBDA] = { "lambda", false, },@/
-};
-
-shared cell Root = NIL;
-
-@ @<Register primitive operators@>=
-Root = env_empty(failure);
-for (i = 0; i < PRIMITIVE_LENGTH; i++) {
-        x = symbol_new_const(Iprimitive[i].label);
-        x = atom(Theap, fix(i), x, FORM_PRIMITIVE, failure);
-        env_define(Root, primitive_label(x), x, failure);
-}
-
-@ There are five registers used by the evaluator. The argument to
+There are five registers used by the evaluator. The argument to
 |evaluate| --- the expression which is to be computed --- is saved
 in |Expression| (|EXPR|) and with |Arguments| (|ARGS|) they represent
 the state of the data being evaluated.  Alongside those |Control_Link|
@@ -5501,13 +5753,21 @@ externally visible.
 
 @<Extern...@>=
 extern unique cell Accumulator;
+extern unique cell Environment;
 
-@ @<Fun...@>=
+@ @d evaluate_desyntax(O) (syntax_p(O) ? syntax_datum(O) : (O))
+@d evaluate_incompatible(L,F) do {
+        lprint("incompatibility at line %d\n", (L));
+        siglongjmp(*(F), LERR_INCOMPATIBLE);
+} while (0)
+@<Fun...@>=
 void evaluate (cell, sigjmp_buf *);
+void evaluate_program (cell, sigjmp_buf *);
 void combine (sigjmp_buf *);
 void validate_formals (bool, sigjmp_buf *);
 void validate_arguments (sigjmp_buf *);
 void validate_operative (sigjmp_buf *);
+void validate_primitive (sigjmp_buf *);
 
 @ Evaluation begins by saving the whole expression in |Arguments|.
 The control link and arguments registers must be empty.
@@ -5539,8 +5799,8 @@ or |Return| and |evaluate| will |return| if computation has indeed
 finished, or dispatch to another chunk as directed by the head of
 the control link stack.
 
-@c
 @.TODO@>
+@c
 void
 evaluate (cell        o,
           sigjmp_buf *failure)
@@ -5552,20 +5812,22 @@ evaluate (cell        o,
         EXPR = o;
         LOG(ACC = VOID);
 Begin:@;
-        if (syntax_p(EXPR))
-                LOG(EXPR = syntax_datum(EXPR)); /* TODO: Also for operatives? */
+        EXPR = evaluate_desyntax(EXPR);
         if (pair_p(EXPR))         goto Combine_Start;
         else if (!symbol_p(EXPR)) goto Finish;
         LOG(ACC = env_search(ENV, EXPR, true, failure));
         if (undefined_p(ACC)) {
+                lprint("looking for ");
+                serial(EXPR, SERIAL_ROUND, 1, NIL, NULL, failure);
+                lprint("\n");
                 LOG(ACC = VOID);
                 siglongjmp(*failure, LERR_MISSING);
         }
         goto Return;
 
 Evaluate:
-        EXPR = note_car(CLINK);
-        CLINK = note_cdr(CLINK);
+        LOG(EXPR = note_car(CLINK));
+        LOG(CLINK = note_cdr(CLINK));
         goto Begin;
 
         @t\4@>@<Evaluate a complex expression@>@;
@@ -5575,18 +5837,49 @@ Finish:
 Return: /* Check |CLINK| to see if there is more work after one full evaluation. */
         if (null_p(CLINK))
                 return; /* |Accumulator| (|ACC|) has the result. */
-        else if (!note_p(CLINK))                      siglongjmp(*failure, LERR_INTERNAL);
-        else if (note(CLINK) == Sym_EVALUATE)         goto Evaluate;
-        else if (note(CLINK) == Sym_COMBINE_APPLY)    goto Combine_Apply;
-        else if (note(CLINK) == Sym_COMBINE_BUILD)    goto Applicative_Build;
-        else if (note(CLINK) == Sym_COMBINE_DISPATCH) goto Combine_Dispatch;
-        else if (note(CLINK) == Sym_COMBINE_FINISH)   goto Combine_Finish;
-        else if (note(CLINK) == Sym_COMBINE_OPERATE)  goto Combine_Operate;
-        else if (note(CLINK) == Sym_OPERATIVE)        goto Operative_Closure;
-        else if (note(CLINK) == Sym_APPLICATIVE)      goto Applicative_Closure;
-        else if (note(CLINK) == Sym_CONDITIONAL)      goto Conditional;
+        else if (!note_p(CLINK))                       siglongjmp(*failure, LERR_INTERNAL);
+        else if (note(CLINK) == Sym_EVALUATE)          goto Evaluate;
+        else if (note(CLINK) == Sym_COMBINE_APPLY)     goto Combine_Apply;
+        else if (note(CLINK) == Sym_COMBINE_BUILD)     goto Applicative_Build;
+        else if (note(CLINK) == Sym_COMBINE_DISPATCH)  goto Combine_Dispatch;
+        else if (note(CLINK) == Sym_COMBINE_FINISH)    goto Combine_Finish;
+        else if (note(CLINK) == Sym_COMBINE_OPERATE)   goto Combine_Operate;
+        else if (note(CLINK) == Sym_OPERATIVE)         goto Operative_Closure;
+        else if (note(CLINK) == Sym_APPLICATIVE)       goto Applicative_Closure;
+        else if (note(CLINK) == Sym_CONDITIONAL)       goto Conditional;
+        else if (note(CLINK) == Sym_ENVIRONMENT_P)     goto Validate_Environment;
+        else if (note(CLINK) == Sym_EVALUATE_DISPATCH) goto Evaluate_Dispatch;
+        else if (note(CLINK) == Sym_SAVE_AND_EVALUATE) goto Save_And_Evaluate;
+        else if (note(CLINK) == Sym_ENVIRONMENT_M)     goto Restore_Environment;
+        else if (note(CLINK) == Sym_DEFINITION)        goto Mutate_Environment;
         else
                 siglongjmp(*failure, LERR_INTERNAL); /* Unknown note. */
+}
+
+@ @c
+void
+evaluate_program (cell        o,
+                  sigjmp_buf *failure)
+{
+        static int Sprogram = 0;
+        cell program;
+        bool syntactic;
+        sigjmp_buf cleanup;
+        Verror reason = LERR_NONE;
+
+        stack_protect(1, o, failure);
+        if (failure_p(reason = sigsetjmp(cleanup, 1)))
+                unwind(failure, reason, false, 1);
+        program = env_search(Root, symbol_new_const("do"), true, &cleanup);
+        syntactic = syntax_p(SO(Sprogram));
+        if (syntactic) {
+                program = cons(program, syntax_datum(SO(Sprogram)), &cleanup);
+                program = syntax_new(program, syntax_start(SO(Sprogram)),
+                        syntax_end(SO(Sprogram)), &cleanup);
+        } else
+                program = cons(program, SO(Sprogram), &cleanup);
+        stack_clear(1);
+        evaluate(program, failure);
 }
 
 @ While building and debugging the evaluator it has proven invaluable
@@ -5707,8 +6000,8 @@ Combine_Apply: /* Restore the saved applicative. */
         LOG(CLINK = note_cdr(CLINK));
 Combine_Operate:@;
         LOG(CLINK = note_new(Sym_COMBINE_FINISH, EXPR, CLINK, failure));
-        LOG(combine(failure)); /* May push further work to |CLINK|. */
-        goto Return;
+        combine(failure);
+        goto Return; /* May have pushed further work to |CLINK|. */
 
 @ Since a computer is at heart little more than a glorified transistor
 \Ls/ would be incomplete without conditional logic, implemented here.
@@ -5721,6 +6014,49 @@ Conditional: /* Evaluate the consequent or alternate of a conditional
         LOG(EXPR  = false_p(ACC) ? lcdr(EXPR) : lcar(EXPR));
         goto Begin;
 
+@ @<Eval...@>=
+Validate_Environment:
+        if (!environment_p(ACC))
+                evaluate_incompatible(__LINE__, failure);
+        LOG(EXPR  = note_car(CLINK));
+        LOG(CLINK = note_cdr(CLINK));
+#if 0 /* Test whether the environment can be mutated. */
+        if (!null_p(EXPR))
+                if (!environment_can_p(ACC, true_p(lcar(EXPR)), lcdr(EXPR)))
+                        evaluate_incompatible(__LINE__, failure);
+#endif
+        goto Return;
+
+@ @<Eval...@>=
+Save_And_Evaluate:
+        LOG(EXPR  = note_car(CLINK));
+        LOG(CLINK = note_cdr(CLINK));
+        LOG(CLINK = note_new(Sym_ENVIRONMENT_M, ACC, CLINK, failure));
+        goto Begin;
+Restore_Environment:
+        LOG(ENV   = note_car(CLINK));
+        LOG(CLINK = note_cdr(CLINK));
+        goto Return;
+
+@ @<Eval...@>=
+Mutate_Environment:
+        LOG(EXPR  = note_car(CLINK));
+        LOG(CLINK = note_cdr(CLINK));
+        LOG(ARGS  = lcar(EXPR));
+        LOG(EXPR  = lcdr(EXPR));
+        if (true_p(ARGS))
+                LOG(env_define(ENV, EXPR, ACC, failure));
+        else
+                LOG(env_set(ENV, EXPR, ACC, failure));
+        goto Return;
+
+@ @<Eval...@>=
+Evaluate_Dispatch:
+        LOG(EXPR  = note_cdr(CLINK)); /* For |assert| --- replaced by |Evaluate|. */
+        assert(note_p(EXPR) && note(EXPR) == Sym_COMBINE_FINISH);
+        LOG(ENV   = ACC);
+        goto Evaluate;
+
 @ Primitive combiners are implemented right here in the evaluator
 (|combine| is only called from a single location in |evalulate|).
 
@@ -5729,15 +6065,59 @@ void
 combine (sigjmp_buf *failure)
 {
         bool flag;
+        int count;
+        cell nsin, ndex;
+        cell value;
 
-        if (primitive_p(ACC))
+        if (primitive_p(ACC)) {
+                if (Iprimitive[primitive(ACC)].applicative ||
+                            Iprimitive[primitive(ACC)].min == -1)
+                        validate_primitive(failure);
                 switch (primitive(ACC)) {
-                @<Primitive combiners@>
+                @<Implement primitive programs@>
                 }
-        else if (applicative_p(ACC))
+        } else if (applicative_p(ACC))
                 LOG(CLINK = note_new(Sym_APPLICATIVE, ACC, CLINK, failure));
         else if (operative_p(ACC))
                 LOG(CLINK = note_new(Sym_OPERATIVE, ACC, CLINK, failure));
+}
+
+@ @<Implement...@>=
+default:
+        siglongjmp(*failure, LERR_INTERNAL);
+
+@ Primitive in |Iprimitive[primitive(ACC)]| has from |.min| to
+|.max| arguments, to put into |EXPR|. If |.min| is -1 only |.max|
+is checked (for eg.~1 or 3 arguments).
+
+This should be merged with |validate_arguments| and moved prior to
+evaluation (TODO).
+
+@.TODO@>
+@c
+void
+validate_primitive (sigjmp_buf *failure)
+{
+        int count;
+
+        count = 0;
+        EXPR = NIL;
+        while (pair_p(ARGS)) {
+                count++;
+                if (Iprimitive[primitive(ACC)].max != 0 &&
+                            count > Iprimitive[primitive(ACC)].max)
+                        evaluate_incompatible(__LINE__, failure);
+                EXPR = cons(lcar(ARGS), EXPR, failure);
+                ARGS = lcdr(ARGS);
+        }
+        if (Iprimitive[primitive(ACC)].min >= 0 &&
+                    count < Iprimitive[primitive(ACC)].min)
+                evaluate_incompatible(__LINE__, failure);
+        if (Iprimitive[primitive(ACC)].max &&
+                    Iprimitive[primitive(ACC)].max != Iprimitive[primitive(ACC)].min)
+                EXPR = cons(fix(count), EXPR, failure);
+        ARGS = EXPR;
+        EXPR = NIL;
 }
 
 @ Entering a closure is similar regardless of whether it's applicative
@@ -5754,28 +6134,28 @@ TODO: Refactor into one chunk?
 @.TODO@>
 @<Eval...@>=
 Operative_Closure: /* |EXPR| has unevaluated arguments, |ARGS| unused. */
-        LOG(EXPR  = note_car(CLINK));     /* Closure. */
+        LOG(EXPR  = note_car(CLINK));     /* Closure */
         LOG(CLINK = note_cdr(CLINK));
         LOG(ACC   = lcar(EXPR));
-        LOG(ARGS  = cons(ACC, ARGS, failure)); /* \.(Formals \.. Arguments\.). */
+        LOG(ARGS  = cons(ACC, ARGS, failure)); /* \.{(Formals \.. Arguments\.)} */
         LOG(EXPR  = lcdr(EXPR));
         LOG(ACC   = ENV);
-        LOG(ENV   = lcar(EXPR));          /* Environment. */
+        LOG(ENV   = lcar(EXPR));          /* Environment */
         LOG(EXPR  = lcdr(EXPR));
         LOG(ENV   = env_extend(ENV, failure));
-        LOG(EXPR  = lcar(EXPR));          /* Body. */
+        LOG(EXPR  = lcar(EXPR));          /* Body */
         LOG(validate_operative(failure)); /* Sets in |ENV| as required. */
         goto Begin;
 
 Applicative_Closure:
-        LOG(EXPR  = note_car(CLINK));     /* Closure. */
+        LOG(EXPR  = note_car(CLINK));     /* Closure */
         LOG(CLINK = note_cdr(CLINK));
-        LOG(ACC   = lcar(EXPR));          /* Formals. */
+        LOG(ACC   = lcar(EXPR));          /* Formals */
         LOG(EXPR  = lcdr(EXPR));
-        LOG(ENV   = lcar(EXPR));          /* Environment. */
+        LOG(ENV   = lcar(EXPR));          /* Environment */
         LOG(EXPR  = lcdr(EXPR));
         LOG(ENV   = env_extend(ENV, failure));
-        LOG(EXPR  = lcar(EXPR));          /* Body. */
+        LOG(EXPR  = lcar(EXPR));          /* Body */
         LOG(validate_arguments(failure)); /* Copies from |ARGS| to |ENV|. */
         goto Begin;
 
@@ -5792,14 +6172,14 @@ also means that the meaning of {\it this\/} \.{do} is fixed by the
 evaluator and cannot be overridden in {\it any\/} environment.
 
 @.TODO@>
-@<Primitive combiners@>=
+@<Implement...@>=
 case PRIMITIVE_LAMBDA:@; /* Return an applicative closure. */
 case PRIMITIVE_VOV:@;    /* Return an operative closure. */
         flag = (primitive(ACC) == PRIMITIVE_LAMBDA);
         if (null_p(ARGS))
-                siglongjmp(*failure, LERR_INCOMPATIBLE);
-        LOG(ACC = lcar(ARGS)); /* Formals. */
-        LOG(EXPR = lcdr(ARGS)); /* Body. */
+                evaluate_incompatible(__LINE__, failure);
+        LOG(ACC = lcar(ARGS)); /* Formals */
+        LOG(EXPR = lcdr(ARGS)); /* Body */
                         cell lame = symbol_new_const("do");
                         lame = env_search(Root, lame, true, failure);
         LOG(EXPR = cons(lame, EXPR, failure));
@@ -5844,19 +6224,19 @@ Each symbol should be unique but this is not validated (TODO).
 
 @.TODO@>
 @<Validate applicative (\.{lambda}) formals@>=
-while (syntax_p(ARGS) && pair_p(syntax_datum(ARGS))) {
-        arg = lcar(syntax_datum(ARGS));
-        LOG(ARGS = lcdr(syntax_datum(ARGS)));
+while (pair_p(evaluate_desyntax(ARGS))) {
+        arg = lcar(evaluate_desyntax(ARGS));
+        LOG(ARGS = lcdr(evaluate_desyntax(ARGS)));
         assert(syntax_p(arg));
         arg = syntax_datum(arg);
         if (!symbol_p(arg))
-                siglongjmp(*failure, LERR_INCOMPATIBLE);
+                evaluate_incompatible(__LINE__, failure);
         LOG(ACC = cons(arg, ACC, failure));
 }
-if (syntax_p(ARGS) && symbol_p(syntax_datum(ARGS)))
-        LOG(ARGS = syntax_datum(ARGS));
-else if (!null_p(ARGS))
-        siglongjmp(*failure, LERR_OOM);
+if (symbol_p(evaluate_desyntax(ARGS)))
+        LOG(ARGS = evaluate_desyntax(ARGS));
+else if (!null_p(evaluate_desyntax(ARGS)))
+        evaluate_incompatible(__LINE__, failure);
 while (!null_p(ACC)) {
         LOG(ARGS = cons(lcar(ACC), ARGS, failure));
         LOG(ACC = lcdr(ACC));
@@ -5883,7 +6263,7 @@ each binding (variable) name must be unique and this is not (TODO).
 @#
 @d save_vov_informal(O,S) do {
         if (!null_p(SO(S)))
-                siglongjmp(cleanup, LERR_INCOMPATIBLE);
+                evaluate_incompatible(__LINE__, failure);
         else
                 LOG(SS((S), (O)));
 } while (0)
@@ -5891,19 +6271,19 @@ each binding (variable) name must be unique and this is not (TODO).
 stack_reserve(3, failure);
 if (failure_p(reason = sigsetjmp(cleanup, 1)))
         unwind(failure, reason, false, 3);
-while (syntax_p(ARGS) && pair_p(syntax_datum(ARGS))) {
-        arg = lcar(syntax_datum(ARGS));
-        if (!syntax_p(arg) || !pair_p(syntax_datum(arg)))
-                siglongjmp(cleanup, LERR_INCOMPATIBLE);
-        state = lcdr(syntax_datum(arg));
-        arg = lcar(syntax_datum(arg));
-        if (!syntax_p(arg) || !symbol_p(syntax_datum(arg)) ||@|
-                        !pair_p(state) || !syntax_p(lcar(state)) ||
-                        !null_p(lcdr(state)))
-                siglongjmp(cleanup, LERR_INCOMPATIBLE);
-        arg = syntax_datum(arg);
-        LOG(state = lcar(state));
-        state = syntax_datum(state);
+ARGS = evaluate_desyntax(ARGS);
+while (pair_p(ARGS)) {
+        arg = lcar(ARGS);
+        arg = evaluate_desyntax(arg);
+        if (!pair_p(arg))
+                evaluate_incompatible(__LINE__, failure);
+        state = lcdr(arg);
+        arg = lcar(arg);
+        arg = evaluate_desyntax(arg);
+        if (!symbol_p(arg) || !pair_p(state) || !null_p(lcdr(state)))
+                evaluate_incompatible(__LINE__, failure);
+        state = lcar(state);
+        state = evaluate_desyntax(state);
         if (state == Sym_VOV_ARGS || state == Sym_VOV_ARGUMENTS)@/
                 save_vov_informal(arg, Svargs);
         else if (state == Sym_VOV_ENV || state == Sym_VOV_ENVIRONMENT)
@@ -5911,12 +6291,12 @@ while (syntax_p(ARGS) && pair_p(syntax_datum(ARGS))) {
         else if (state == Sym_VOV_CONT || state == Sym_VOV_CONTINUATION)
                 save_vov_informal(arg, Svcont);
         else
-                siglongjmp(cleanup, LERR_INCOMPATIBLE);
-        LOG(ARGS = lcdr(syntax_datum(ARGS)));
+                evaluate_incompatible(__LINE__, failure);
+        LOG(ARGS = lcdr(ARGS));
 }
 if (!null_p(ARGS) ||
             (null_p(SO(Svargs)) && null_p(SO(Svenv)) && null_p(SO(Svcont))))
-        siglongjmp(cleanup, LERR_INCOMPATIBLE);
+        evaluate_incompatible(__LINE__, failure);
 ARGS = cons(SO(Svcont), ARGS, failure);
 ARGS = cons(SO(Svenv), ARGS, failure);
 ARGS = cons(SO(Svargs), ARGS, failure);
@@ -5924,40 +6304,6 @@ stack_clear(3);
 
 @ A closure object is simply the three pieces of virtual machine
 state saved in an opaque list.
-
-@d closure_formals(O)     (lcar(O))
-@d closure_environment(O) (lcadr(O))
-@d closure_body(O)        (lcaddr(O))
-@<Fun...@>=
-cell closure_new (bool, cell, cell, cell, sigjmp_buf *);
-
-@ Usually (always?) these arguments are actually in registers and
-the stack dancing is unnecessary.
-
-@c
-cell
-closure_new (bool        is_applicative,
-             cell        formals,     /* |Accumulator| */
-             cell        environment, /* |Environment| */
-             cell        body,        /* |Expression| */
-             sigjmp_buf *failure)
-{
-        static int Sformals = 3, Senv = 2, Sbody = 1, Sret = 0;
-        cell r;
-        sigjmp_buf cleanup;
-        Verror reason = LERR_NONE;
-
-        stack_protect(4, formals, environment, body, NIL, failure);
-        if (failure_p(reason = sigsetjmp(cleanup, 1)))
-                unwind(failure, reason, false, 4);
-        SS(Sret, cons(SO(Sbody), SO(Sret), &cleanup));
-        SS(Sret, cons(SO(Senv), SO(Sret), &cleanup));
-        SS(Sret, atom(Theap, SO(Sformals), SO(Sret),
-                is_applicative ? FORM_APPLICATIVE : FORM_OPERATIVE, &cleanup));
-        r = SO(Sret);
-        stack_clear(4);
-        return r;
-}
 
 @ From the |Applicative_Closure| evaluator chunk, the arguments
 have been evaluated and the number of them is validated while each
@@ -5980,13 +6326,13 @@ validate_arguments (sigjmp_buf *failure)
         stack_reserve(2, failure);
         if (failure_p(reason = sigsetjmp(cleanup, 1)))
                 unwind(failure, reason, false, 2);
-        LOG(SS(Sname, ACC));
+        LOG(SS(Sname, evaluate_desyntax(ACC)));
         LOG(SS(Sarg, ARGS));
         while (pair_p(SO(Sname))) {
                 LOG(name = lcar(SO(Sname)));
                 LOG(SS(Sname, lcdr(SO(Sname))));
                 if (null_p(SO(Sarg)))
-                        siglongjmp(cleanup, LERR_INCOMPATIBLE);
+                        evaluate_incompatible(__LINE__, failure);
                 LOG(arg = lcar(SO(Sarg)));
                 LOG(SS(Sarg, lcdr(SO(Sarg))));
                 LOG(env_define(ENV, name, arg, failure));
@@ -5995,7 +6341,7 @@ validate_arguments (sigjmp_buf *failure)
                 LOG(assert(symbol_p(SO(Sname))));
                 LOG(env_define(ENV, SO(Sname), SO(Sarg), failure));
         } else if (!null_p(SO(Sarg)))
-                siglongjmp(cleanup, LERR_INCOMPATIBLE);
+                evaluate_incompatible(__LINE__, failure);
         stack_clear(2);
 }
 
@@ -6035,63 +6381,89 @@ validate_operative (sigjmp_buf *failure)
 
         assert(pair_p(SO(Sinformal)));
         if (symbol_p(lcar(SO(Sinformal))))
-                siglongjmp(cleanup, LERR_UNIMPLEMENTED); /* Continuation. */
+                siglongjmp(cleanup, LERR_UNIMPLEMENTED); /* Continuation */
         assert(null_p(lcdr(SO(Sinformal))));
 
         stack_clear(1);
 }
 
-@* Primitives. The pair constructor \.{cons} along with its accessors
-\.{car}, \.{cdr}, etc.
+@* Primitives. Core primitives are primarily operatives and some
+applicatives to manipulate lists, the environment and closures.
+Primitives which are applicative have their argument lists checked
+for length. Operatives enforce a maximum number of arguments (which
+may be zero) if the minimum indicated is $-1$ or that they will
+process the argument list entirely (minimum is zero) and the maximum
+value is not used.
 
-@<Primitive combiners@>=
+@<Symbolic...@>=
+PRIMITIVE_BREAK,@/
+PRIMITIVE_CAR,@/
+PRIMITIVE_CDR,@/
+PRIMITIVE_CONS,@/
+PRIMITIVE_CURRENT_ENVIRONMENT,@/
+PRIMITIVE_DEFINE_M,@/
+PRIMITIVE_DO,@/
+PRIMITIVE_DUMP,@/
+PRIMITIVE_EVAL,@/
+PRIMITIVE_IF,@/
+PRIMITIVE_LAMBDA,@/
+PRIMITIVE_NULL_P,@/
+PRIMITIVE_PAIR_P,@/
+PRIMITIVE_ROOT_ENVIRONMENT,@/
+PRIMITIVE_SET_M,@/
+PRIMITIVE_VOV,@/
+
+@ @<Primitive...@>=
+[PRIMITIVE_BREAK]               = { "break",      NIL, false, -1, 0, },@|
+[PRIMITIVE_CURRENT_ENVIRONMENT] = { "current-environment",
+                                                  NIL, false, -1, 0, },@|
+[PRIMITIVE_DO]                  = { "do",         NIL, false,  0, 0, },@|
+[PRIMITIVE_DEFINE_M]            = { "define!",    NIL, false,  0, 0, },@|
+[PRIMITIVE_IF]                  = { "if",         NIL, false, -1, 3, },@|
+[PRIMITIVE_LAMBDA]              = { "lambda",     NIL, false,  0, 0, },@|
+[PRIMITIVE_ROOT_ENVIRONMENT]    = { "root-environment",
+                                                  NIL, false, -1, 0, },@|
+[PRIMITIVE_SET_M]               = { "set!",       NIL, false,  0, 0, },@|
+[PRIMITIVE_VOV]                 = { "vov",        NIL, false,  0, 0, },@/
+@#
+[PRIMITIVE_CAR]                 = { "car",        NIL, true,   1, 1, },@|
+[PRIMITIVE_CDR]                 = { "cdr",        NIL, true,   1, 1, },@|
+[PRIMITIVE_CONS]                = { "cons",       NIL, true,   2, 2, },@|
+[PRIMITIVE_DUMP]                = { "dump",       NIL, true,   1, 1, },@|
+[PRIMITIVE_EVAL]                = { "eval",       NIL, true,   1, 2, },@|
+[PRIMITIVE_NULL_P]              = { "null?",      NIL, true,   1, 1, },@|
+[PRIMITIVE_PAIR_P]              = { "pair?",      NIL, true,   1, 1, },@|
+
+@ The pair constructor \.{cons} along with its accessors
+\.{car}, \.{cdr}, etc. |ARGS| has been scanned sufficient to be
+certain it is a proper list (or |NIL|).
+
+@<Implement...@>=
 case PRIMITIVE_CONS:
-        if (null_p(ARGS))
-                siglongjmp(*failure, LERR_INCOMPATIBLE);
-        LOG(Tmp_SIN = lcar(ARGS));
-        LOG(ARGS = lcdr(ARGS));
-        if (null_p(ARGS))
-                siglongjmp(*failure, LERR_INCOMPATIBLE);
         LOG(Tmp_DEX = lcar(ARGS));
         LOG(ARGS = lcdr(ARGS));
-        if (!null_p(ARGS))
-                siglongjmp(*failure, LERR_INCOMPATIBLE);
+        LOG(Tmp_SIN = lcar(ARGS));
+        LOG(ARGS = lcdr(ARGS));
+        assert(null_p(ARGS));
         LOG(ACC = cons(Tmp_SIN, Tmp_DEX, failure)); /* \.{Tmp\_*} reset by |cons|. */
         break;
 
-@ Set the stage to evaluate an expression and branch to the evaluation
-of one of two other expressions depending on its outcome's truth.
-
-The test is saved in the |Expression| register with the consequent
-and alternate (in case the test evaluates to false) expressions
-saved in a pair in the control link stack. An alternate expression
-is optional and in such a case a false test result will evaluate
-to |VOID|.
-
-@<Primitive combiners@>=
-case PRIMITIVE_IF: /* (Operative) */
-        if (!pair_p(ARGS))
-                siglongjmp(*failure, LERR_INCOMPATIBLE);
-        LOG(EXPR = lcar(ARGS)); /* Condition. */
+case PRIMITIVE_CAR:
+        LOG(EXPR = lcar(ARGS));
         LOG(ARGS = lcdr(ARGS));
-        if (!pair_p(ARGS))
-                siglongjmp(*failure, LERR_INCOMPATIBLE);
-        LOG(ACC = lcar(ARGS)); /* Consequent. */
+        assert(null_p(ARGS));
+        if (!pair_p(EXPR))
+                evaluate_incompatible(__LINE__, failure);
+        LOG(ACC = lcar(EXPR));
+        break;
+
+case PRIMITIVE_CDR:
+        LOG(EXPR = lcar(ARGS));
         LOG(ARGS = lcdr(ARGS));
-        if (null_p(ARGS))
-                LOG(ARGS = cons(ACC, VOID, failure));
-        else if (!pair_p(ARGS))
-                siglongjmp(*failure, LERR_INCOMPATIBLE);
-        else {
-                LOG(Tmp_ier = lcar(ARGS)); /* Alternate. */
-                LOG(ARGS = lcdr(ARGS));
-                if (!null_p(ARGS))
-                        siglongjmp(*failure, LERR_INCOMPATIBLE);
-                LOG(ARGS = cons(ACC, Tmp_ier, failure));
-                LOG(Tmp_ier = NIL);
-        }
-        CLINK = note_new(Sym_CONDITIONAL, ARGS, CLINK, failure);
-        CLINK = note_new(Sym_EVALUATE, EXPR, CLINK, failure);
+        assert(null_p(ARGS));
+        if (!pair_p(EXPR))
+                evaluate_incompatible(__LINE__, failure);
+        LOG(ACC = lcdr(EXPR));
         break;
 
 @ Perform a list of evaluations sequentially, terminating with the
@@ -6106,22 +6478,1000 @@ with the accumulator (the list head) in its tail position which is
 then replaced. This is so that the evaluator does not require any
 temporary storage other than the five evaluator registers.
 
-@<Primitive combiners@>=
+@<Implement...@>=
 case PRIMITIVE_DO: /* (Operative) */
-        LOG(ACC   = note_new(Sym_EVALUATE, VOID, NIL, failure));
-        LOG(EXPR  = ACC);
+        LOG(EXPR = note_new(Sym_EVALUATE, VOID, NIL, failure));
+        LOG(ACC = EXPR);
         while (!null_p(ARGS)) {
                 if (!pair_p(ARGS))
-                        siglongjmp(*failure, LERR_INCOMPATIBLE);
-                LOG(ACC   = note_new(Sym_EVALUATE, lcar(ARGS), ACC, failure));
-                LOG(note_set_cdr_m(EXPR, ACC));
-                LOG(EXPR  = ACC);
-                LOG(ACC   = note_cdr(ACC));
-                LOG(ARGS  = lcdr(ARGS));
+                        evaluate_incompatible(__LINE__, failure);
+                LOG(value = note_new(Sym_EVALUATE, evaluate_desyntax(lcar(ARGS)), NIL, failure));
+                LOG(note_set_cdr_m(ACC, value));
+                LOG(ACC = value);
+                LOG(ARGS = lcdr(ARGS));
+                ARGS = evaluate_desyntax(ARGS);
         }
-        LOG(note_set_cdr_m(EXPR, CLINK));
+        LOG(note_set_cdr_m(ACC, CLINK));
         LOG(CLINK = EXPR);
         break;
+
+@ @<Implement...@>=
+case PRIMITIVE_CURRENT_ENVIRONMENT:
+        assert(null_p(ARGS));
+        LOG(ACC = ENV);
+        break;
+case PRIMITIVE_ROOT_ENVIRONMENT:
+        assert(null_p(ARGS));
+        LOG(ACC = Root);
+        break;
+
+@ Set the stage to evaluate an expression and branch to the evaluation
+of one of two other expressions depending on its outcome's truth.
+
+The test is saved in the |Expression| register with the consequent
+and alternate (in case the test evaluates to false) expressions
+saved in a pair in the control link stack. An alternate expression
+is optional and in such a case a false test result will evaluate
+to |VOID|.
+
+@<Implement...@>=
+case PRIMITIVE_IF: /* (Operative) */
+        LOG(count = fix_value(lcar(ARGS)));
+        LOG(ARGS = lcdr(ARGS));
+        if (count == 3)
+                validated_argument(ACC, ARGS, false, defined_p, failure);
+        else if (count == 1)
+                LOG(ACC = VOID); /* No alternate */
+        else
+                evaluate_incompatible(__LINE__, failure);
+        validated_argument(EXPR, ARGS, false, defined_p, failure);
+        LOG(EXPR = cons(EXPR, ACC, failure));
+        validated_argument(ACC, ARGS, false, defined_p, failure);
+        LOG(CLINK = note_new(Sym_CONDITIONAL, EXPR, CLINK, failure));
+        LOG(CLINK = note_new(Sym_EVALUATE, ACC, CLINK, failure));
+        break;
+
+@ Debugging.
+
+@<Implement...@>=
+case PRIMITIVE_DUMP:
+        lprint("DUMP ");
+        ACC = lcar(ARGS);
+        serial(ACC, SERIAL_DETAIL, 42, NIL, NULL, failure);
+        lprint("\n");
+case PRIMITIVE_BREAK:
+        breakpoint();
+        break;
+
+@ @<Fun...@>=
+void breakpoint (void);
+
+@ @c
+void
+breakpoint (void)
+{
+        printf("");
+}
+
+@ (define! <env> <sym> <expr>)
+
+or (define! <env> (<sym> . <formals>) . <body>)
+ == (define! <env> <sym> (lambda <formals> . <body>))
+
+== (define! <env> <pair?> . <rest>)
+ == (define! <env> ,(car <pair>) (lambda ,(cdr <pair) . <rest>))
+
+@<Implement...@>=
+case PRIMITIVE_DEFINE_M:
+case PRIMITIVE_SET_M:
+        flag = (primitive(ACC) == PRIMITIVE_DEFINE_M);
+        if (!pair_p(ARGS))
+                evaluate_incompatible(__LINE__, failure);
+        LOG(ACC   = lcar(ARGS)); /* Environment to mutate. */
+        ARGS = lcdr(ARGS);
+        if (!pair_p(ARGS))
+                evaluate_incompatible(__LINE__, failure);
+        EXPR = lcar(ARGS); /* Binding label. */
+        EXPR = evaluate_desyntax(EXPR);
+        if (pair_p(EXPR)) { /* Applicative closure: \.{(label . formals)} */
+                LOG(ARGS  = lcdr(ARGS)); /* Closure body. */
+                LOG(value = lcdr(EXPR)); /* Applicative formals. */
+                LOG(EXPR  = lcar(EXPR)); /* Real binding label. */
+                EXPR = evaluate_desyntax(EXPR);
+                LOG(ARGS  = cons(value, ARGS, failure));
+                LOG(ARGS  = cons(Iprimitive[PRIMITIVE_LAMBDA].box, ARGS,
+                        failure));
+        } else if (symbol_p(EXPR)) {
+                LOG(ARGS = lcdr(ARGS));
+                if (!pair_p(ARGS))
+                        evaluate_incompatible(__LINE__, failure);
+                LOG(value = lcar(ARGS)); /* Value (after evaluation). */
+                LOG(ARGS = lcdr(ARGS));
+                if (!null_p(ARGS))
+                        evaluate_incompatible(__LINE__, failure);
+                LOG(ARGS = value);
+        } else
+                evaluate_incompatible(__LINE__, failure);
+        LOG(EXPR  = cons(predicate(flag), EXPR, failure));
+        LOG(CLINK = note_new(Sym_DEFINITION, EXPR, CLINK, failure));
+        LOG(CLINK = note_new(Sym_SAVE_AND_EVALUATE, ARGS, CLINK, failure));
+        LOG(CLINK = note_new(Sym_ENVIRONMENT_P, EXPR, CLINK, failure));
+        LOG(CLINK = note_new(Sym_EVALUATE, ACC, CLINK, failure));
+        break;
+
+@ @d primitive_predicate(O) do {
+        ACC  = lcar(ARGS);
+        ARGS = lcdr(ARGS);
+        assert(null_p(ARGS));
+        ACC  = predicate(O(ACC));
+} while (0); break
+@<Implement...@>=
+case PRIMITIVE_NULL_P:
+        primitive_predicate(null_p);
+case PRIMITIVE_PAIR_P:
+        primitive_predicate(pair_p);
+
+@ @<Implement...@>=
+case PRIMITIVE_EVAL:
+        LOG(count = fix_value(lcar(ARGS)));
+        LOG(ARGS = lcdr(ARGS));
+        if (count == 2)
+                validated_argument(ACC, ARGS, false, environment_p, failure);
+        else if (count == 1)
+                LOG(ACC = ENV);
+        else
+                evaluate_incompatible(__LINE__, failure);
+        LOG(EXPR  = lcar(ARGS)); /* Expression to evaluate. */
+        LOG(CLINK = note_new(Sym_EVALUATE_DISPATCH, EXPR, CLINK, failure));
+        break;
+
+@ @d validated_argument(VAR, ARGS, NULLABLE, PREDICATE, FAILURE) do {
+        (VAR) = lcar(ARGS);
+        (ARGS) = lcdr(ARGS);
+        if ((!(NULLABLE) && null_p(VAR)) || !PREDICATE(VAR))
+                evaluate_incompatible(__LINE__, (FAILURE));
+} while (0)
+
+@*1 Object primitives.
+
+@<Symbolic...@>=
+PRIMITIVE_NEW_TREE_PLAIN_NODE,
+PRIMITIVE_NEW_TREE_BIWARD_NODE,
+PRIMITIVE_NEW_TREE_SINWARD_NODE,
+PRIMITIVE_NEW_TREE_DEXWARD_NODE,
+PRIMITIVE_TREE_SIN_HAS_THREAD_P,
+PRIMITIVE_TREE_DEX_HAS_THREAD_P,
+PRIMITIVE_TREE_DEX_IS_LIVE_P,
+PRIMITIVE_TREE_SIN_IS_LIVE_P,
+PRIMITIVE_TREE_P,
+PRIMITIVE_TREE_PLAIN_P,
+PRIMITIVE_TREE_RETHREAD_M,
+PRIMITIVE_TREE_SIN_THREADABLE_P,
+PRIMITIVE_TREE_DEX_THREADABLE_P,
+PRIMITIVE_TREE_DATUM,
+@#
+PRIMITIVE_NEW_ROPE_PLAIN_NODE,
+PRIMITIVE_ROPE_P,
+PRIMITIVE_ROPE_PLAIN_P,
+PRIMITIVE_ROPE_SIN_THREADABLE_P,
+PRIMITIVE_ROPE_DEX_THREADABLE_P,
+PRIMITIVE_ROPE_SEGMENT,
+
+@ @<Primitive...@>=
+[PRIMITIVE_NEW_TREE_PLAIN_NODE] = { "new-tree%plain-node",
+                                                NIL, true, 3, 3, },@|
+[PRIMITIVE_NEW_TREE_BIWARD_NODE] = { "new-tree%bi-threadable-node",
+                                                NIL, true, 3, 3, },@|
+[PRIMITIVE_NEW_TREE_DEXWARD_NODE] = { "new-tree%sin-threadable-node",
+                                                NIL, true, 3, 3, },@|
+[PRIMITIVE_NEW_TREE_SINWARD_NODE] = { "new-tree%dex-threadable-node",
+                                                NIL, true, 3, 3, },@|
+[PRIMITIVE_TREE_SIN_HAS_THREAD_P] = { "tree/sin-has-thread?",
+                                                NIL, true, 1, 1, },@|
+[PRIMITIVE_TREE_DEX_HAS_THREAD_P] = { "tree/dex-has-thread?",
+                                                NIL, true, 1, 1, },@|
+[PRIMITIVE_TREE_SIN_IS_LIVE_P] = { "tree/live-sin",
+                                                NIL, true, 1, 1, },@|
+[PRIMITIVE_TREE_DEX_IS_LIVE_P] = { "tree/live-dex",
+                                                NIL, true, 1, 1, },@|
+[PRIMITIVE_TREE_P] = { "tree?",
+                                                NIL, true, 1, 1, },@|
+[PRIMITIVE_TREE_PLAIN_P] = { "tree%plain?",
+                                                NIL, true, 1, 1, },@|
+[PRIMITIVE_TREE_RETHREAD_M] = { "tree/rethread!",
+                                                NIL, true, 3, 3, },@|
+[PRIMITIVE_TREE_SIN_THREADABLE_P] = { "tree%sin-threadable?",
+                                                NIL, true, 1, 1, },@|
+[PRIMITIVE_TREE_DEX_THREADABLE_P] = { "tree%dex-threadable?",
+                                                NIL, true, 1, 1, },@|
+[PRIMITIVE_TREE_DATUM] = { "tree/datum",
+                                                NIL, true, 1, 1, },@|
+@#
+[PRIMITIVE_ROPE_P] = { "rope?",
+                                                NIL, true, 1, 1, },@|
+[PRIMITIVE_ROPE_PLAIN_P] = { "rope%plain?",
+                                                NIL, true, 1, 1, },@|
+[PRIMITIVE_ROPE_SIN_THREADABLE_P] = { "rope%sin-threadable?",
+                                                NIL, true, 1, 1, },@|
+[PRIMITIVE_ROPE_DEX_THREADABLE_P] = { "rope%dex-threadable?",
+                                                NIL, true, 1, 1, },@|
+[PRIMITIVE_NEW_ROPE_PLAIN_NODE] = { "new-rope%plain-node",
+                                                NIL, true, 1, 3, },@|
+[PRIMITIVE_ROPE_SEGMENT] = { "rope/segment",
+                                                NIL, true, 1, 1, },@|
+
+@ @<Implement...@>=
+case PRIMITIVE_ROPE_P:
+        ACC = predicate(rope_p(lcar(ARGS)));
+        break;
+case PRIMITIVE_ROPE_PLAIN_P:
+        ACC = predicate(plain_rope_p(lcar(ARGS)));
+        break;
+case PRIMITIVE_ROPE_SIN_THREADABLE_P:
+        ACC = predicate(rope_sin_threadable_p(lcar(ARGS)));
+        break;
+case PRIMITIVE_ROPE_DEX_THREADABLE_P:
+        ACC = predicate(rope_dex_threadable_p(lcar(ARGS)));
+        break;
+
+@ @<Implement...@>=
+case PRIMITIVE_NEW_ROPE_PLAIN_NODE:
+        count = fix_value(lcar(ARGS));
+        ARGS = lcdr(ARGS);
+        if (count == 3) {
+                validated_argument(ndex, ARGS, true, plain_rope_p, failure);
+                validated_argument(nsin, ARGS, true, plain_rope_p, failure);
+        } else if (count != 1)
+                evaluate_incompatible(__LINE__, failure);
+        else
+                nsin = ndex = NIL;
+        validated_argument(ACC, ARGS, true, rope_p, failure);
+        if (null_p(ACC))
+                ACC = rope_node_new_length(false, false, 0, nsin, ndex, failure);
+        else
+                ACC = rope_node_new_clone(false, false, ACC, nsin, ndex,
+                        failure);
+        break;
+
+@ @<Implement...@>=
+case PRIMITIVE_TREE_P:
+        ACC = predicate(tree_p(lcar(ARGS)));
+        break;
+case PRIMITIVE_TREE_PLAIN_P:
+        ACC = predicate(plain_tree_p(lcar(ARGS)));
+        break;
+case PRIMITIVE_TREE_SIN_THREADABLE_P:
+        ACC = predicate(tree_sin_threadable_p(lcar(ARGS)));
+        break;
+case PRIMITIVE_TREE_DEX_THREADABLE_P:
+        ACC = predicate(tree_dex_threadable_p(lcar(ARGS)));
+        break;
+
+@ @<Implement...@>=
+case PRIMITIVE_TREE_SIN_HAS_THREAD_P:
+        if (!tree_sin_threadable_p(lcar(ARGS)))
+                ACC = LFALSE;
+        else
+                ACC = tree_sin_has_thread_p(lcar(ARGS));
+        break;
+case PRIMITIVE_TREE_DEX_HAS_THREAD_P:
+        if (!tree_dex_threadable_p(lcar(ARGS)))
+                ACC = LFALSE;
+        else
+                ACC = tree_dex_has_thread_p(lcar(ARGS));
+        break;
+case PRIMITIVE_TREE_SIN_IS_LIVE_P:
+        ACC = predicate(dryad_sin_p(lcar(ARGS)));
+        break;
+case PRIMITIVE_TREE_DEX_IS_LIVE_P:
+        ACC = predicate(dryad_dex_p(lcar(ARGS)));
+        break;
+
+@ @<Implement...@>=
+case PRIMITIVE_NEW_TREE_PLAIN_NODE:
+        validated_argument(ndex, ARGS, true, plain_tree_p, failure);
+        validated_argument(nsin, ARGS, true, plain_tree_p, failure);
+#if 0
+        ACC = tree_node_new(lcar(ARGS), nsin, ndex, failure);
+#endif
+        break;
+case PRIMITIVE_NEW_TREE_BIWARD_NODE:
+        validated_argument(ndex, ARGS, true, tree_threadable_p, failure);
+        validated_argument(nsin, ARGS, true, tree_threadable_p, failure);
+#if 0
+        ACC = tree_threadable_node_new(lcar(ARGS), nsin, ndex, failure);
+#endif
+        break;
+case PRIMITIVE_NEW_TREE_SINWARD_NODE:
+        validated_argument(ndex, ARGS, true, tree_sin_threadable_p, failure);
+        validated_argument(nsin, ARGS, true, tree_sin_threadable_p, failure);
+        if (tree_dex_threadable_p(nsin) || tree_dex_threadable_p(ndex))
+                evaluate_incompatible(__LINE__, failure);
+#if 0
+        ACC = tree_sin_threadable_node_new(lcar(ARGS), nsin, ndex, failure);
+#endif
+        break;
+case PRIMITIVE_NEW_TREE_DEXWARD_NODE:
+        validated_argument(ndex, ARGS, true, tree_dex_threadable_p, failure);
+        validated_argument(nsin, ARGS, true, tree_dex_threadable_p, failure);
+        if (tree_sin_threadable_p(nsin) || tree_sin_threadable_p(ndex))
+                evaluate_incompatible(__LINE__, failure);
+#if 0
+        ACC = tree_dex_threadable_node_new(lcar(ARGS), nsin, ndex, failure);
+#endif
+        break;
+@#
+case PRIMITIVE_TREE_RETHREAD_M:
+        validated_argument(ndex, ARGS, false, boolean_p, failure);
+        validated_argument(nsin, ARGS, false, boolean_p, failure);
+        if (!tree_p(lcar(ARGS)))
+                evaluate_incompatible(__LINE__, failure);
+#if 0
+        ACC = treeish_rethread_m(lcar(ARGS), true_p(nsin), true_p(ndex),
+                failure);
+#endif
+        break;
+
+@ @<Implement...@>=
+case PRIMITIVE_TREE_DATUM:
+        validated_argument(value, ARGS, false, tree_p, failure);
+        ACC = dryad_datum(value);
+        break;
+
+@* Serialisation.
+
+@d serial_printable_p(O) ((O) >= ' ' && (O) < 0x7f)
+@d SERIAL_SILENT 0
+@d SERIAL_HUMAN  1
+@d SERIAL_ROUND  2
+@d SERIAL_DETAIL 3
+@<Fun...@>=
+void gc_serial (cell, cell);
+void serial (cell, int, int, cell, cell *, sigjmp_buf *);
+void serial_append_imp (cell, char *, int, sigjmp_buf *);
+int serial_cycle (cell, cell);
+char *serial_deduplicate (cell, int, cell, cell, sigjmp_buf *);
+void serial_escape (char *, int, cell, sigjmp_buf *);
+void serial_imp (cell, int, int, bool, cell, cell, sigjmp_buf *);
+void serial_rope (cell, int, int, cell, cell, sigjmp_buf *);
+
+@
+
+what:
+3 debug: all detail
+2 round-trip: strings/symbols formatted, impossible-to-print objects abort
+1 descriptive: (unimplemented)
+0 silent (to collect a list of recursive points)
+
+how:
+strings escaped vs. raw
+maximum depth
+numeric base
+
+buffer is a segment where the serialised result will be put. Can
+only be |NIL| if |detail| is 0 or |dprint| is enabled.
+
+@c
+void
+serial (cell        o,
+        int         detail,
+        int         maxdepth,
+        cell        buffer,
+        cell       *cycles,
+        sigjmp_buf *failure)
+{
+        static int Sobject = 0;
+        size_t count;
+        Oheap *h, *heap;
+        bool compacting;
+        cell ignored = Null_Array; /* In case of |special_p(o)|. */
+        sigjmp_buf cleanup;
+        Verror reason = LERR_NONE;
+
+        assert(defined_p(o));
+        assert(maxdepth >= 0);
+        if (detail)
+                assert(null_p(buffer));
+        else
+                assert((LDEBUG_P && null_p(buffer)) || segment_p(buffer));
+        if (cycles == NULL)
+                cycles = &ignored;
+        stack_protect(1, o, failure);
+        if (failure_p(reason = sigsetjmp(cleanup, 1)))
+                unwind(failure, reason, false, 1);
+@#
+        if (!special_p(o)) {
+                @<Determine which heap an object is in@>@;
+                @<Look for cyclic data structures@>@;
+        }
+        if (detail)
+                serial_imp(SO(Sobject), detail, maxdepth, true, buffer,
+                        *cycles, failure);
+        stack_clear(1);
+}
+
+@ @<Determine which heap an object is in@>=
+heap = Theap;
+h = Sheap;
+while (h != NULL)
+        if (h == ATOM_TO_HEAP(o)) {
+                heap = Sheap;
+                break;
+        } else
+                h = h->next;
+
+@ @<Look for cyclic data structures@>=
+*cycles = array_new_imp(8, LFALSE, FORM_ARRAY, &cleanup);
+pointer_set_datum_m(*cycles, fix(0));
+compacting = (ATOM_TO_HEAP(o)->pair != NULL);
+count = 0; /* Ignored. */
+*cycles = gc_mark(heap, *cycles, compacting, NULL, &count);
+SS(Sobject, gc_mark(heap, SO(Sobject), compacting, cycles, &count));
+if (compacting)
+        gc_compacting(heap, false);
+else
+        gc_sweeping(heap, false);
+if (null_p(*cycles))
+        siglongjmp(cleanup, LERR_OOM);
+count = 2 * fix_value(pointer_datum(*cycles));
+*cycles = array_grow_m(*cycles, count - array_length(*cycles), LFALSE, failure);
+count /= 2;
+pointer_set_datum_m(*cycles, fix(count));
+@#
+#if 0
+serial_imp(SO(Sobject), SERIAL_SILENT, maxdepth, false, NULL, *cycles, failure);
+pointer_set_datum_m(*cycles, fix(0));
+for (i = 0; i < count; i++) {
+        j = fix_value(pointer_datum(*cycles));
+        if (true_p(array_ref(*cycles, i + count))) {
+                if (i != j)
+                        array_set_m(*cycles, j++, array_ref(*cycles, i));
+                pointer_set_datum_m(*cycles, fix(j));
+        }
+}
+for (; i < j * 2; i++)
+        array_set_m(*cycles, j, LFALSE);
+#endif
+
+@ When it's collecting the object being serialised, the garbage
+collector is instructed to call this function whenever it encounters
+a reference it has already seen in that round of collection.
+
+@c
+@.TODO@>
+void
+gc_serial (cell cycles,
+           cell found)
+{
+        int i, len;
+        sigjmp_buf cleanup;
+        Verror reason = LERR_NONE;
+
+        if (null_p(cycles))
+                return;
+        if (failure_p(reason = sigsetjmp(cleanup, 1)))
+                return; /* FIXME: The error is lost. */
+        len = fix_value(pointer_datum(cycles));
+        for (i = 0; i < len; i++)
+                if (array_ref(cycles, i) == found)
+                        return;
+        if (len >= array_length(cycles))
+                array_grow_m(cycles, array_length(cycles), LFALSE, &cleanup);
+        array_set_m(cycles, len, found);
+        pointer_set_datum_m(cycles, fix(len + 1));
+}
+
+@ @d serial_append(B,C,L,F) do {
+        if (LDEBUG_P && null_p(B))
+                for (int _i = 0; _i < (L); _i++)
+                        lput((C)[_i]);
+        else
+                serial_append_imp((B), (C), (L), (F));
+} while (0)
+@c
+void
+serial_append_imp (cell        buffer,
+                   char       *content,
+                   int         length,
+                   sigjmp_buf *failure)
+{
+        int i, off;
+
+        assert(segment_p(buffer));
+        off = fix_value(pointer_datum(buffer));
+        i = segment_length(buffer) - off - 1;
+        if (i > length)
+                i = length;
+        for (; i >= 0; i--)
+                segment_address(buffer)[off + i] = content[i];
+        segment_address(buffer)[off + i] = '\0';
+        pointer_set_datum_m(buffer, fix(off + i));
+        if (i != length)
+                siglongjmp(*failure, LERR_OVERFLOW);
+}
+
+@ Uses \CEE/ stack (calls itself) but doesn't have to.
+
+Buffer may be NIL if debugging and |LDEBUG_P| so |lprint|/|lput|
+will work.
+
+@c
+void
+serial_imp (cell        o,
+            int         detail,
+            int         maxdepth,
+            bool        prefix,
+            cell        buffer,
+            cell        cycles,
+            sigjmp_buf *failure)
+{
+        cell p;
+        int i, length = 0;
+        char *append = NULL, buf[FIX_BASE10 + 2];
+
+        assert(maxdepth >= 0);
+        assert((LDEBUG_P && null_p(buffer)) || segment_p(buffer));
+        assert(array_p(cycles));
+        if (special_p(o)) {
+                @<Serialise a unique object@>
+        } else if (symbol_p(o)) {
+                @<Serialise a symbol@>
+        } else
+                append = serial_deduplicate(o, detail, buffer, cycles, failure);
+        if (append == NULL) {
+                @<Serialise an object@>@; /* An unterminated |if|/|else
+                                                if| chain. */
+                else @+
+                { /* Will go away when |@<Serialise an object@>| is complete. */
+                        lprint("%2x?\n", form(o));
+                        assert(!"unknown type");
+                }
+        }
+@#
+        if (append == NULL) {
+                lprint("%p: %x\n", o, special_p(o) ?  -1 : form(o));
+                siglongjmp(*failure, LERR_UNPRINTABLE);
+        }
+        if (!length) {
+                length = append[0];
+                append++;
+        }
+        if (detail)
+                serial_append(buffer, append, length, failure);
+}
+
+@ @<Serialise a unique object@>=
+if (null_p(o))
+        append = "\002()";
+else if (false_p(o))
+        append = "\002#f";
+else if (true_p(o))
+        append = "\002#t";
+else if (void_p(o)) { /* Licence to disappear. */
+        if (detail == SERIAL_DETAIL)
+                append = "\007#<void>";
+#if 0
+        else@+ if (detail != SERIAL_ROUND)
+                append = "\000";
+#endif
+} else if (eof_p(o)) { /* The terminator will not be back. */
+        if (detail == SERIAL_DETAIL)
+                append = "\021#<schwarzenegger>";
+} else if (undefined_p(o)) { /* Ecce res qui est faba. */
+        if (detail == SERIAL_DETAIL)
+                append = "\006#<zen>";
+} else {
+        assert(fix_p(o));
+        i = fix_value(o);
+        if (!i)
+              append = "\0010";
+        else {
+                if (i < 0)
+                        i = -i;
+                append = buf + FIX_BASE10 + 2;
+                *--append = '\0'; /* Terminator. */
+                *--append = 0; /* Length. */
+                while (i) {
+                        *(append - 1) = *(append) + 1;
+                        *append-- = (i % 10) + '0';
+                        i /= 10;
+                }
+        }
+        if (fix_value(o) < 0) {
+                *(append - 1) = *(append) + 1;
+                *append-- = '-';
+        }
+}
+
+@ @<Serialise a symbol@>=
+append = symbol_buffer(o);
+length = symbol_length(o);
+if (detail && maxdepth)
+        for (i = 0; i < length; i++)
+                if (!serial_printable_p(append[i])) {
+                        if (detail) {
+                                serial_append(buffer, "#|", 2, failure);
+                                serial_escape(append, length, buffer, failure);
+                                serial_append(buffer, "|", 1, failure);
+                        }
+                        append = "\0";
+                        length = 0;
+                        break;
+                }
+
+@ @c
+void
+serial_escape (char       *append,
+               int         length,
+               cell        buffer,
+               sigjmp_buf *failure)
+{
+        int i, j;
+        char ascii[4] = { '#', 'x', '\0', '\0' };
+
+        for (i = 0; i < length; i++) {
+                if (append[i] == '#')
+                        serial_append(buffer, "##", 2, failure);
+                else if (append[i] == '|')
+                        serial_append(buffer, "#|", 2, failure);
+                else if (append[i] == '\n' || append[i] == '\t' ||
+                            serial_printable_p(append[i]))
+                        serial_append(buffer, append + i, 1, failure);
+                else {
+                        j = (append[i] & 0xf0) >> 4;
+                        ascii[2] = int_to_hexscii(j, false);
+                        j = (append[i] & 0x0f) >> 0;
+                        ascii[3] = int_to_hexscii(j, false);
+                        serial_append(buffer, ascii, 4, failure);
+                }
+        }
+}
+
+@ @c
+int
+serial_cycle (cell cycles,
+              cell candidate)
+{
+        int r;
+
+        for (r = 0; r < fix_value(pointer_datum(cycles)); r++)
+                if (array_ref(cycles, r) == candidate)
+                        return r;
+        return -1;
+}
+
+@ The first time a cycle is encountered identify and print it, later
+occurrences refer back to it.
+
+@c
+char *
+serial_deduplicate (cell        o,
+                    int         detail,
+                    cell        buffer,
+                    cell        cycles,
+                    sigjmp_buf *failure)
+{
+        int c, i;
+
+        assert((LDEBUG_P && null_p(buffer)) || segment_p(buffer));
+        assert(array_p(cycles));
+        c = serial_cycle(cycles, o);
+        if (c == -1)
+                return NULL;
+        i = c + fix_value(pointer_datum(cycles));
+        if (!detail)
+                array_set_m(cycles, i, LTRUE);
+        else if (true_p(array_ref(cycles, i))) {
+                serial_append(buffer, "##", 2, failure);
+                serial_imp(fix(c), SERIAL_ROUND, 1, true, buffer, cycles, failure);
+        } else {
+                serial_append(buffer, "#=", 2, failure);
+                serial_imp(fix(c), SERIAL_ROUND, 1, true, buffer, cycles, failure);
+                serial_append(buffer," ", 1, failure);
+                array_set_m(cycles, i, LTRUE);
+                return NULL;
+        }
+        return "\0";
+}
+
+@ This is a long chain of |if|/|else if| beginning here. Not sure I like that.
+
+@<Serialise an object@>=
+if (pair_p(o)) {
+        if (!maxdepth && detail != SERIAL_ROUND)
+                append = "\005(...)";
+        else if (maxdepth) {
+                if (detail)
+                        serial_append(buffer, "(", 1, failure);
+                serial_imp(lcar(o), detail, maxdepth - 1, true, buffer, cycles,
+                        failure);
+                for (o = lcdr(o); pair_p(o); o = lcdr(o)) {
+                        if (detail)
+                                serial_append(buffer, " ", 1, failure);
+                        serial_imp(lcar(o), detail, maxdepth - 1, true, buffer,
+                                cycles, failure);
+                }
+                if (!null_p(o)) {
+                        if (detail)
+                                serial_append(buffer, " . ", 1, failure);
+                        serial_imp(o, detail, maxdepth - 1, true, buffer,
+                                cycles, failure);
+                }
+                if (detail)
+                        serial_append(buffer, ")", 1, failure);
+                append = "\0";
+        }
+}
+
+@ @<Serialise an object@>=
+else if (array_p(o)) {
+        if (!maxdepth && detail != SERIAL_ROUND)
+                append = "\005[...]";
+        else if (maxdepth) {
+                if (detail)
+                        serial_append(buffer, "[", 1, failure);
+                for (i = 0; i < array_length(o); i++) {
+                        serial_imp(array_ref(o, i), detail, maxdepth - 1,
+                                true, buffer, cycles, failure);
+                        if (detail && i < array_length(o) - 1)
+                                serial_append(buffer, " ", 1, failure);
+                }
+                if (detail)
+                        serial_append(buffer, "]", 1, failure);
+                append = "\0";
+        }
+}
+
+@ @<Serialise an object@>=
+else if (rope_p(o)) {
+        if (detail == SERIAL_DETAIL) {
+                serial_append(buffer, "“", (int) sizeof ("“"), failure);
+                serial_rope(o, detail, maxdepth, buffer, cycles, failure);
+                serial_append(buffer, "”", (int) sizeof ("”"), failure);
+        } else {
+                if (detail)
+                        serial_append(buffer, "|", 1, failure);
+                serial_rope(o, detail, maxdepth, buffer, cycles, failure);
+                if (detail)
+                        serial_append(buffer, "|", 1, failure);
+        }
+        append = "\0";
+}
+
+@ @c
+void
+serial_rope (cell        o,
+             int         detail,
+             int         maxdepth,
+             cell        buffer,
+             cell        cycles,
+             sigjmp_buf *failure)
+{
+        cell p;
+
+        assert(rope_p(o));
+        if (maxdepth < 0 && detail == SERIAL_ROUND)
+                siglongjmp(*failure, LERR_UNPRINTABLE);
+        else if (maxdepth < 0) {
+                if (detail)
+                        serial_append(buffer, "...", 3, failure);
+        } else {
+                p = rope_prev(o, failure);
+                if (null_p(p)) {
+                        if (detail == SERIAL_DETAIL)
+                                serial_append(buffer, "()", 2, failure);
+                } else if (serial_deduplicate(p, detail, buffer, cycles, failure) == NULL)
+                        serial_rope(p, detail, maxdepth - 1, buffer, cycles, failure);
+                if (detail == SERIAL_DETAIL)
+                        serial_append(buffer, " |", 2, failure);
+                if (detail)
+                        serial_escape(rope_buffer(o), rope_blength(o), buffer, failure);
+                if (detail == SERIAL_DETAIL)
+                        serial_append(buffer, "| ", 2, failure);
+                p = rope_next(o, failure);
+                if (null_p(p)) {
+                        if (detail == SERIAL_DETAIL)
+                                serial_append(buffer, "()", 2, failure);
+                } else if (serial_deduplicate(p, detail, buffer, cycles, failure) == NULL)
+                        serial_rope(p, detail, maxdepth - 1, buffer, cycles, failure);
+        }
+}
+
+@ @<Serialise an object@>=
+else if (primitive_p(o) && detail != SERIAL_ROUND) {
+        if (detail) {
+                serial_append(buffer, "#{primitive ", 13, failure);
+                serial_append(buffer, Iprimitive[primitive(o)].label,
+                        (int) strlen (Iprimitive[primitive(o)].label), failure);
+                serial_append(buffer, "}", 1, failure);
+        }
+        append = "\0";
+}
+
+@ @<Serialise an object@>=
+else if (environment_p(o) && detail != SERIAL_ROUND) {
+        if (!maxdepth)
+                append = "\015<ENVIRONMENT>";
+        else {
+                if (detail)
+                        serial_append(buffer, "#{environment ", 14, failure);
+                serial_imp(env_layer(o), detail, maxdepth - 1, true, buffer,
+                        cycles, failure);
+                if (detail)
+                        serial_append(buffer, " on ", 4, failure);
+                serial_imp(env_previous(o), detail, maxdepth - 1, true, buffer,
+                        cycles, failure);
+                if (detail)
+                        serial_append(buffer, "}", 1, failure);
+                append = "\0";
+        }
+}
+
+@ \.{table free/length (id . value)} (|id = hash % length|).
+
+@<Serialise an object@>=
+else if (keytable_p(o) && detail != SERIAL_ROUND) {
+        if (!maxdepth)
+                append = "\014#{table ...}";
+        else {
+                if (detail)
+                        serial_append(buffer, "#{table ", 8, failure);
+                serial_imp(fix(keytable_free(o)), SERIAL_ROUND, 1, true,
+                        buffer, cycles, failure);
+                if (detail)
+                        serial_append(buffer, "/", 1, failure);
+                serial_imp(fix(keytable_length(o)), SERIAL_ROUND, 1, true,
+                        buffer, cycles, failure);
+                for (i = 0; i < keytable_length(o); i++) {
+                        if (!null_p(keytable_ref(o, i))) {
+                                if (detail)
+                                        serial_append(buffer, " (", 2, failure);
+                                serial_imp(fix(i), detail, maxdepth - 1, true,
+                                        buffer, cycles, failure);
+                                if (detail)
+                                        serial_append(buffer, " . ", 3, failure);
+                                serial_imp(keytable_ref(o, i), detail, maxdepth - 1, true,
+                                        buffer, cycles, failure);
+                                if (detail)
+                                        serial_append(buffer, ")", 1, failure);
+                        }
+                }
+                if (detail)
+                        serial_append(buffer, "}", 1, failure);
+                append = "\0";
+        }
+}
+
+@ @<Serialise an object@>=
+else if (closure_p(o) && detail != SERIAL_ROUND) {
+        if (!maxdepth)
+                append = "\016#{closure ...}";
+        else {
+                if (detail) {
+                        serial_append(buffer, "#{", 2, failure);
+                        if (applicative_p(o))
+                                serial_append(buffer, "applicative ", 12, failure);
+                        else
+                                serial_append(buffer, "operative ", 10, failure);
+                }
+                serial_imp(closure_formals(o), detail, maxdepth - 1, true,
+                        buffer, cycles, failure);
+                if (detail)
+                        serial_append(buffer, " ", 1, failure);
+                serial_imp(closure_body(o), detail, maxdepth - 1, true,
+                        buffer, cycles, failure);
+                if (detail)
+                        serial_append(buffer, " in ", 4, failure);
+                serial_imp(closure_environment(o), detail, maxdepth - 1, true,
+                        buffer, cycles, failure);
+                if (detail)
+                        serial_append(buffer, "}", 1, failure);
+                append = "\0";
+        }
+}
+
+@ @<Serialise an object@>=
+else if (dlist_p(o) && detail != SERIAL_ROUND) {
+        if (!maxdepth)
+                append = "\006<LIST>";
+        else {
+                if (prefix) {
+                        if (detail)
+                                serial_append(buffer, "#{dlist ", 8, failure);
+                        serial_imp(dlist_datum(o), detail, maxdepth - 1, true,
+                                buffer, cycles, failure);
+                        p = dlist_next(o);
+                        while (p != o) {
+                                if (detail)
+                                        serial_append(buffer, " :: ", 4, failure);
+                                serial_imp(p, detail, maxdepth, false,
+                                        buffer, cycles, failure);
+                                p = dlist_next(p);
+                        }
+                        if (detail)
+                                serial_append(buffer, "}", 1, failure);
+                } else
+                        serial_imp(dlist_datum(o), detail, maxdepth - 1, true,
+                                buffer, cycles, failure);
+                append = "\0";
+        }
+}
+
+@ @<Serialise an object@>=
+else if (note_p(o) && detail != SERIAL_ROUND) {
+        if (!maxdepth)
+                append = "\006<NOTE>";
+        else {
+                serial_imp(note(o), detail, maxdepth - 1, true, buffer, cycles,
+                        failure);
+                if (detail)
+                        serial_append(buffer, "ª", (int) sizeof ("ª"), failure);
+                serial_imp(note_car(o), detail, maxdepth - 1, true, buffer,
+                        cycles, failure);
+                if (detail)
+                        serial_append(buffer, " ¦ ", (int) sizeof (" ¦ "), failure);
+                serial_imp(note_cdr(o), detail, maxdepth - 1, true, buffer,
+                        cycles, failure);
+                if (detail)
+                        serial_append(buffer, "º", (int) sizeof ("º"), failure);
+                append = "\0";
+        }
+}
+
+@ @<Serialise an object@>=
+else if (syntax_p(o) && detail != SERIAL_ROUND) {
+        if (!maxdepth)
+                append = "\010<SYNTAX>";
+        else {
+                if (detail)
+                        serial_append(buffer, "#{syntax ", 9, failure);
+                serial_imp(syntax_datum(o), detail, maxdepth - 1, true, buffer,
+                        cycles, failure);
+                if (detail)
+                        serial_append(buffer, " ", 1, failure);
+                serial_imp(syntax_start(o), detail, maxdepth - 1, true, buffer,
+                        cycles, failure);
+                if (detail)
+                        serial_append(buffer, " ", 1, failure);
+                serial_imp(syntax_end(o), detail, maxdepth - 1, true, buffer,
+                        cycles, failure);
+                if (detail)
+                        serial_append(buffer, "}", 1, failure);
+                append = "\0";
+        }
+}
+
+@ @<Serialise an object@>=
+else if (lexeme_p(o) && detail != SERIAL_ROUND) {
+        if (!maxdepth)
+                append = "\015#{lexeme ...}";
+        else {
+                if (detail)
+                        serial_append(buffer, "#{lexeme ", 9, failure);
+                serial_imp(fix(lexeme(o)->cat), SERIAL_ROUND, 1, true,
+                        buffer, cycles, failure);
+                if (detail)
+                        serial_append(buffer, " @@", 2, failure);
+                serial_imp(fix(lexeme(o)->tboffset), SERIAL_ROUND, 1,
+                        true, buffer, cycles, failure);
+                if (detail)
+                        serial_append(buffer, ":", 1, failure);
+                serial_imp(fix(lexeme(o)->blength), SERIAL_ROUND, 1,
+                        true, buffer, cycles, failure);
+                if (detail)
+                        serial_append(buffer, " of ", 4, failure);
+                serial_imp(lexeme_twine(o), SERIAL_ROUND, maxdepth - 1,
+                        true, buffer, cycles, failure);
+                if (detail)
+                        serial_append(buffer, "}", 1, failure);
+                append = "\0";
+        }
+}
+
+@ @<Serialise an object@>=
+else if (keytable_p(o)) {
+        append = NULL;
+}
 
 @** Miscellanea.
 
@@ -6159,6 +7509,12 @@ high_bit (digit o)
 #                       define Lnoreturn /* noisy compiler */
 #               endif
 #       endif
+#endif
+
+#ifdef LDEBUG
+#       define LDEBUG_P true
+#else
+#       define LDEBUG_P false
 #endif
 
 #if EOF == -1
@@ -6378,7 +7734,31 @@ mem_init (void)
         ENV = env_extend(Root, failure);
 }
 
+@ @c
+int
+lprint (char *format,
+        ...)
+{
+        va_list args;
+        int r;
+
+        assert(LDEBUG_P);
+        va_start(args, format);
+        r = vfprintf(stdout, format, args);
+        va_end(args);
+        return r;
+}
+
+int
+lput (int c)
+{
+        assert(LDEBUG_P);
+        return putchar(c);
+}
+
 @ @<Fun...@>=
 void mem_init (void);
+int lprint (char *, ...);
+int lput (int);
 
 @ @d WARN() fprintf(stderr, "WARNING: You probably don't want to do that.\n");

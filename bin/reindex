@@ -1,0 +1,62 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+my (@index, %index);
+my $filename = $ARGV[0];
+$filename =~ s/\.[a-z-]+$//;
+
+my ($prefix, $style, $text);
+my $line;
+my $in = '';
+while (<>) {
+        next if /^\s*$/;
+        s/ *%?$//;
+        $in .= ' ' if $in;
+        $in = "$in$_";
+        if (!/\.$/) {
+                chomp $in;
+                next;
+        }
+        die unless $in =~ /^(\\I)(\\.)?\{(.*)\}, (.*)\.$/;
+        ($prefix, $style, $text) = ($1, $2, $3);
+        $line = [ $prefix, $style, $text, split /, /, $4 ];
+        $in = '';
+        next if $text =~ /^\\_|\\_$|^.$/ or $text =~ /^b[01]*$/;
+        push @index, $line  unless $style eq '\9';
+        push @{$index{$text}}, $line;
+}
+
+unlink "$filename.idx.bak" if -e "$filename.idx.bak";
+rename "$filename.idx", "$filename.idx.bak" if -e "$filename.idx";
+open INDEX, '>', "$filename.idx" or die;
+
+for (@index) {
+        next unless scalar @{$index{$_->[2]}};
+        $in = "$_->[0]$_->[1]\{$_->[2]\}, ";
+        if (scalar @{$index{$_->[2]}} == 1) {
+                $in .= join ', ', (@$_[3..$#$_]);
+        } else {
+                my %page;
+                for (@{$index{$_->[2]}}) {
+                        for (@$_[3..$#$_]) {
+                                my $pid = $_;
+                                $pid =~ s/\D//g;
+                                $page{$pid} = $_;
+                        }
+                }
+                $in .= join ', ', map { $page{$_} } sort keys %page;
+        }
+        $in .= ".\n";
+        $line = '';
+        while (length $in > 72) {
+                my $off = 80;
+                $off = length $in if length $in < $off;
+                $off-- while (substr($in, $off, 1) ne ' ');
+                $line .= substr($in, 0, $off + 1, '');
+                $line =~ s/.$/\n/;
+        }
+        print INDEX "$line$in";
+        $index{$_->[2]} = [];
+}

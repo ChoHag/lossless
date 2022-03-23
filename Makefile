@@ -3,57 +3,69 @@ CWEAVE?=  cweave
 PDFTEX?=  pdftex
 TEST?=    prove
 CFLAGS+=  -Wall -Wpedantic -Wextra -I. -fPIC
-LDFLAGS+= -lpthread
+LDFLAGS+= -lpthread -ledit -lcurses
 TFLAGS+=  -v
 
-SOURCES:=       lossless.c ffi.c
-OBJECTS:=       lossless.o ffi.o
-TEST_SCRIPTS:=
-TEST_OBJECTS:=
+BIN_SOURCES:= lossless.h repl.c
+LIB_SOURCES:= lossless.h ffi.c
+BIN_OBJECTS:= repl.o
+LIB_OBJECTS:= ffi.o
 
-OTHER_SOURCES:= lossless.h
 
-all: liblossless.so lossless.pdf ffi.perl man/mandoc.db
+all: lossless liblossless.so lossless.pdf repl.pdf ffi.perl man/mandoc.db
 
 full: test all
 
 
+$(SOURCES): lossless.w
 
-lossless.pdf: lossless.tex
-	$(PDFTEX) lossless.tex
+$(BIN_SOURCES): lossless.c repl.w
 
-lossless.tex: lossless.w
-	mkdir -p t && $(CWEAVE) lossless.w
+$(LIB_SOURCES): lossless.c
 
-lossless: $(OBJECTS)
-	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) -o lossless $(OBJECTS)
+$(BIN_OBJECTS): $(BIN_SOURCES)
 
-liblossless.so: $(OBJECTS)
-	$(CC) $(LDFLAGS) -shared -o liblossless.so $(OBJECTS)
+$(LIB_OBJECTS): $(LIB_SOURCES)
 
-$(OBJECTS): $(SOURCES)
 
-$(SOURCES) $(TEST_SOURCES) $(OTHER_SOURCES): lossless.w
-	mkdir -p t && $(CTANGLE) lossless.w $(LASS)
+lossless: lossless.o $(BIN_OBJECTS)
+	$(LINK.c) -o lossless lossless.o $(BIN_OBJECTS)
 
-test: $(TEST_SCRIPTS)
-	$(TEST) $(TFLAGS) -e '' t
-
-$(TEST_SCRIPTS): $(TEST_OBJECTS)
-
-$(TEST_OBJECTS): $(TEST_SOURCES) $(OTHER_SOURCES)
+liblossless.so: lossless.o $(LIB_OBJECTS)
+	$(LINK.c) -shared -o liblossless.so lossless.o $(LIB_OBJECTS)
 
 ffi.perl: always liblossless.so
 	ln -sfn ../liblossless.so perl/
-	LD_LIBRARY_PATH=$(pwd) make -C perl
+	make -C perl
 	date > ffi.perl
 
 man/mandoc.db: always
 	makewhatis man
 
+
 always:
 
-.SUFFIXES: .t
+.SUFFIXES: .idx-in .idx .pdf .t .tex .w
+
+# Dependencies (can these be baked into automatic rules)?
+lossless.pdf: lossless.idx
+lossless.idx-in: lossless.tex
+repl.pdf: repl.idx
+repl.idx-in: repl.tex
+
+.w.tex:
+	$(CWEAVE) $< - $@
+	mv $$(echo $< | sed s/.w$$//).idx $$(echo $< | sed s/.w$$//).idx-in
+
+# Remove single-letter and merge identical identifiers.
+.idx-in.idx:
+	perl bin/reindex $<
+
+.tex.pdf:
+	$(PDFTEX) $<
+
+.w.c:
+	$(CTANGLE) $< - $@
 
 .c.t:
 	if echo " $(ALLOC_TEST_SCRIPTS) " | grep -qF " $@ "; then          \
@@ -71,10 +83,13 @@ dist: lossless.pdf $(SOURCES) $(OTHER_SOURCES) $(TEST_SOURCES)
 	tar -C tmp -cf- lossless-0.$$d | gzip -9c > lossless-0.$$d.tgz
 
 clean:
-	rm -f core *.core *.idx *.log *.scn *.toc *.o
+	rm -f core *.core *.idx *.idx-in *.log *.scn *.toc *.o
 	rm -f liblossless.so lossless *.o
-	rm -f lossless.c lossless.tex lossless.pdf
+	rm -f lossless.[ch] repl.c ffi.c
+	rm -f lossless.tex lossless.pdf
+	rm -f repl.tex repl.pdf
 	rm -f lossless*tgz
 	rm -fr t
+	rm -f man/mandoc.db
 	make -C perl clean
 	rm -f ffi.perl

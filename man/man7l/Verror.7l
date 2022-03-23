@@ -14,74 +14,74 @@ the error conditions listed here and the function never returns.
 .Pp
 These error conditions are defined:
 .Bl -tag -width "LERR_INTERRUPTXXXXX" -offset indent -compact
-.It Dv LERR_AMBIGUOUS
+.It Er LERR_AMBIGUOUS
 constant etc. incorrectly terminated
-.It Dv LERR_DOUBLE_TAIL
+.It Er LERR_DOUBLE_TAIL
 two
 .Dq \&.
 operators
-.It Dv LERR_EMPTY_TAIL
+.It Er LERR_EMPTY_TAIL
 a
 .Dq \&.
 without a tail expression
-.It Dv LERR_EOF
+.It Er LERR_EOF
 end of file or stream
-.It Dv LERR_EXISTS
+.It Er LERR_EXISTS
 new binding conflicts
-.It Dv LERR_HEAVY_TAIL
+.It Er LERR_HEAVY_TAIL
 a
 .Dq \&.
 with more than one tail expression
-.It Dv LERR_IMPROPER
+.It Er LERR_IMPROPER
 a list operation encountered an improper list
-.It Dv LERR_INCOMPATIBLE
+.It Er LERR_INCOMPATIBLE
 operation on incompatible operand
-.It Dv LERR_INTERNAL
+.It Er LERR_INTERNAL
 bug in Lossless
-.It Dv LERR_INTERRUPT
+.It Er LERR_INTERRUPT
 an operation was interrupted
-.It Dv LERR_LIMIT
+.It Er LERR_LIMIT
 a software-defined limit has been reached
-.It Dv LERR_LISTLESS_TAIL
+.It Er LERR_LISTLESS_TAIL
 list tail-syntax
 .Dq ( \&. )
 not in a list
-.It Dv LERR_MISMATCH
+.It Er LERR_MISMATCH
 closing bracket did not match open bracket
-.It Dv LERR_MISSING
+.It Er LERR_MISSING
 a keytable or environment lookup failed
-.It Dv LERR_NONCHARACTER
+.It Er LERR_NONCHARACTER
 scanning UTF-8 encoding failed
-.It Dv LERR_OOM
+.It Er LERR_OOM
 out of memory
-.It Dv LERR_SYNTAX
+.It Er LERR_SYNTAX
 unrecognisable syntax (insufficient alone)
-.It Dv LERR_UNCLOSED_OPEN
+.It Er LERR_UNCLOSED_OPEN
 missing
 .Dq \&) ,
 .Dq \]
 or
 .Dq \&}
-.It Dv LERR_UNCOMBINABLE
+.It Er LERR_UNCOMBINABLE
 attempted to combine a non-program
-.It Dv LERR_UNDERFLOW
+.It Er LERR_UNDERFLOW
 a stack was popped too far
-.It Dv LERR_UNIMPLEMENTED
+.It Er LERR_UNIMPLEMENTED
 a feature is not implemented
-.It Dv LERR_UNOPENED_CLOSE
+.It Er LERR_UNOPENED_CLOSE
 premature
 .Dq \&( ,
 .Dq \[
 or
 .Dq \&{
-.It Dv LERR_UNSCANNABLE
+.It Er LERR_UNSCANNABLE
 parser encountered an invalid lexeme
 .El
 .Pp
 .Pp
 The constant
-.Dv LERR_NONE
+.Er LERR_NONE
 is also defined to be zero (0) and
-.Dv LERR_LENGTH
+.Er LERR_LENGTH
 the total number of error conditions (including
-.Dv LERR_NONE ) .
+.Er LERR_NONE ) .
