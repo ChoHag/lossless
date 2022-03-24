@@ -1,6 +1,12 @@
-To build:
+To build on OpenBSD:
 
-        make
+        make DEBUG=-DLDEBUG     # To enable stdio-based printing
+
+        Alternatively set it in the environment:
+        export DEBUG=-DLDEBUG
+
+        No optimisation and better debugging symbols are also helpful:
+        export DEBUG=-DLDEBUG -O0 -g
 
 Useful targets:
 
@@ -9,6 +15,8 @@ Useful targets:
         make liblossless.so     As a linkable object
 
         make ffi.perl           Perl wrapper
+
+        make test               Run losslees through a comprehensive test suite
 
 The available documentation can be read from within the development
 directory by updating MANPATH:
