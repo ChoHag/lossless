@@ -44,6 +44,38 @@ man/mandoc.db: always
 	makewhatis man
 
 
+dist: lossless-$(VERSION).tgz
+
+# TODO: check git status.
+lossless-$(VERSION).tgz: all
+	test -n "$(VERSION)" # make dist without $$(VERSION)!
+	make -C tmp/dist pack FROM=$$(pwd) VERSION=$(VERSION)
+	cp tmp/dist/lossless-$(VERSION).tgz .
+
+# TODO: pull latest source
+pack:
+	make clean
+	mkdir -p tmp
+	mkdir tmp/lossless-$(VERSION)
+	touch tmp/lossless-$(VERSION)/tmp
+	cp $(FROM)/*.pdf $(FROM)/*.[ch] tmp/lossless-$(VERSION)
+	cp -pR * tmp/lossless-$(VERSION) || true
+	rm -f tmp/lossless-$(VERSION)/tmp
+	mkdir tmp/lossless-$(VERSION)/tmp
+	tar -C tmp -cf- lossless-$(VERSION) | gzip -9c > lossless-$(VERSION).tgz
+
+clean:
+	rm -f core *.core *.idx *.idx-in *.log *.scn *.toc *.o
+	rm -f liblossless.so lossless
+	rm -f lossless.[ch] repl.c ffi.c
+	rm -f lossless.tex lossless.pdf
+	rm -f repl.tex repl.pdf
+	rm -f lossless*tgz
+	rm -fr t
+	rm -f man/mandoc.db
+	make -C perl clean
+	rm -f ffi.perl
+
 always:
 
 .SUFFIXES: .idx-in .idx .pdf .t .tex .w
@@ -74,23 +106,3 @@ repl.idx-in: repl.tex
 	else                                                               \
 		$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) lltest.o -o $@ $<;  \
 	fi
-
-dist: lossless.pdf $(SOURCES) $(OTHER_SOURCES) $(TEST_SOURCES)
-	d=$$(date +%s);                                              \
-	mkdir -p tmp/lossless-0.$$d/t;                               \
-	cp README* Makefile lossless.pdf *.[chw] tmp/lossless-0.$$d; \
-	cp t/*.[ch] tmp/lossless-0.$$d/t;                            \
-	rm -f tmp/lossless-0.$$d/*~ tmp/lossless-0.$$d/t/*~;         \
-	tar -C tmp -cf- lossless-0.$$d | gzip -9c > lossless-0.$$d.tgz
-
-clean:
-	rm -f core *.core *.idx *.idx-in *.log *.scn *.toc *.o
-	rm -f liblossless.so lossless *.o
-	rm -f lossless.[ch] repl.c ffi.c
-	rm -f lossless.tex lossless.pdf
-	rm -f repl.tex repl.pdf
-	rm -f lossless*tgz
-	rm -fr t
-	rm -f man/mandoc.db
-	make -C perl clean
-	rm -f ffi.perl

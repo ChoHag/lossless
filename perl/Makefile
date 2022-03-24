@@ -9,3 +9,4 @@ Makefile.xs: Makefile.PL typemap Lossless.xs lib/Lossless.pm
 
 clean: Makefile.xs
 	make -f Makefile.xs clean
+	rm -f Makefile.xs.old
