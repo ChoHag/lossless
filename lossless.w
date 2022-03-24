@@ -93,11 +93,6 @@ TODO: Remove headers which are no longer necessary.
 #include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
-#ifndef LTEST
-#define LALLOC realloc
-#else
-#define LALLOC fallible_realloc
-#endif
 
 @ The main product of this part of \Ls/ is a library for dynamic
 or static linking. Untitled sections are concatenated and included
@@ -448,17 +443,28 @@ garbage collection to reclaim any discarded atoms first (this is
 also when unused segments are returned to the master allocator).
 
 @<Fun...@>=
-void *mem_alloc (void *, size_t, sigjmp_buf *);
+void *mem_alloc (void *, size_t, size_t, sigjmp_buf *);
 
 @ @c
 void *
 mem_alloc (void       *old,
            size_t      length,
+           size_t      align,
            sigjmp_buf *failure)
 {
         void *r;
 
-        if ((r = LALLOC(old, length)) == NULL)
+        if (!align)
+                r = realloc(old, length);
+        else {
+                assert(old == NULL);
+                if (((align - 1) & align) != 0 || align == 0)
+                        siglongjmp(*failure, LERR_INCOMPATIBLE);
+                if ((length & (align - 1)) != 0)
+                        siglongjmp(*failure, LERR_INCOMPATIBLE);
+                r = aligned_alloc(align, length);
+        }
+        if (r == NULL)
                 siglongjmp(*failure, LERR_OOM);
         return r;
 }
@@ -843,7 +849,7 @@ into a compacting heap (and so it follows that the compacting code
 is largely untested).
 
 @<Init...@>=
-Theap = SEGMENT_TO_HEAP(segment_alloc(-1, HEAP_CHUNK, 1, failure));
+Theap = SEGMENT_TO_HEAP(segment_alloc(-1, HEAP_CHUNK, 1, HEAP_CHUNK, failure));
 heap_init_sweeping(Theap, NULL);
 segment_init(HEAP_TO_SEGMENT(Theap), heap_alloc(Theap, failure));
 Sheap = NULL;
@@ -946,7 +952,7 @@ heap_enlarge (Oheap      *heap,
         cell owner;
 
         if (heap->pair == NULL) {
-                snew = segment_alloc(-1, HEAP_CHUNK, 1, failure);
+                snew = segment_alloc(-1, HEAP_CHUNK, 1, HEAP_CHUNK, failure);
                 new = SEGMENT_TO_HEAP(snew);
                 heap_init_sweeping(new, heap);
                 owner = heap_alloc(new, failure);
@@ -954,8 +960,8 @@ heap_enlarge (Oheap      *heap,
                 pointer_set_m(owner, snew);
                 segment_set_owner_m(owner, owner);
         } else {
-                snew = segment_alloc(-1, HEAP_CHUNK, 1, failure);
-                spair = segment_alloc(-1, HEAP_CHUNK, 1, failure);
+                snew = segment_alloc(-1, HEAP_CHUNK, 1, HEAP_CHUNK, failure);
+                spair = segment_alloc(-1, HEAP_CHUNK, 1, HEAP_CHUNK, failure);
                 new = SEGMENT_TO_HEAP(snew);
                 pair = SEGMENT_TO_HEAP(spair);
                 heap_init_compacting(new, heap, pair);
@@ -989,10 +995,8 @@ heap_alloc (Oheap      *heap,
             sigjmp_buf *failure)
 {
         Oheap *h, *next;
-        int repeat;
         cell r;
 
-        repeat = 0;
         next = heap;
         if (heap->pair != NULL) {
 allocate_incrementing:
@@ -1220,7 +1224,7 @@ necessary or helpful.
 @<Type def...@>=
 struct Osegment { /* Must remain pointer-aligned. */
  struct Osegment *next, *prev; /* Linked list of all allocated segments. */
-        half length, stride; /* Notably absent: object header size. */
+        half length, stride; /* Notably absent: header size \AM\ alignment. */
         cell owner; /* The referencing atom; cleared and re-set during
                         garbage collection. */
         char address[]; /* Base address of the available space (occupies
@@ -1238,9 +1242,9 @@ list can be scanned for unused allocations to release.
 shared Osegment *Allocations = NULL;
 
 @ @<Fun...@>=
-Osegment *segment_alloc_imp (Osegment *, long, long, long, sigjmp_buf *);
+Osegment *segment_alloc_imp (Osegment *, long, long, long, long, sigjmp_buf *);
 cell segment_init (Osegment *, cell);
-cell segment_new_imp (Oheap *, long, long, long, Otag, sigjmp_buf *);
+cell segment_new_imp (Oheap *, long, long, long, long, Otag, sigjmp_buf *);
 void segment_release_imp (Osegment *, bool);
 void segment_release_m (cell, bool);
 cell segment_resize_m (cell, long, long, sigjmp_buf *);
@@ -1267,14 +1271,18 @@ performed appears as |size = sizeof (Osegment) + header + (length
 If the allocation is new then it's inserted at the end of the
 |Allocations| list.
 
-@d segment_alloc(H,L,S,F) segment_alloc_imp(NULL, (H), (L), (S), (F))
+TODO: These arguments should be |size_t| type.
+
+@.TODO@>
+@d segment_alloc(H,L,S,A,F) segment_alloc_imp(NULL, (H), (L), (S), (A), (F))
 @c
 Osegment *
-segment_alloc_imp (Osegment     *old,
-                   long          header,
-                   long          length,
-                   long          stride,@|
-                   sigjmp_buf   *failure)
+segment_alloc_imp (Osegment   *old,
+                   long        header,
+                   long        length,
+                   long        stride,@|
+                   long        align,
+                   sigjmp_buf *failure)
 {
         long cstride;
         size_t size;
@@ -1284,13 +1292,14 @@ segment_alloc_imp (Osegment     *old,
         if (header == -1)
                 header = - sizeof (Osegment);
         assert(old == NULL || stride == old->stride);
+        assert(align == 0 || old == NULL);
         cstride = stride ? stride : 1;
         if (length > HALF_MAX || stride > HALF_MAX ||@|
                     ckd_mul(&size, length, cstride) ||@|
                     ckd_add(&size, size, header) ||
                     ckd_add(&size, size, sizeof (Osegment)))
                 siglongjmp(*failure, LERR_OOM);
-        r = mem_alloc(old, size, failure);
+        r = mem_alloc(old, size, align, failure);
         r->length = length;
         if (old == NULL) {
                 r->stride = stride;
@@ -1311,13 +1320,18 @@ segment_alloc_imp (Osegment     *old,
 includes the support for creating an interned segment or it allocates
 the memory and returns a new atom pointing to it.
 
-@d segment_new(H,L,S,F) segment_new_imp(Theap, (H), (L), (S), FORM_SEGMENT, (F))
+TODO: These arguments should (probably) {\it not\/} be |size_t| but
+they should probably not be |long| either.
+
+@d segment_new(H,L,S,A,F) segment_new_imp(Theap, (H), (L), (S), (A),
+        FORM_SEGMENT, (F))
 @c
 cell
 segment_new_imp (Oheap      *heap,
                  long        header,
                  long        length,
                  long        stride,
+                 long        align,
                  Otag        ntag,@|
                  sigjmp_buf *failure)
 {
@@ -1336,7 +1350,7 @@ segment_new_imp (Oheap      *heap,
                 return r;
         }
         Tmp_ier = atom(heap, NIL, NIL, FORM_PAIR, failure);
-        s = segment_alloc(header, length, stride, failure);
+        s = segment_alloc(header, length, stride, align, failure);
         TAG_SET_M(Tmp_ier, ntag);
         ATOM_TO_ATOM(Tmp_ier)->sin = (cell) s;
         s->owner = Tmp_ier;
@@ -1395,7 +1409,8 @@ segment_resize_m (cell        o,
                 old = segbuf_base(o);
                 nstride = segment_stride(o);
                 segment_release_m(o, false);
-                new = segment_alloc_imp(old, header, nlength, nstride, failure);
+                new = segment_alloc_imp(old, header, nlength, nstride, 0,
+                        failure);
                 pointer_set_m(o, new);
                 return o;
         }
@@ -1405,7 +1420,7 @@ segment_resize_m (cell        o,
         Tmp_ier = o;
         if (failure_p(reason = sigsetjmp(cleanup, 1)))
                 unwind(failure, reason, true, 0);
-        r = segment_new(0, nlength, 0, &cleanup);
+        r = segment_new(0, nlength, 0, 0, &cleanup);
         if (segment_length(Tmp_ier) < nlength)
                 nlength = segment_length(Tmp_ier);
         for (i = 0; i < nlength; i++)
@@ -1531,13 +1546,12 @@ gc_sweeping (Oheap *heap,
         size_t count, remain;
         int i;
         Oatom *a;
-        Oheap *last, *p;
+        Oheap *p;
 
-        assert(heap == Theap || Sheap != NIL && heap == Sheap);
+        assert((heap == Theap) || ((Sheap != NIL) && (heap == Sheap)));
         count = remain = 0;
         p = heap;
         while (p != NULL) {
-                last = p;
                 remain += HEAP_LENGTH;
                 p = p->next;
         }
@@ -1570,7 +1584,10 @@ gc_sweeping (Oheap *heap,
         return remain - count;
 }
 
-@ @c
+@
+
+@.TODO@>% see warning
+@c
 size_t
 gc_compacting (Oheap *heap,
                bool   segments)
@@ -1579,7 +1596,7 @@ gc_compacting (Oheap *heap,
         int i;
         Oheap *last, *p;
 
-        assert(heap == Theap || Sheap != NIL && heap == Sheap);
+        assert((heap == Theap) || ((Sheap != NIL) && (heap == Sheap)));
         count = remain = 0;
         p = heap;
         while (p != NULL) {
@@ -1601,7 +1618,8 @@ gc_compacting (Oheap *heap,
         while (p != NULL) {
                 p->pair->free = HEAP_TO_LAST(p->pair);
                 for (i = 0; i < HEAP_LENGTH; i--) {
-                        ATOM_TO_TAG(--p->pair->free) = FORM_NONE;
+                        ATOM_TO_TAG(--p->pair->free) = FORM_NONE; /* warning:
+                                operation on |p->pair->free| may be undefined */
                         p->pair->free->sin = p->pair->free->dex = NIL;
                 }
                 p->pair->pair = p;
@@ -1901,7 +1919,8 @@ array_new_imp (long        length,
         if (failure_p(reason = sigsetjmp(cleanup, 1)))
                 unwind(failure, reason, true, 0);
         Tmp_ier = fill; /* Safe because |segment_new_imp| won't use |Tmp_ier|. */
-        r = segment_new_imp(Theap, 0, length, sizeof (cell), ntag, &cleanup);
+        r = segment_new_imp(Theap, 0, length, sizeof (cell),
+                sizeof (cell), ntag, &cleanup);
         if (defined_p(Tmp_ier) && length > 0) {
                 array_set_m(r, 0, Tmp_ier);
                 for (i = 1; i < length; i++)
@@ -1911,7 +1930,10 @@ array_new_imp (long        length,
         return r;
 }
 
-@ @c
+@ I think the interface between this and |segment_resize_m| kept
+growing bugs which is why they are currently independent.
+
+@c
 cell
 array_grow (cell        o,
             long        delta,
@@ -2225,7 +2247,7 @@ shared cell Symbol_Table = NIL;
 shared int Symbol_Buffer_Free = 0, Symbol_Table_Free = 0;
 
 @ @<Init...@>=
-Symbol_Buffer = segment_new_imp(Theap, 0, SYMBOL_CHUNK, sizeof (char),
+Symbol_Buffer = segment_new_imp(Theap, 0, SYMBOL_CHUNK, sizeof (char), 0,
         FORM_SEGMENT, failure);
 memset(segment_address(Symbol_Buffer), '\0', SYMBOL_CHUNK); /* off-by-many? */
 Symbol_Table = keytable_new(0, failure);
@@ -2833,7 +2855,7 @@ record_new (cell        record_form,    /* The record form. */
         r = array_new_imp(array_length + 1, NIL, FORM_RECORD, &cleanup);
         if (segment_length > 0) {
                 SS(Sret, r);
-                tmp = segment_new(0, segment_length, 1, &cleanup);
+                tmp = segment_new(0, segment_length, 1, 0, &cleanup);
                 pointer_set_datum_m(tmp, SO(Sform));
                 r = SO(Sret);
                 array_set_m(r, 0, tmp);
@@ -2854,16 +2876,16 @@ continue the theme {\it utfh\/} is UTF-Hexadecimal or UTF-16 and
 @d UCP_MAX 0x10ffff
 @<Global...@>=
 struct {
-	char size; /* How many bits are supplied by this byte. */
-	char data; /* Mask: Encoded bits. */
-	char lead; /* Mask: Leading bits which will be set. */
-        long max; /* Maximum code-point value this many bytes can encode. */
+        char size;    /* How many bits are supplied by this byte. */
+        uint8_t data; /* Mask: Encoded bits. */
+        uint8_t lead; /* Mask: Leading bits which will be set. */
+        int32_t max;  /* Maximum code-point value this many bytes can encode. */
 } UTFIO[] = {@|
-	{ 6, 0x3f, 0x80, 0x000000 }, /* Continuation byte. */@t\iII@>
-	{ 7, 0x7f, 0x00, 0x00007f }, /* Single ASCII byte. */@t\iII@>
-	{ 5, 0x1f, 0xc0, 0x0007ff }, /* Start of 2-byte encoding. */@t\iII@>
-	{ 4, 0x0f, 0xe0, 0x00ffff }, /* Start of 3-byte encoding. */@t\iII@>
-	{ 3, 0x07, 0xf0, 0x10ffff }, /* Start of 4-byte encoding. */@t\iII@>
+        { 6, 0x3f, 0x80, 0x000000 }, /* Continuation byte. */@t\iII@>
+        { 7, 0x7f, 0x00, 0x00007f }, /* Single ASCII byte. */@t\iII@>
+        { 5, 0x1f, 0xc0, 0x0007ff }, /* Start of 2-byte encoding. */@t\iII@>
+        { 4, 0x0f, 0xe0, 0x00ffff }, /* Start of 3-byte encoding. */@t\iII@>
+        { 3, 0x07, 0xf0, 0x10ffff }, /* Start of 4-byte encoding. */@t\iII@>
 @t\4\4@>};
 
 @ Going into the parser from |UTFIO_COMPLETE| (ie.~0) will exit in
@@ -3140,7 +3162,7 @@ rope_node_new_length (bool        sinward,
         stack_protect(2, nsin, ndex, failure);
         if (failure_p(reason = sigsetjmp(cleanup, 1)))
                 unwind(failure, reason, false, 2);
-        r = segment_new(sizeof (Orope), length, 0, &cleanup);
+        r = segment_new(sizeof (Orope), length, 0, 0, &cleanup);
         r = dryad_node_new(false, sinward, dexward, r, SO(Snsin),
                 SO(Sndex), &cleanup);
         rope_cplength(r) = rope_glength(r) = -1;
@@ -4766,6 +4788,10 @@ lexar(SO(Silex))->cplength = 0;
 analyser state clones are used to create the three lexemes covering
 the string and its delimiters.
 
+TODO: gcc warns that |irope| and |idelim| are set but not used ---
+are they a holdover from earlier buggier days?
+
+@.TODO@>
 @<Finish and return a raw string/symbol combination@>=
 irope = rope_iter(lexar_iterator(SO(Silex)));
 idelim = rope_iter(lexar_iterator(SO(Sedelim)));
@@ -5452,7 +5478,7 @@ case LEXICAT_SYMBOL:
                 parse_fail(Sfail, LERR_AMBIGUOUS, z, &cleanup);
         } else {
                 a = lexeme(lex)->blength;
-                SS(Sbuild, x = segment_new(0, a, 0, &cleanup));
+                SS(Sbuild, x = segment_new(0, a, 0, 0, &cleanup));
                 buf = segment_address(x);
                 lex = dlist_datum(SO(Sllex));
                 x = rope_iterate_start(lexeme_twine(lex),
@@ -5590,7 +5616,7 @@ transform_lexeme_segment (cell        o,
                 length -= offset + 1;
         while (offset--)
                 rope_iterate_next_byte(SO(Siter), &cleanup);
-        SS(Sdst, segment_new(0, length, 0, &cleanup));
+        SS(Sdst, segment_new(0, length, 0, 0, &cleanup));
         buf = segment_address(SO(Sdst));
         @<Copy, transforming, |length| bytes after |offset|@>@;
         r = SO(Sdst);
@@ -6550,7 +6576,7 @@ void breakpoint (void);
 void
 breakpoint (void)
 {
-        printf("");
+        printf("Why did we ever allow GNU?\n");
 }
 
 @ (define! <env> <sym> <expr>)
@@ -7491,23 +7517,19 @@ high_bit (digit o)
 }
 
 @ @<Repair the system headers@>=
-#ifndef Lunused
-#       ifdef __GNUC__ /* \AM\ clang */
-#               define Lunused __attribute__ ((__unused__))
-#       else
-#               define Lunused /* noisy compiler */
-#       endif
+#ifdef __GNUC__ /* \AM\ clang */
+#       define Lunused __attribute__ ((__unused__))
+#else
+#       define Lunused /* noisy compiler */
 #endif
 
-#ifndef Lnoreturn
-#       ifdef __GNUC__ /* \AM clang */
-#               define Lnoreturn __attribute__ ((__noreturn__))
+#ifdef __GNUC__ /* \AM clang */
+#       define Lnoreturn __attribute__ ((__noreturn__))
+#else
+#       ifdef _Noreturn
+#               define Lnoreturn _Noreturn
 #       else
-#               ifdef _Noreturn
-#                       define Lnoreturn _Noreturn
-#               else
-#                       define Lnoreturn /* noisy compiler */
-#               endif
+#               define Lnoreturn /* noisy compiler */
 #       endif
 #endif
 

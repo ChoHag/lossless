@@ -2,7 +2,7 @@ CTANGLE?= ctangle
 CWEAVE?=  cweave
 PDFTEX?=  pdftex
 TEST?=    prove
-CFLAGS+=  -Wall -Wpedantic -Wextra -I. -fPIC
+CFLAGS+=  -Wall -Wpedantic -Wextra -Wno-implicit-fallthrough -I. -fPIC
 LDFLAGS+= -lpthread -ledit -lcurses
 TFLAGS+=  -v
 
@@ -28,8 +28,9 @@ $(BIN_OBJECTS): $(BIN_SOURCES)
 $(LIB_OBJECTS): $(LIB_SOURCES)
 
 
+# The LDFLAGS are repeated here to build on linux; there's likely a better way
 lossless: lossless.o $(BIN_OBJECTS)
-	$(LINK.c) -o lossless lossless.o $(BIN_OBJECTS)
+	$(LINK.c) lossless.o $(BIN_OBJECTS) $(LDFLAGS) -o lossless
 
 liblossless.so: lossless.o $(LIB_OBJECTS)
 	$(LINK.c) -shared -o liblossless.so lossless.o $(LIB_OBJECTS)

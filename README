@@ -1,0 +1,40 @@
+To build:
+
+        make
+
+Useful targets:
+
+        make lossless           Lossless executable
+
+        make liblossless.so     As a linkable object
+
+        make ffi.perl           Perl wrapper
+
+The available documentation can be read from within the development
+directory by updating MANPATH:
+
+        MANPATH=:$PWD/man
+
+        make man/mandoc.db      Rebuild the manual pages' index
+
+Dependencies:
+
+        C compiler
+        TeX *
+        CWEB *
+
+        The makefile has been tuned to work equally with BSD and GNU make.
+
+        The REPL, which is very much a work in progress, depends on the
+        editline library built into BSD.
+
+CWEB and TeX are both part of the astronomically huge TeX Live
+distribution. The necessary parts can be installed on OpenBSD with
+"pkg_add texlive_texmf-minimal". Debian-based Linux distributions
+require "texlive-extra-utils". Reports for other systems and
+distributions are welcome --- the file you need which will ultimately
+pull in all the necessary TeX parts is "cwebmac.tex".
+
+[*] Optional; TeX is required to produce the PDF files which aren't
+needed to build and run lossless and CWEB generates the C source
+and header files which are already included in the tarball distribution.

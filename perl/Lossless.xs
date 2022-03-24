@@ -7,14 +7,13 @@
 
 #include "lossless.h"
 
-#define llcatch(INSTR) do {                                 \
-        Verror reason;                                      \
-        sigjmp_buf catch;                                   \
-                                                            \
-        if (failure_p(reason = sigsetjmp(catch, 1)))        \
-                Perl_croak("Lossless error %d: %s", reason, \
-                        Ierror[reason].message);            \
-        (INSTR);                                            \
+#define llcatch(INSTR) do {                                                     \
+        Verror reason;                                                          \
+        sigjmp_buf catch;                                                       \
+                                                                                \
+        if (failure_p(reason = sigsetjmp(catch, 1)))                            \
+                croak("Lossless error %d: %s", reason, Ierror[reason].message); \
+        (INSTR);                                                                \
 } while (0)
 
 #define llassign(EXPR) llcatch(RETVAL = (EXPR))
