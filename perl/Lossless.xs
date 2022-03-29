@@ -77,24 +77,24 @@ cell evaluate (cell o)
 ##
 cell lapi_env_search (cell o, cell e = NIL)
         CODE:
-                llassign(env_search(e, o, true, &catch));
+                llassign(env_search(e, o, &catch));
         OUTPUT: RETVAL
 
 void lapi_env_define (cell n, cell v, cell e = NIL)
         CODE:
-                llcatch(env_define(e, n, v, &catch));
+                llcatch(env_define_m(e, n, v, &catch));
 
 void lapi_env_set (cell n, cell v, cell e = NIL)
         CODE:
-                llcatch(env_set(e, n, v, &catch));
+                llcatch(env_set_m(e, n, v, &catch));
 
 void lapi_env_unset (cell n, cell e = NIL)
         CODE:
-                llcatch(env_unset(e, n, &catch));
+                llcatch(env_unset_m(e, n, &catch));
 
 void lapi_env_clear (cell n, cell e = NIL)
         CODE:
-                llcatch(env_clear(e, n, &catch));
+                llcatch(env_clear_m(e, n, &catch));
 
 ##
 cell rope_new (SV *o, bool thread_sin = false, bool thread_dex = false)
