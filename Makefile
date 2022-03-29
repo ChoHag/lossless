@@ -32,12 +32,16 @@ repl.c: repl.w
 lossless.o: lossless.c lossless.h
 ffi.o: ffi.c lossless.h
 repl.o: repl.c lossless.h
-lossless.pdf: lossless.idx
+lossless.pdf: lossless.idx llfig-1.pdf
 lossless.idx-in: lossless.tex
 lossless.tex: lossless.w
 repl.pdf: repl.idx
 repl.idx-in: repl.tex
 repl.tex: repl.w
+
+llfig-1.pdf: llfig.mp
+	mpost llfig.mp
+	mptopdf llfig.?
 
 # Compilers:
 # The LDFLAGS are repeated here to build on linux; there's likely a better way
@@ -95,7 +99,7 @@ clean:
 
 .w.tex:
 	$(CWEAVE) $< - $@
-	mv $$(echo $< | sed s/.w$$//).idx $$(echo $< | sed s/.w$$//).idx-in
+	src="$<"; mv "$${src%.w}.idx" "$${src%.w}.idx-in"
 
 # Remove single-letter and merge identical identifiers.
 .idx-in.idx:

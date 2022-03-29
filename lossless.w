@@ -22,6 +22,7 @@
 \def\iII{\hskip2em}
 \def\iIV{\hskip4em}
 \def\iI{\hskip1em}
+\def\epdf#1{\pdfximage{#1}\pdfrefximage\pdflastximage}% Why isn't this provided?
 \def\qc{$\rangle\!\rangle$}
 \def\qo{$\langle\!\langle$}
 \def\to{{$\rightarrow$}}
@@ -308,7 +309,7 @@ typedef enum {
         LERR_LIMIT,          /* A software-defined limit has been reached. */
         LERR_LISTLESS_TAIL,  /* List tail-syntax (\..) not in a list. */
         LERR_MISMATCH,       /* Closing bracket did not match open bracket. */
-        LERR_MISSING,        /* A keytable or environment lookup failed. */
+        LERR_MISSING,        /* A hash table or environment lookup failed. */
         LERR_NONCHARACTER,   /* Scanning UTF-8 encoding failed. */
         LERR_OOM,            /* Out of memory. */
         LERR_OVERFLOW,       /* Attempt to access past the end of a buffer. */
@@ -627,13 +628,14 @@ atoms' tags will be one of the other values here.
 @d FORM_ARRAY             (LTAG_NONE | 0x01)
 @d FORM_COLLECTED         (LTAG_NONE | 0x02)
 @d FORM_FIX               (LTAG_NONE | 0x03)
-@d FORM_HEAP              (LTAG_NONE | 0x04)
-@d FORM_KEYTABLE          (LTAG_NONE | 0x05)
+@d FORM_HASHTABLE         (LTAG_NONE | 0x04)
+@d FORM_HEAP              (LTAG_NONE | 0x05)
 @d FORM_RECORD            (LTAG_NONE | 0x06)
-@d FORM_RUNE              (LTAG_NONE | 0x07)
-@d FORM_SEGMENT_INTERN    (LTAG_NONE | 0x08)
-@d FORM_SYMBOL            (LTAG_NONE | 0x09)
-@d FORM_SYMBOL_INTERN     (LTAG_NONE | 0x0a)
+@d FORM_RECORD_INDEX      (LTAG_NONE | 0x07)
+@d FORM_RUNE              (LTAG_NONE | 0x08)
+@d FORM_SEGMENT_INTERN    (LTAG_NONE | 0x09)
+@d FORM_SYMBOL            (LTAG_NONE | 0x0a)
+@d FORM_SYMBOL_INTERN     (LTAG_NONE | 0x0b)
 @#
 @d FORM_PRIMITIVE         (LTAG_DDEX | 0x00)
 @d FORM_SEGMENT           (LTAG_DDEX | 0x01)
@@ -676,9 +678,10 @@ somewhat compensate for this the format of any |cell| arguments to
 @d null_array_p(O)        ((O) == Null_Array)
 @d collected_p(O)         (form_p((O), COLLECTED))
 @d environment_p(O)       (form_p((O), ENVIRONMENT))
-@d keytable_p(O)          (form_p((O), KEYTABLE) || null_array_p(O))
+@d hashtable_p(O)         (form_p((O), HASHTABLE) || null_array_p(O))
 @d note_p(O)              (form_p((O), NOTE))
 @d record_p(O)            (form_p((O), RECORD))
+@d record_index_p(O)      (form_p((O), RECORD_INDEX))
 @d rune_p(O)              (form_p((O), RUNE))
 @#
 @d segment_intern_p(O)    (form_p((O), SEGMENT_INTERN))
@@ -689,8 +692,9 @@ somewhat compensate for this the format of any |cell| arguments to
 @d symbol_p(O)            (symbol_intern_p(O) || symbol_stored_p(O))
 @#
 @d character_p(O)         (eof_p(O) || rune_p(O))
-@d arraylike_p(O)         (array_p(O) || keytable_p(O) || record_p(O))
-@d pointer_p(O)           (segment_stored_p(O) || arraylike_p(O) || form_p((O), HEAP))
+@d arraylike_p(O)         (array_p(O) || hashtable_p(O) || record_p(O))
+@d pointer_p(O)           (segment_stored_p(O) || symbol_stored_p(O) ||
+        arraylike_p(O) || form_p((O), HEAP))
 @#
 @d primitive_p(O)         (form_p((O), PRIMITIVE))
 @d closure_p(O)           (form_p((O), APPLICATIVE) || form_p((O), OPERATIVE))
@@ -1191,7 +1195,7 @@ necessary or helpful.
                       (lcdr_set_m((O), (cell) (D)))
 @d pointer_set_m(O,D) (lcar_set_m((O), (cell) (D)))
 @#
-@d segint_p(O)        (segment_intern_p(O))
+@d segint_p(O)        (segment_intern_p(O) || symbol_intern_p(O))
 @d segint_address(O)  (segint_base(O)->buffer)
 @d segint_base(O)     ((Ointern *) (O))
 @d segint_header(O)   ((long) 0)
@@ -1344,8 +1348,11 @@ segment_new_imp (Oheap      *heap,
         if (ckd_add(&total, header, length))
                 siglongjmp(*failure, LERR_LIMIT);
         if (stride == 0 && total <= INTERN_BYTES) {
-                assert(ntag == FORM_SEGMENT);
-                r = atom(heap, NIL, NIL, FORM_SEGMENT_INTERN, failure);
+                if (ntag == FORM_SEGMENT)
+                        ntag = FORM_SEGMENT_INTERN;
+                else
+                        assert(ntag == FORM_SYMBOL_INTERN);
+                r = atom(heap, NIL, NIL, ntag, failure);
                 segint_set_length_m(r, length);
                 return r;
         }
@@ -1475,7 +1482,7 @@ which are explained as they are introduced.
 enum {
         LGCR_TMPSIN, LGCR_TMPDEX, LGCR_TMPIER,@/
         LGCR_NULL,@/
-        LGCR_SYMBUFFER, LGCR_SYMTABLE,@/
+        LGCR_SYMTABLE,@/
         LGCR_STACK,@/
         LGCR_PROTECT_0, LGCR_PROTECT_1, LGCR_PROTECT_2, LGCR_PROTECT_3,@/
         LGCR_EXPRESSION, LGCR_ENVIRONMENT, LGCR_ACCUMULATOR, LGCR_ARGUMENTS,
@@ -1502,7 +1509,6 @@ Registers[LGCR_TMPSIN]      = &Tmp_SIN;
 Registers[LGCR_TMPDEX]      = &Tmp_DEX;
 Registers[LGCR_TMPIER]      = &Tmp_ier;
 Registers[LGCR_NULL]        = &Null_Array;
-Registers[LGCR_SYMBUFFER]   = &Symbol_Buffer;
 Registers[LGCR_SYMTABLE]    = &Symbol_Table;
 Registers[LGCR_STACK]       = &Stack;
 Registers[LGCR_PROTECT_0]   = Protect + 0;
@@ -2027,7 +2033,11 @@ array_set_m (cell o,
         array_address(o)[idx] = d;
 }
 
-@* Key-Based Lookup Table. K\AM R hash function as adapted by pdksh.
+@* Symbols \AM\ Tables. All symbols are saved in the global
+|Symbol_Table|. Their location is determined by calculating a hash
+over the symbol's label. The hash calculation function used here
+was originally written by K\AM R and was copied from pdksh (as was
+most of the table implementation).
 
 @<Type def...@>=
 typedef uint32_t Vhash;
@@ -2075,53 +2085,85 @@ hash_buffer (char       *buf,
         return r;
 }
 
-@ Maybe store meta-tuple's length in segment's other ``unused'' field, |stride|.
+@ To distinguish them from database tables (relations) the array
+used by hashes for constant-time search is called a hash table.
+When used casually the term hash may usually refers to the hash
+table but may also mean the hash value.
 
-@d KEYTABLE_MINLENGTH         8
-@d KEYTABLE_MAXLENGTH         (INT_MAX >> 1)
+A hash table works best when the array is not allowed to get too
+full (increasing the liklihood of collisions) so an array one cell
+longer than specified is allocated and the last element records how
+many cells remain unused.
+
+|Null_Array| can masquerade as an empty hash table.
+
+@d HASHTABLE_MINLENGTH          8
+@d HASHTABLE_MAXLENGTH          (INT_MAX >> 1)
 @#
-@d keytable_free(O)           (null_array_p(O) ? 0 :
+@d hashtable_blocked(O)         (null_array_p(O) ? 0 :
+        fix_value(array_ref((O), array_length(O) - 2)))
+@d hashtable_free(O)            (null_array_p(O) ? 0 :
         fix_value(array_ref((O), array_length(O) - 1)))
-@d keytable_free_p(O)         (keytable_free(O) > 0)
-@d keytable_length(O)         (null_array_p(O) ? (long) 0 : array_length(O) - 1)
-@d keytable_ref(O,I)          (array_ref((O), (I)))
-@d keytable_set_free_m(O,V)   (array_set_m((O), array_length(O) - 1, fix(V)))
+@d hashtable_blocked_p(O)       (hashtable_blocked(O) > 0)
+@d hashtable_free_p(O)          (hashtable_free(O) > 0)
+@d hashtable_length(O)          (null_array_p(O) ? (long) 0 : array_length(O) - 2)
+@d hashtable_ref(O,I)           (array_ref((O), (I)))
+@d hashtable_set_blocked_m(O,V) (array_set_m((O), array_length(O) - 2, fix(V)))
+@d hashtable_set_free_m(O,V)    (array_set_m((O), array_length(O) - 1, fix(V)))
 @<Fun...@>=
-cell keytable_new (long, sigjmp_buf *);
-cell keytable_enlarge_m (cell, Vhash (*)(cell, sigjmp_buf *), sigjmp_buf *);
-void keytable_remove_m (cell, long);
-void keytable_save_m (cell, long, cell);
-int keytable_search (cell, Vhash, int (*)(cell, void *, sigjmp_buf *), void *, sigjmp_buf *);
+cell hashtable_delete_m (cell, cell, cell, bool, sigjmp_buf *);
+cell hashtable_enlarge_m (cell, Vhash (*)(cell, sigjmp_buf *), sigjmp_buf *);
+cell hashtable_insert_m (cell, cell, cell, bool, sigjmp_buf *);
+int hashtable_match (cell, void *, sigjmp_buf *);
+cell hashtable_new_imp (long, sigjmp_buf *);
+Vhash hashtable_rehash (cell, sigjmp_buf *);
+void hashtable_remove_m (cell, long);
+cell hashtable_replace_m (cell, cell, cell, bool, sigjmp_buf *);
+void hashtable_save_m (cell, long, cell);
+int hashtable_scan (cell, Vhash, int (*)(cell, void *, sigjmp_buf *),
+        void *, sigjmp_buf *);
+cell hashtable_search (cell, cell, sigjmp_buf *);
+cell hashtable_set_imp (cell, cell, cell, Vmaybe, sigjmp_buf *);
 
-@ @c
+@ If the table is small enough then the cost of a hash collision
+is low so it is permitted to fill up otherwise the number of cells
+free is set to $\lfloor70\%\rfloor$ of the array's size.
+
+@d hashtable_new(L,F) ((L) == 0 ? Null_Array : hashtable_new_imp((L), (F)))
+@c
 cell
-keytable_new (long        length,
-              sigjmp_buf *failure)
+hashtable_new_imp (long        length,
+                   sigjmp_buf *failure)
 {
         cell r;
         long f;
 
-        assert(length >= 0);
-        if (length >= KEYTABLE_MAXLENGTH)
+        assert(length > 0);
+        if (length >= HASHTABLE_MAXLENGTH)
                 siglongjmp(*failure, LERR_LIMIT);
-        else if (length == 0)
-                f = 0;
-        else if (length <= KEYTABLE_MINLENGTH)
-                f = (length = KEYTABLE_MINLENGTH) - 1;
+        else if (length <= HASHTABLE_MINLENGTH)
+                f = (length = HASHTABLE_MINLENGTH) - 2;
         else
                 f = (7 * (length = 1 << (high_bit(length) - 1))) / 10;
-        if (length == 0)
-                return Null_Array;
-        r = array_new_imp(length + 1, NIL, FORM_KEYTABLE, failure);
-        keytable_set_free_m(r, f);
+        r = array_new_imp(length + 2, NIL, FORM_HASHTABLE, failure);
+        hashtable_set_blocked_m(r, 0);
+        hashtable_set_free_m(r, f);
         return r;
 }
 
-@ @c
+@ If a value is being inserted into the hash table but it has reached
+capacity then it gets enlarged to the next power-of-two size and
+its contents are re-distributed.
+
+TODO: Shrink the table if there are sufficient blocked cells (or
+in delete).
+
+@.TODO@>
+@c
 cell
-keytable_enlarge_m (cell        o,
-                    Vhash     (*hashfn)(cell, sigjmp_buf *),
-                    sigjmp_buf *failure)
+hashtable_enlarge_m (cell        o,
+                     Vhash     (*hashfn)(cell, sigjmp_buf *),
+                     sigjmp_buf *failure)
 {
         static int Sobject = 1, Sret = 0;
         cell r = NIL, s;
@@ -2131,26 +2173,28 @@ keytable_enlarge_m (cell        o,
         sigjmp_buf cleanup;
         Verror reason = LERR_NONE;
 
-        assert(keytable_p(o));
-        nlength = keytable_length(o);
+        assert(hashtable_p(o));
+        nlength = hashtable_length(o);
         if (nlength >= (INT_MAX >> 2))
                 siglongjmp(*failure, LERR_LIMIT);
         if (nlength == 0)
-                nlength = KEYTABLE_MINLENGTH;
-        else
-                nlength <<= 1;
+                nfree = (nlength = HASHTABLE_MINLENGTH) - 2;
+        else {
+                if (!hashtable_blocked_p(o))
+                        nlength <<= 1;
+                nfree = (7 * nlength) / 10; /* $\lfloor70\%\rfloor$ */
+        }
         stack_protect(2, o, NIL, failure);
         if (failure_p(reason = sigsetjmp(cleanup, 1)))
                 unwind(failure, reason, false, 2);
-        SS(Sret, r = keytable_new(nlength, &cleanup));
-        nfree = (7 * nlength) / 10; /* $\lfloor70\%\rfloor$ */
-        for (i = 0; i < keytable_length(SO(Sobject)); i++)
+        SS(Sret, r = hashtable_new(nlength, &cleanup));
+        for (i = 0; i < hashtable_length(SO(Sobject)); i++)
                 if (Interrupt)
                         siglongjmp(cleanup, LERR_INTERRUPT);
-                else if (!null_p((s = array_ref(SO(Sobject), i)))) {
+                else if (!null_p((s = array_ref(SO(Sobject), i))) && defined_p(s)) {
                         nhash = hashfn(s, &cleanup);
                         for (j = nhash % nlength;
-                            !null_p(keytable_ref(r, j));
+                            !null_p(hashtable_ref(r, j));
                             j--)
                                 if (j == 0)
                                         j = nlength - 1;
@@ -2158,124 +2202,261 @@ keytable_enlarge_m (cell        o,
                         nfree--;
                 }
         r = SO(Sret);
-        keytable_set_free_m(r, nfree);
+        hashtable_set_blocked_m(r, 0);
+        hashtable_set_free_m(r, nfree);
         stack_clear(2);
         return r;
 }
 
-@ @c
-void
-keytable_save_m (cell o,
-                 long idx,
-                 cell datum)
-{
-        assert(keytable_p(o));
-        assert(idx >= 0 && idx < keytable_length(o));
-        assert(keytable_free_p(o));
-        assert(null_p(keytable_ref(o, idx)));
-        array_set_m(o, idx, datum);
-        keytable_set_free_m(o, keytable_free(o) - 1);
-}
-
-@ @c
-void
-keytable_remove_m (cell o,
-                   long idx)
-{
-        int i, j;
-
-        assert(keytable_p(o));
-        assert(idx >= 0 && idx < keytable_length(o));
-        assert(!null_p(keytable_ref(o, idx)));
-        i = idx;
-        while (1) {
-                j = i - 1;
-                if (j == 0)
-                        j = keytable_length(o) - 1;
-                array_set_m(o, i, array_ref(o, j));
-                if (null_p(keytable_ref(o, i)))
-                        break;
-                i = j;
-        }
-        keytable_set_free_m(o, keytable_free(o) + 1);
-}
-
-@ Return value must not be used if |*failure == LERR_MISSING &&
-keytable_full_p(o)|.
+@ If the location indicated by a hash value is in use the next
+unused array element is located and returned, {\it regardless\/}
+of whether the table is full.
 
 @c
 int
-keytable_search (cell        o,
-                 Vhash       hash,
-                 int       (*match)(cell, void *, sigjmp_buf *),
-                 void       *ctx,
-                 sigjmp_buf *failure)
+hashtable_scan (cell        o,
+                Vhash       hash,
+                int       (*match)(cell, void *, sigjmp_buf *),
+                void       *ctx,
+                sigjmp_buf *failure)
 {
         int p, r;
 
-        assert(keytable_p(o));
+        assert(hashtable_p(o));
         if (null_array_p(o))
                 return FAIL;
-        for (r = hash % keytable_length(o);
-                    !null_p(keytable_ref(o, r));
+        for (r = hash % hashtable_length(o);
+                    !null_p(hashtable_ref(o, r));
                     r--) {
-                p = match(keytable_ref(o, r), ctx, failure);
-                if (p == 0)
-                        return r;
+                if (defined_p(hashtable_ref(o, r))) {
+                        p = match(hashtable_ref(o, r), ctx, failure);
+                        if (p == 0)
+                                return r;
+                }
                 if (r == 0)
-                        r = keytable_length(o) - 1;
+                        r = hashtable_length(o) - 1;
         }
         return r;
 }
 
-@* Symbols. |Symbol_Table| looks up symbols by hash. |symbol_buffer|
-stores |TAG_SYMBOL| content, atom has length/buffer-offset.
-|TAG_SYMBOL_HERE| has length in first byte of car, content in rest
-of car/cdr pair.
+@ If the table has space remaining (possibly after having been
+enlarged to make some) the space located by |hashtable_scan| can be
+claimed.
 
-@d SYMBOL_CHUNK         0x1000
-@d SYMBOL_MAX           INT_MAX
-@d SYMBOL_BUFFER_MAX    LONG_MAX
-@d Symbol_Buffer_Length (segment_length(Symbol_Buffer))
-@d Symbol_Buffer_Base   ((char *) segment_address(Symbol_Buffer))
-@d Symbol_Table_Length  (keytable_length(Symbol_Table))
-@d Symbol_Table_ref(i)  (keytable_ref(Symbol_Table, (i)))
+@c
+void
+hashtable_save_m (cell o,
+                  long idx,
+                  cell datum)
+{
+        assert(hashtable_p(o));
+        assert(idx >= 0 && idx < hashtable_length(o));
+        assert(hashtable_free_p(o));
+        assert(null_p(hashtable_ref(o, idx)));
+        array_set_m(o, idx, datum);
+        hashtable_set_free_m(o, hashtable_free(o) - 1);
+}
+
+@ If a value is removed from a hash table then it will no longer
+participate in a collision which may have caused another value to
+have been stored out-of-place.
+
+Rather than shuffling everything below the removed item as this
+algorithm does, causing a yet-to-be-discovered bug, the removed
+entry ought to be replaced with a sentinel and the number of them
+counted against the need to enlarge when there is no free space.
+
+@c
+void
+hashtable_remove_m (cell o,
+                    long idx)
+{
+        assert(hashtable_p(o));
+        assert(idx >= 0 && idx < hashtable_length(o));
+        assert(!null_p(hashtable_ref(o, idx)));
+        assert(defined_p(hashtable_ref(o, idx)));
+        array_set_m(o, idx, UNDEFINED);
+        hashtable_set_blocked_m(o, hashtable_blocked(o) + 1);
+        hashtable_set_free_m(o, hashtable_free(o) + 1);
+}
+
+@ The symbol table associates a hash value computed from a symbol
+label to a symbol atom. A hash table is made to associate a symbol
+with an arbitrary object, for use in environments (below) or as a
+run-time data structure, by storing a pair with the symbol in one
+half and the datum in the other.
+
+Insertion and replacement are the same except for whether the entry
+must or must not already be present.
+
+@c
+cell
+hashtable_insert_m (cell        o,
+                    cell        label,
+                    cell        datum,
+                    bool        permissive,
+                    sigjmp_buf *failure)
+{
+        assert(defined_p(datum));
+        return hashtable_set_imp(o, label, datum,
+                (permissive ? CAN : CANNOT), failure);
+}
+
+cell
+hashtable_replace_m (cell        o,
+                     cell        label,
+                     cell        datum,
+                     bool        permissive,
+                     sigjmp_buf *failure)
+{
+        assert(defined_p(datum));
+        return hashtable_set_imp(o, label, datum,
+                (permissive ? CAN : MUST), failure);
+}
+
+@ |masked| is carried as a cell to match the \CEE/ function signature
+of insert \AM\ replace.
+
+@c
+cell
+hashtable_delete_m (cell        o,
+                    cell        label,
+                    cell        masked,
+                    bool        permissive,
+                    sigjmp_buf *failure)
+{
+        int idx;
+
+        assert(symbol_p(label));
+        assert(boolean_p(masked));
+        if (true_p(masked))
+                hashtable_set_imp(o, label, UNDEFINED, MUST, failure);
+        else {
+                idx = hashtable_search(o, label, failure);
+                if (idx == FAIL || null_p(hashtable_ref(o, idx))) {
+                        if (!permissive)
+                                siglongjmp(*failure, LERR_MISSING);
+                } else
+                        hashtable_remove_m(o, idx);
+        }
+        return o;
+}
+
+@ @c
+cell
+hashtable_set_imp (cell        o,
+                   cell        label,
+                   cell        datum,
+                   Vmaybe      replace,
+                   sigjmp_buf *failure)
+{
+        static int Sobject = 2, Slabel = 1, Sdatum = 0;
+        cell r, table;
+        Vhash hash;
+        long idx;
+        sigjmp_buf cleanup;
+        Verror reason = LERR_NONE;
+
+        assert(hashtable_p(o));
+        assert(symbol_p(label));
+        /* |datum| validated by caller --- in particular it could be |UNDEFINED|. */
+        stack_protect(3, o, label, datum, failure);
+        if (failure_p(reason = sigsetjmp(cleanup, 1)))
+                unwind(failure, reason, false, 3);
+        hash = symbol_hash(SO(Slabel));
+again:
+        table = SO(Sobject);
+        idx = hashtable_scan(table, hash, hashtable_match,
+                (void *) SO(Slabel), &cleanup);
+        if (idx == FAIL || null_p(hashtable_ref(table, idx))) {
+                if (replace == MUST)
+                        siglongjmp(*failure, LERR_MISSING);
+                if (!hashtable_free_p(table)) {
+                        SS(Sobject, hashtable_enlarge_m(table,
+                                hashtable_rehash, &cleanup));
+                        goto again;
+                }
+        } else if (replace == CANNOT)
+                siglongjmp(*failure, LERR_EXISTS);
+        hashtable_save_m(SO(Sobject), idx, cons(SO(Slabel), SO(Sdatum),
+                &cleanup));
+        r = SO(Sobject);
+        stack_clear(3);
+        return r;
+}
+
+@ @c
+int
+hashtable_match (cell        binding,
+                 void       *ctx,
+                 sigjmp_buf *failure @[Lunused@])
+{
+        cell maybe = (cell) ctx;
+
+        assert(symbol_p(maybe));
+        assert(pair_p(binding));
+        assert(symbol_p(lcar(binding)));
+        return ((lcar(binding) == maybe) ? 0 : -1);
+}
+
+@ @c
+Vhash
+hashtable_rehash (cell        o,
+                  sigjmp_buf *failure @[Lunused@])
+{
+        assert(pair_p(o) && symbol_p(lcar(o)));
+        return symbol_hash(lcar(o));
+}
+
+@ @c
+cell
+hashtable_search (cell        o,
+                  cell        label,
+                  sigjmp_buf *failure)
+{
+        cell r;
+        long idx;
+
+        assert(hashtable_p(o));
+        assert(symbol_p(label));
+        idx = hashtable_scan(o, symbol_hash(label), hashtable_match,
+                (void *) label, failure);
+        if (idx == FAIL)
+                return UNDEFINED;
+        r = hashtable_ref(o, idx);
+        if (null_p(r))
+                return UNDEFINED;
+        else
+                return r;
+}
+
+@ @d SYMBOL_MAX        INT_MAX
+@d Symbol_Table_ref(I) (hashtable_ref(Symbol_Table, (I)))
 @#
 @<Global...@>=
-shared cell Symbol_Buffer = NIL;
 shared cell Symbol_Table = NIL;
-shared int Symbol_Buffer_Free = 0, Symbol_Table_Free = 0;
 
 @ @<Init...@>=
-Symbol_Buffer = segment_new_imp(Theap, 0, SYMBOL_CHUNK, sizeof (char), 0,
-        FORM_SEGMENT, failure);
-memset(segment_address(Symbol_Buffer), '\0', SYMBOL_CHUNK); /* off-by-many? */
-Symbol_Table = keytable_new(0, failure);
+Symbol_Table = hashtable_new(0, failure);
 
 @ @<Fun...@>=
-int symbol_table_cmp (cell, void *, sigjmp_buf *);
+int symbol_table_match (cell, void *, sigjmp_buf *);
 long symbol_table_search (Vhash, Osymbol_compare, sigjmp_buf *);
 Vhash symbol_table_rehash (cell s, sigjmp_buf *);
 cell symbol_new_buffer (char *, long, sigjmp_buf *);
 cell symbol_new_imp (Vhash, char  *, long, sigjmp_buf *);
 
-@ @d symint_p(O)            (symbol_intern_p(O))
-@d symint_length(O)         (((Ointern *) (O))->length)
-@d symint_buffer(O)         (((Ointern *) (O))->buffer)
-@d symint_hash(O)           (hash_buffer(symint_buffer(O),
-        symint_length(O), NULL))
+@ @d symint_base(O) ((Osymbol *) NULL)
+@d symint_buffer(O) ((char *) segment_address(O))
+@d symint_hash(O)   (hash_buffer(symbol_buffer(O), symbol_length(O), NULL))
 @#
-@d symbuf_length(O)         ((long) lcar(O))
-@d symbuf_set_length_m(O,V) (lcar_set_m((O), (V)))
-@d symbuf_offset(O)         ((long) lcdr(O))
-@d symbuf_set_offset_m(O,V) (lcdr_set_m((O), (V)))
-@d symbuf_store(O)          ((Osymbol *) (Symbol_Buffer_Base + symbuf_offset(O)))
-@d symbuf_buffer(O)         (symbuf_store(O)->buffer)
-@d symbuf_hash(O)           (symbuf_store(O)->hash)
+@d symbuf_base(O)   ((Osymbol *) segment_address(O))
+@d symbuf_buffer(O) (symbuf_base(O)->buffer)
+@d symbuf_hash(O)   (symbuf_base(O)->hash)
 @#
-@d symbol_length(O)         (symint_p(O) ? symint_length(O) : symbuf_length(O))
-@d symbol_buffer(O)         (symint_p(O) ? symint_buffer(O) : symbuf_buffer(O))
-@d symbol_hash(O)           (symint_p(O) ? symint_hash(O) : symbuf_hash(O))
+@d symbol_buffer(O) (symbol_intern_p(O) ? symint_buffer(O) : symbuf_buffer(O))
+@d symbol_hash(O)   (symbol_intern_p(O) ? symint_hash(O) : symbuf_hash(O))
+@d symbol_length(O) (segment_length(O))
 @<Type def...@>=
 typedef struct {
         Vhash hash;
@@ -2287,28 +2468,26 @@ typedef struct {
         int   length;
 } Osymbol_compare;
 
-@ Might need to be made interruptable.
-
-@c
+@ @c
 int
-symbol_table_cmp (cell        sym,
-                  void       *ctx,
-                  sigjmp_buf *failure)
+symbol_table_match (cell        symbol,
+                    void       *ctx,
+                    sigjmp_buf *failure)
 {
         Osymbol_compare *scmp = ctx;
         int i;
 
-        assert(symbol_p(sym));
-        if (symbol_length(sym) > scmp->length)
+        assert(symbol_p(symbol));
+        if (symbol_length(symbol) > scmp->length)
                 return 1;
-        if (symbol_length(sym) < scmp->length)
+        if (symbol_length(symbol) < scmp->length)
                 return 1;
         for (i = 0; i < scmp->length; i++) {
                 if (Interrupt)
                         siglongjmp(*failure, LERR_INTERRUPT);
-                if (symbol_buffer(sym)[i] > scmp->buf[i])
+                if (symbol_buffer(symbol)[i] > scmp->buf[i])
                         return 1;
-                if (symbol_buffer(sym)[i] < scmp->buf[i])
+                if (symbol_buffer(symbol)[i] < scmp->buf[i])
                         return 1;
         }
         return 0;
@@ -2320,7 +2499,8 @@ symbol_table_search (Vhash           hash,
                      Osymbol_compare scmp,
                      sigjmp_buf     *failure)
 {
-        return keytable_search(Symbol_Table, hash, symbol_table_cmp, &scmp, failure);
+        return hashtable_scan(Symbol_Table, hash, symbol_table_match,
+                &scmp, failure);
 }
 
 @ @c
@@ -2337,7 +2517,7 @@ symbol_table_rehash (cell        s,
 
 @ @d symbol_new_segment(O,F) (symbol_new_buffer(segment_address(O),
         segment_length(O), (F)))
-@d symbol_new_const(O)       (symbol_new_buffer((O), 0, NULL))
+@d symbol_new_const(O)       (symbol_new_buffer((O), -1, NULL))
 @c
 cell
 symbol_new_buffer (char       *buf,
@@ -2346,8 +2526,8 @@ symbol_new_buffer (char       *buf,
 {
         Vhash hash;
 
-        assert(length >= 0);
-        if (length == 0)
+        assert(length >= -1);
+        if (length == -1)
                 hash = hash_cstr(buf, &length, failure);
         else
                 hash = hash_buffer(buf, length, failure);
@@ -2363,62 +2543,35 @@ symbol_new_imp (Vhash       hash,
                 long        length,
                 sigjmp_buf *failure)
 {
-        static int Sret = 0;
         cell new, r = NIL;
-        int boff, i, size, idx;
+        int i, idx;
         Osymbol_compare scmp = { buf, length };
-        sigjmp_buf cleanup;
-        Verror reason = LERR_NONE;
 
         assert(length >= 0);
 search:
         idx = symbol_table_search(hash, scmp, failure);
-        if (idx == FAIL || (null_p(keytable_ref(Symbol_Table, idx)) &&
-                    !keytable_free_p(Symbol_Table))) {
-                new = keytable_enlarge_m(Symbol_Table, symbol_table_rehash, failure);
+        if (idx == FAIL || (null_p(hashtable_ref(Symbol_Table, idx)) &&
+                    !hashtable_free_p(Symbol_Table))) {
+                new = hashtable_enlarge_m(Symbol_Table, symbol_table_rehash, failure);
                 Symbol_Table = new;
                 goto search;
         }
-        if (!null_p(keytable_ref(Symbol_Table, idx)))
-                return keytable_ref(Symbol_Table, idx);
+        if (!null_p(hashtable_ref(Symbol_Table, idx)))
+                return hashtable_ref(Symbol_Table, idx);
 @#
-        stack_reserve(1, failure);
-        if (failure_p(reason = sigsetjmp(cleanup, 1)))
-                unwind(failure, reason, false, 1);
-        if (length <= WIDE_BYTES - 1) {
-                @<Create an interned symbol@>
-        } else {
-                @<Create a buffered symbol@>
+        if (length <= INTERN_BYTES)
+                r = segment_new_imp(Theap, 0, length, 0, 0,
+                        FORM_SYMBOL_INTERN, failure);
+        else {
+                r = segment_new_imp(Theap, sizeof (Osymbol), length, 0, 0,
+                        FORM_SYMBOL, failure);
+                symbuf_base(r)->hash = hash;
         }
-        keytable_save_m(Symbol_Table, idx, r);
-        stack_clear(1);
+        for (i = 0; i < length; i++)
+                symbol_buffer(r)[i] = buf[i];
+        hashtable_save_m(Symbol_Table, idx, r);
         return r;
 }
-
-@ @<Create an interned symbol@>=
-SS(Sret, r = atom(Theap, NIL, NIL, FORM_SYMBOL_INTERN, &cleanup));
-symint_length(r) = length;
-for (i = 0; i < length; i++)
-        symbol_buffer(r)[i] = buf[i];
-
-@ @<Create a buffered symbol@>=
-if (ckd_add(&size, sizeof (Osymbol), length))
-        siglongjmp(*failure, LERR_LIMIT);
-while (size > Symbol_Buffer_Length ||
-            Symbol_Buffer_Length - size < Symbol_Buffer_Free) {
-        if (Symbol_Buffer_Length >= SYMBOL_BUFFER_MAX)
-                siglongjmp(*failure, LERR_LIMIT);
-        new = segment_resize_m(Symbol_Buffer, 0, SYMBOL_CHUNK, &cleanup);
-        Symbol_Buffer = new;
-}
-boff = Symbol_Buffer_Free;
-Symbol_Buffer_Free += sizeof (Osymbol) + length;
-SS(Sret, r = atom(Theap, NIL, NIL, FORM_SYMBOL, &cleanup));
-symbuf_set_offset_m(r, boff);
-symbuf_set_length_m(r, length);
-symbuf_hash(r) = hash;
-for (i = 0; i < length; i++)
-        symbol_buffer(r)[i] = buf[i];
 
 @* Trees \AM\ Double-Linked Lists.
 
@@ -3526,24 +3679,19 @@ fail:
         siglongjmp(*failure, reason);
 }
 
-@* Environments.
+@* Environments. An environment is a hash table with a link to
+another hash table which it descended from.
 
 @ @d env_layer(O)           (lcdr(O))
 @d env_previous(O)          (lcar(O))
 @d env_replace_layer_m(O,E) (lcdr_set_m((O), (E)))
 @d env_root_p(O)            (environment_p(O) && null_p(env_previous(O)))
 @<Fun...@>=
-Vhash env_rehash (cell, sigjmp_buf *);
-void env_clear (cell, cell, sigjmp_buf *);
-cell env_define (cell, cell, cell, sigjmp_buf *);
-cell env_extend (cell, sigjmp_buf *);
-cell env_here (cell, cell, sigjmp_buf *);
-int env_match (cell, void *, sigjmp_buf *);
+cell env_search (cell, cell, sigjmp_buf *);
 cell env_new_imp (cell, sigjmp_buf *);
-cell env_search (cell, cell, bool, sigjmp_buf *);
-cell env_set (cell, cell, cell, sigjmp_buf *);
-cell env_set_imp (cell, cell, cell, bool, sigjmp_buf *);
-cell env_unset (cell, cell, sigjmp_buf *);
+cell env_extend (cell, sigjmp_buf *);
+void env_set_imp (cell (*)(cell, cell, cell, bool, sigjmp_buf *), cell,
+        cell, cell, sigjmp_buf *);
 
 @ @d env_empty(F)   (env_new_imp(NIL, (F)))
 @c
@@ -3559,7 +3707,7 @@ env_new_imp (cell        o,
         stack_protect(1, o, failure);
         if (failure_p(reason = sigsetjmp(cleanup, 1)))
                 unwind(failure, reason, false, 1);
-        r = keytable_new(0, &cleanup);
+        r = hashtable_new(0, &cleanup);
         r = atom(Theap, SO(Sobject), r, FORM_ENVIRONMENT, &cleanup);
         stack_clear(1);
         return r;
@@ -3574,161 +3722,47 @@ env_extend (cell        o,
         return env_new_imp(o, failure);
 }
 
-@ @c
-Vhash
-env_rehash (cell        o,
-            sigjmp_buf *failure @[Lunused@])
-{
-        assert(pair_p(o) && symbol_p(lcar(o)));
-        return symbol_hash(lcar(o));
-}
-
-@ @c
-int
-env_match (cell        binding,
-           void       *ctx,
-           sigjmp_buf *failure @[Lunused@])
-{
-        cell maybe = (cell) ctx;
-
-        assert(symbol_p(maybe));
-        assert(pair_p(binding));
-        assert(symbol_p(lcar(binding)));
-        return lcar(binding) == maybe ? 0 : -1;
-}
-
-@ @c
-cell
-env_set_imp (cell        where,
+@ @d env_define_m(E,L,D,F) (env_set_imp(hashtable_insert_m, (E), (L), (D), (F)))
+@d env_set_m(E,L,D,F) (env_set_imp(hashtable_replace_m, (E), (L), (D), (F)))
+@d env_unset_m(E,L,F) (env_set_imp(hashtable_delete_m, (E), (L), LTRUE, (F)))
+@d env_clear_m(E,L,F) (env_set_imp(hashtable_delete_m, (E), (L), LFALSE, (F)))
+@c
+void
+env_set_imp (cell      (*method)(cell, cell, cell, bool, sigjmp_buf *),
+             cell        o,
              cell        label,
              cell        datum,
-             bool        new_p,
              sigjmp_buf *failure)
 {
-        static int Swhere = 3, Slabel = 2, Sdatum = 1, Stable = 0;
-        cell table, r = NIL;
-        Vhash hash;
-        long idx;
+        static int Sobject = 2, Slabel = 1, Sdatum = 0;
+        cell table;
         sigjmp_buf cleanup;
         Verror reason = LERR_NONE;
 
-        assert(environment_p(where));
-        assert(symbol_p(label));
-        /* |datum| validated by caller --- in particular it could be |UNDEFINED|. */
-        stack_protect(4, where, label, datum, NIL, failure);
+        assert(environment_p(o));
+        stack_protect(3, o, label, datum, failure);
         if (failure_p(reason = sigsetjmp(cleanup, 1)))
-                unwind(failure, reason, false,4);
-        hash = symbol_hash(SO(Slabel));
-again:
-        SS(Stable, (table = env_layer(SO(Swhere))));
-        idx = keytable_search(table, hash, env_match, (void *) SO(Slabel), &cleanup);
-        if (idx == FAIL || null_p(keytable_ref(table, idx))) {
-                if (!new_p)
-                        siglongjmp(*failure, LERR_MISSING);
-                if (!keytable_free_p(table)) {
-                        table = keytable_enlarge_m(table, env_rehash, &cleanup);
-                        env_replace_layer_m(SO(Swhere), table);
-                        goto again;
-                }
-        } else if (new_p)
-                siglongjmp(*failure, LERR_EXISTS);
-        r = cons(SO(Slabel), SO(Sdatum), &cleanup);
-        keytable_save_m(SO(Stable), idx, r);
-        r = keytable_ref(SO(Stable), idx);
-        stack_clear(4);
-        return r;
+                unwind(failure, reason, false, 3);
+        table = method(env_layer(SO(Sobject)), SO(Slabel), SO(Sdatum),
+                false, failure);
+        env_replace_layer_m(SO(Sobject), table);
+        stack_clear(3);
 }
 
 @ @c
 cell
-env_define (cell        where,
+env_search (cell        o,
             cell        label,
-            cell        datum,
-            sigjmp_buf *failure)
-{
-        assert(defined_p(datum));
-        return env_set_imp(where, label, datum, true, failure);
-}
-
-@ @c
-cell
-env_set (cell        where,
-         cell        label,
-         cell        datum,
-         sigjmp_buf *failure)
-{
-        assert(defined_p(datum));
-        return env_set_imp(where, label, datum, false, failure);
-}
-
-@ @c
-cell
-env_unset (cell        where,
-           cell        label,
-           sigjmp_buf *failure)
-{
-        return env_set_imp(where, label, UNDEFINED, false, failure);
-}
-
-@ @c
-void
-env_clear (cell        where,
-           cell        label,
-           sigjmp_buf *failure)
-{
-        cell table;
-        Vhash hash;
-        long idx;
-
-        assert(environment_p(where));
-        assert(symbol_p(label));
-        hash = symbol_hash(label);
-        table = env_layer(where);
-        idx = keytable_search(table, hash, env_match, (void *) label, failure);
-        if (idx != FAIL && !null_p(keytable_ref(table, idx)))
-                keytable_remove_m(table, idx);
-}
-
-@ @c
-cell
-env_here (cell        haystack,
-          cell        needle,
-          sigjmp_buf *failure)
-{
-        cell r = NIL;
-        long idx;
-
-        assert(environment_p(haystack));
-        assert(symbol_p(needle));
-        idx = keytable_search(env_layer(haystack), symbol_hash(needle),
-                env_match, (void *) needle, failure);
-        if (idx == FAIL)
-                return NIL;
-        r = keytable_ref(env_layer(haystack), idx);
-        if (null_p(r) || undefined_p(lcdr(r)))
-                return NIL;
-        else
-                return r;
-}
-
-@ @d env_look(H,N,F) env_search((H), (N), false, (F))
-@c
-cell
-env_search (cell        haystack,
-            cell        needle,
-            bool        ascend,
             sigjmp_buf *failure)
 {
         cell r;
 
-        assert(environment_p(haystack));
-        assert(symbol_p(needle));
-        for (; !null_p(haystack); haystack = env_previous(haystack)) {
-                r = env_here(haystack, needle, failure);
-                if (!null_p(r))
-                        return lcdr(r);
-                else if (!ascend)
-                        break;
+        assert(environment_p(o));
+        assert(symbol_p(label));
+        for (; !null_p(o); o = env_previous(o)) {
+                r = hashtable_search(env_layer(o), label, failure);
+                if (defined_p(r))
+                        return lcdr(r); /* May be |UNDEFINED|! */
         }
         return UNDEFINED;
 }
@@ -3944,36 +3978,7 @@ syntax_new_imp (cell        datum,
 
 @* Annotated pairs. These are used by the evaluator (below) to keep
 track of its partial work. The evaluator should probably be refactored
-to use syntax nodes instead. At least they should use a numeric
-identifier rather than a \Ls/ symbol to avoid this horrific API:
-
-@.TODO@>
-@d Sym_APPLICATIVE      (symbol_new_const("APPLICATIVE"))
-@d Sym_COMBINE_APPLY    (symbol_new_const("COMBINE-APPLY"))
-@d Sym_COMBINE_BUILD    (symbol_new_const("COMBINE-BUILD"))
-@d Sym_COMBINE_DISPATCH (symbol_new_const("COMBINE-DISPATCH"))
-@d Sym_COMBINE_FINISH   (symbol_new_const("COMBINE-FINISH"))
-@d Sym_COMBINE_OPERATE  (symbol_new_const("COMBINE-OPERATE"))
-@d Sym_CONDITIONAL      (symbol_new_const("CONDITIONAL"))
-@d Sym_DEFINITION       (symbol_new_const("DEFINITION"))
-@d Sym_EVALUATE_DISPATCH       (symbol_new_const("EVALUATE-DISPATCH"))
-@d Sym_SAVE_AND_EVALUATE       (symbol_new_const("SAVE-ENVIRONMENT-AND-EVALUATE"))
-@d Sym_ENVIRONMENT_P    (symbol_new_const("ENVIRONMENT?"))
-@d Sym_ENVIRONMENT_M    (symbol_new_const("ENVIRONMENT!"))
-@d Sym_EVALUATE         (symbol_new_const("EVALUATE"))
-@d Sym_OPERATIVE        (symbol_new_const("OPERATIVE"))
-@<Prepare con...@>=
-(void) Sym_APPLICATIVE;
-(void) Sym_COMBINE_APPLY;
-(void) Sym_COMBINE_BUILD;
-(void) Sym_COMBINE_DISPATCH;
-(void) Sym_COMBINE_FINISH;
-(void) Sym_COMBINE_OPERATE;
-(void) Sym_CONDITIONAL;
-(void) Sym_DEFINITION;
-(void) Sym_EVALUATE;
-(void) Sym_ENVIRONMENT_P;
-(void) Sym_OPERATIVE;
+to use syntax nodes instead.
 
 @ @d note(O)           (lcar(O))
 @d note_pair(O)        (lcdr(O))
@@ -4075,22 +4080,24 @@ and speed is not of the essence.} until the evaluation process
 A primitive is a block of \CEE/ code identified by a |Vprimitive|,
 an integer offset into an array of |Oprimitive| objects, |Iprimitive|.
 
+@d PRIMITIVE_PREFIX           4
+@#
 @d primitive(O)               (fix_value(lcar(O)))
 @d primitive_label(O)         (lcdr(O))
 @d primitive_base(O)          (&Iprimitive[primitive(O)])
-@d primitive_applicative_p(O) (primitive_p(O) && primitive_base(O)->applicative)
-@d primitive_operative_p(O)   (primitive_p(O) && !primitive_base(O)->applicative)
+@d primitive_applicative_p(O) (primitive_p(O) &&
+        (primitive_base(O)->schema[0] >= '0') &&
+        (primitive_base(O)->schema[0] <= '9'))
+@d primitive_operative_p(O)   (primitive_p(O) && !primitive_applicative_p(O))
 @<Type def...@>=
 typedef enum {@+
-        @<Symbolic primitive identifiers@>@;@+
+        @<Primitive \CEE/ symbols@>@;@+
         PRIMITIVE_LENGTH@+
 } Vprimitive;
 
 typedef struct {
-        char *label; /* \Ls/ binding. */
+        char *schema; /* \Ls/ binding \AM\ signature. */
         cell  box; /* Heap storage. */
-        bool  applicative; /* Or operative? */
-        char  min, max; /* Minimum and/or maximum required arguments. */
 } Oprimitive;
 
 @#
@@ -4108,7 +4115,7 @@ establishing any closures and is what's returned by \.{(root-environment)}.
 
 @<Global...@>=
 Oprimitive Iprimitive[] = {
-        @<Primitive definitions@>
+        @<Primitive schemata@>
 };
 
 shared cell Root = NIL;
@@ -4116,9 +4123,9 @@ shared cell Root = NIL;
 @ @<Register primitive operators@>=
 Root = env_empty(failure);
 for (i = 0; i < PRIMITIVE_LENGTH; i++) {
-        x = symbol_new_const(Iprimitive[i].label);
+        x = symbol_new_const(Iprimitive[i].schema + PRIMITIVE_PREFIX);
         x = Iprimitive[i].box = atom(Theap, fix(i), x, FORM_PRIMITIVE, failure);
-        env_define(Root, primitive_label(x), x, failure);
+        env_define_m(Root, primitive_label(x), x, failure);
 }
 
 @** Compute.
@@ -5010,19 +5017,6 @@ false_symbol:
         lexar_putback(Silex);@+
         goto symbol;
 
-@ When scanning a number the analyser, for readability's sake the
-analyer allows sequential digits to be separated by an underscore
-rune \qo\.\_\qc. Although readability's sake dictates that this
-would be used every third rune or so the reality is that \Ls/ must
-accept more. When a \.\_ rune is permissable |want_digit| is set
-to the false value |CAN| and when it is not to the truth |MUST|.
-When not only can a \.\_ be accepted but neither can a digit it is
-set to the other truth |CANNOT|.
-
-@d CANNOT -1
-@d CAN 0
-@d MUST 1
-
 @ Curious numbers aside, numbers might not be a number --- the
 not-a-number symbol, or this block is jumped into by signed
 $\pm$\.{nan} (see above). |has_ratio| is set to ensure that a \..
@@ -5086,7 +5080,16 @@ finish:@;
         }
         return dlist_datum(SO(Sret));
 
-@ All types of scanning for number eventually end up here, which
+@ When scanning a number the analyser, for readability's sake the
+analyer allows sequential digits to be separated by an underscore
+rune \qo\.\_\qc. Although readability's sake dictates that this
+would be used every third rune or so the reality is that \Ls/ must
+accept more. When a \.\_ rune is permissable |want_digit| is set
+to the false value |CAN| and when it is not to the truth |MUST|.
+When not only can a \.\_ be accepted but neither can a digit it is
+set to the other truth |CANNOT|.
+
+All types of scanning for number eventually end up here, which
 checks that a digit's representation fits within the current base
 or permits a lone \.\_ to pass, toggling |want_digit|.
 
@@ -5746,21 +5749,19 @@ case LEXICAT_RECURSE_IS:
         break;
 
 @* Evaluator. The evaluator is based distantly on that presented
-by Steele and Sussman in ``Design of LISP-Based Processors'.
+by Steele and Sussman in ``Design of LISP-Based Processors''.
 
 There are five registers used by the evaluator. The argument to
 |evaluate| --- the expression which is to be computed --- is saved
 in |Expression| (|EXPR|) and with |Arguments| (|ARGS|) they represent
-the state of the data being evaluated.  Alongside those |Control_Link|
+the state of the data being evaluated. Alongside those |Control_Link|
 (|CLINK|) then represents the state of the computation evaluating
 it in the form of a stack of partial work to later resume.
 
 The run-time's current environment is in |Environment| (|ENV|) and
 the result of computation (or the partial result while computation
-is incomplete) in the |Accumulator| |ACC|.
-
-As a general rule the shorter names are used within the evaluator
-to avoid being overwhelmed by verbosity.
+is incomplete) in the |Accumulator| |ACC|. The shorter names are
+defined for convenience.
 
 @d ACC   Accumulator
 @d ARGS  Arguments
@@ -5775,114 +5776,74 @@ unique cell Environment = NIL;
 unique cell Expression = NIL;
 
 @ The accumulator (the answer) is the only part of the evaluator
-externally visible.
+externally visible. This should perhaps be replaced by a return
+value from |evaluate| (TODO)?
 
+@.TODO@>
 @<Extern...@>=
 extern unique cell Accumulator;
-extern unique cell Environment;
 
-@ @d evaluate_desyntax(O) (syntax_p(O) ? syntax_datum(O) : (O))
-@d evaluate_incompatible(L,F) do {
-        lprint("incompatibility at line %d\n", (L));
-        siglongjmp(*(F), LERR_INCOMPATIBLE);
-} while (0)
-@<Fun...@>=
+@ @<Fun...@>=
 void evaluate (cell, sigjmp_buf *);
 void evaluate_program (cell, sigjmp_buf *);
-void combine (sigjmp_buf *);
 void validate_formals (bool, sigjmp_buf *);
 void validate_arguments (sigjmp_buf *);
 void validate_operative (sigjmp_buf *);
-void validate_primitive (sigjmp_buf *);
 
-@ Evaluation begins by saving the whole expression in |Arguments|.
-The control link and arguments registers must be empty.
+@ The closure-constructing primitives \.{lambda} \AM\ \.{vov} and
+the sequencing operator \.{do} are integral to the evaluator. We
+also include the debugging aids \.{break} and \.{dump}. Curiously
+the primitives \.{if} and \.{eval} do not occupy this hallowed
+ground --- they are run-of-the mill operators no more special than
+\.{cons} or \.{define!}.
+ 
+@<Primitive \C...@>=
+PRIMITIVE_BREAK,@/
+PRIMITIVE_DO,@/
+PRIMITIVE_DUMP,@/
+PRIMITIVE_LAMBDA,@/
+PRIMITIVE_VOV@&,@/
 
-The evaluation algorithm is written here taking very little advantage
-of syntax \CEE/ offers, not even passing the result of one function
-as the direct argument of another. This is primarily because that's
-how the algorithm was originally written by Sussman \AM\ Steele
-(their goal was to write code to be translated directly to silicon)
-however it is also easier to describe and, in the author's opinion,
-understand than it would be if it were presented in a ``higher-level''
-form than what is effectively dressed up machine code.
+@ @<Primitive schema...@>=
+[PRIMITIVE_BREAK]  = { "00__break",  NIL, },@/
+[PRIMITIVE_DO]     = { ":___do",     NIL, },@/
+[PRIMITIVE_DUMP]   = { "11__dump",   NIL, },@/
+[PRIMITIVE_LAMBDA] = { "!:__lambda", NIL, },@/
+[PRIMITIVE_VOV]    = { "!:__vov",    NIL, }@&,@/
 
-The algorithm as a whole consists of labeled chunks (as they will
-be referred to) of code which terminate by branching to another
-chunk. There is no ``returning'' to a partially-complete chunk.
-With few exceptions each chunk either carries out the next stage
-of evaluation or performs a conditional jump into another section
-(this is a restriction useful\footnote{$^1$}{I expect.} to silicon
-which is not necessary in \CEE/ but remains for familiarity).
+@ While building and debugging the evaluator it has proven invaluable
+to get a trace of the activity but it is exceptionally noisy. However
+\Ls/ is still in development so the macro is still here, disabled.
 
-Broadly speaking the algorithm takes the form of a loop starting
-at the |Begin| chunk after the expression to evaluate has been
-prepared in |Expression|. |Begin| dispatches based on the format
-of the expression --- symbols are looked up in the environment,
-pairs are combined and re-evaluated and other atoms remain themselves.
-After evaluation is complete control will proceed to either |Finish|
-or |Return| and |evaluate| will |return| if computation has indeed
-finished, or dispatch to another chunk as directed by the head of
-the control link stack.
+@d LOG(cmd) cmd
+@d DONTLOG(cmd) do { printf("%s\n", #cmd); cmd; } while (0)
+@<Primitive imp...@>=
+case PRIMITIVE_DUMP:
+        lprint("DUMP ");
+        LOG(next_argument(ACC, ARGS));
+        serial(ACC, SERIAL_DETAIL, 42, NIL, NULL, failure);
+        lprint("\n");
+case PRIMITIVE_BREAK:
+        breakpoint();
+        break;
 
-@.TODO@>
-@c
-void
-evaluate (cell        o,
-          sigjmp_buf *failure)
-{
-
-        assert(null_p(CLINK) && null_p(ARGS));
-        assert(environment_p(ENV));
-@#
-        EXPR = o;
-        LOG(ACC = VOID);
-Begin:@;
-        EXPR = evaluate_desyntax(EXPR);
-        if (pair_p(EXPR))         goto Combine_Start;
-        else if (!symbol_p(EXPR)) goto Finish;
-        LOG(ACC = env_search(ENV, EXPR, true, failure));
-        if (undefined_p(ACC)) {
-                lprint("looking for ");
-                serial(EXPR, SERIAL_ROUND, 1, NIL, NULL, failure);
-                lprint("\n");
-                LOG(ACC = VOID);
-                siglongjmp(*failure, LERR_MISSING);
-        }
-        goto Return;
-
-Evaluate:
-        LOG(EXPR = note_car(CLINK));
-        LOG(CLINK = note_cdr(CLINK));
-        goto Begin;
-
-        @t\4@>@<Evaluate a complex expression@>@;
-
-Finish:
-        LOG(ACC = EXPR);
-Return: /* Check |CLINK| to see if there is more work after one full evaluation. */
-        if (null_p(CLINK))
-                return; /* |Accumulator| (|ACC|) has the result. */
-        else if (!note_p(CLINK))                       siglongjmp(*failure, LERR_INTERNAL);
-        else if (note(CLINK) == Sym_EVALUATE)          goto Evaluate;
-        else if (note(CLINK) == Sym_COMBINE_APPLY)     goto Combine_Apply;
-        else if (note(CLINK) == Sym_COMBINE_BUILD)     goto Applicative_Build;
-        else if (note(CLINK) == Sym_COMBINE_DISPATCH)  goto Combine_Dispatch;
-        else if (note(CLINK) == Sym_COMBINE_FINISH)    goto Combine_Finish;
-        else if (note(CLINK) == Sym_COMBINE_OPERATE)   goto Combine_Operate;
-        else if (note(CLINK) == Sym_OPERATIVE)         goto Operative_Closure;
-        else if (note(CLINK) == Sym_APPLICATIVE)       goto Applicative_Closure;
-        else if (note(CLINK) == Sym_CONDITIONAL)       goto Conditional;
-        else if (note(CLINK) == Sym_ENVIRONMENT_P)     goto Validate_Environment;
-        else if (note(CLINK) == Sym_EVALUATE_DISPATCH) goto Evaluate_Dispatch;
-        else if (note(CLINK) == Sym_SAVE_AND_EVALUATE) goto Save_And_Evaluate;
-        else if (note(CLINK) == Sym_ENVIRONMENT_M)     goto Restore_Environment;
-        else if (note(CLINK) == Sym_DEFINITION)        goto Mutate_Environment;
-        else
-                siglongjmp(*failure, LERR_INTERNAL); /* Unknown note. */
-}
+@ @<Fun...@>=
+void breakpoint (void);
 
 @ @c
+void
+breakpoint (void)
+{
+        printf("Why did we ever allow GNU?\n");
+}
+
+@ The entry point to the evaluator is |evaluate| and |evaluate_program|
+which calls |evaluate| after first prepending the \.{(do)} primitive
+--- the \Ls/ syntax parser returns a list of expressions and without
+\.{do} it would be evaluated as a single expression rather than a
+sequence.
+
+@c
 void
 evaluate_program (cell        o,
                   sigjmp_buf *failure)
@@ -5896,331 +5857,471 @@ evaluate_program (cell        o,
         stack_protect(1, o, failure);
         if (failure_p(reason = sigsetjmp(cleanup, 1)))
                 unwind(failure, reason, false, 1);
-        program = env_search(Root, symbol_new_const("do"), true, &cleanup);
+        program = Iprimitive[PRIMITIVE_DO].box;
         syntactic = syntax_p(SO(Sprogram));
         if (syntactic) {
-                program = cons(program, syntax_datum(SO(Sprogram)), &cleanup);
+                LOG(program = cons(program, syntax_datum(SO(Sprogram)), &cleanup));
                 program = syntax_new(program, syntax_start(SO(Sprogram)),
                         syntax_end(SO(Sprogram)), &cleanup);
         } else
-                program = cons(program, SO(Sprogram), &cleanup);
+                LOG(program = cons(program, SO(Sprogram), &cleanup));
         stack_clear(1);
         evaluate(program, failure);
 }
 
-@ While building and debugging the evaluator it has proven invaluable
-to get a trace of the activity but it is exceptionally noisy. However
-\Ls/ is still in development so the macro is still here, disabled.
+@ Overall the evaluator determines for any given expression whether
+it's a bare symbol to be looked up in the active environment or a
+pair to evaluate recursively. Anything else is evaluated to itself.
 
-@d LOG(cmd) cmd
-@d DONTLOG(cmd) do { printf("%s\n", #cmd); cmd; } while (0)
+\vskip 1em\epdf{llfig-1.pdf}
 
-@ A ``complex expression'' is a list who's first element is an
-applicative or operative combiner, which is to say a function/procedure
-or some other code who's arguments are (applicative) or are not
-(operative) themselves evaluated before calling it.
+Figure 1 (TODO: label it) visualises the evaluation process. An
+unevaluated expression is placed in |Expression| and the evaluator
+begins at |Begin|. After the process of evaluation for a whole
+expression has been completed the evaluator returns to |Return| and
+the result will be available in the |Accumulator|.
 
-|Combine_Start| is entered when a pair is evaluated. First the list
-of partially evaluated arguments (of which the result of combining
-this pair (calling this function) will be part), the current
-environment and the combiner's own arguments are saved in the control
-stack. The combiner is left to be evaluated so that |Combine_Dispatch|
-later knows where to dispatch to.
+Evaluating anything other than a list is simple. Look-up places a
+bound value in |Accumulator| and reports an error if it wasn't
+found. Everything else is copied as-is. The rest (all) of the diagram
+describes how to evaluate a list --- called ``combining'' because
+a list of one or more expressions is combined into a single expression.
+
+The three boxes labelled \.{EVALUATE} and \.{MAGIC} can be thought
+of as representing the whole of figure 1 again --- they are where
+the evaluator recursively ``calls'' itself.
+
+The labels in this diagram correspond to the \CEE/ labels of the
+co-routines which implement them. The original S\AM S design of
+this interpreter was for silicon and was written in a linear fashion
+taking no advantage of \CEE/ idioms which are unavailable in pure
+hardware. For the most part the code here still follows that same
+pattern although a few liberties have been taken with some functional
+accessors and \CEE/ contstructs.
+
+@.TODO@>
+@d evaluate_desyntax(O) (syntax_p(O) ? syntax_datum(O) : (O))
+@d evaluate_incompatible(L,F) do { /* Inadquate arity-mismatch handling. */
+        lprint("incompatibility at line %d\n", (L));
+        siglongjmp(*(F), LERR_INCOMPATIBLE);
+} while (0)
+@c
+void
+evaluate (cell        o,
+          sigjmp_buf *failure)
+{
+        cell formals, value;
+        bool flag;
+        int count, min, max;
+        char *schema;
+
+        assert(null_p(CLINK) && null_p(ARGS));
+        assert(environment_p(ENV));
+        EXPR = o;
+        LOG(ACC = VOID);
+        LOG(goto Begin);
+        @<Evaluate a complex expression@>@;
+}
+
+@ Unevaluated expressions are placed in |Expression| and the evaluator
+is (re-)started here.
+
+@<Evaluate a complex expression@>=
+Begin:@;
+        EXPR = evaluate_desyntax(EXPR);
+        if (pair_p(EXPR))         LOG(goto Combine_Start);
+        else if (!symbol_p(EXPR)) LOG(goto Finish);
+        LOG(ACC = env_search(ENV, EXPR, failure));
+        if (undefined_p(ACC)) { /* For simpler debugging --- |abort()|
+                                        will soon follow. */
+                lprint("looking for %p ", EXPR);
+                serial(EXPR, SERIAL_ROUND, 1, NIL, NULL, failure);
+                lprint("\n");
+                LOG(ACC = VOID);
+                siglongjmp(*failure, LERR_MISSING);
+        }
+        LOG(goto Return);
+
+@ The evaluator recurses back into itself by saving the current
+state of computation (TODO: use the regular stack) and resuming at
+|Begin| with an unevaluated |Expression|. When evaluation, recursive
+or not, has finished control reaches |Return|.
+
+If there is a {\it note\/} remaining on the |Control_Link| then
+rather than returning the evaluated expression to the caller a layer
+of recursion is unpeeled and the computation which it interrupted
+is resumed at the appropriate co-process. TODO: This special object
+type can/should probably be merged with syntax objects (which would
+have been renamed).
+
+TODO: This is an extremely naive and expensive, but simple, method
+of comparing symbols with \CEE/ constants and should be replaced
+ASAP.
+
+Note that |Sym_COMBINE_READY| is not detected here but the co-routine
+which places it ends up jumping directly into |Combine_Ready|.
+
+@.TODO@>
+@d Sym_COMBINE_READY    (symbol_new_const("COMBINE-READY"))
+@d Sym_COMBINE_BUILD    (symbol_new_const("COMBINE-BUILD"))
+@d Sym_COMBINE_DISPATCH (symbol_new_const("COMBINE-DISPATCH"))
+@d Sym_COMBINE_FINISH   (symbol_new_const("COMBINE-FINISH"))
+@d Sym_CONDITIONAL      (symbol_new_const("CONDITIONAL"))
+@d Sym_DEFINITION       (symbol_new_const("DEFINITION"))
+@d Sym_EVALUATE         (symbol_new_const("EVALUATE"))
+@<Evaluate a complex expression@>=
+Finish:
+        LOG(ACC = EXPR);
+Return: /* Check |CLINK| to see if there is more work after complete
+                evaluation. */
+        if (null_p(CLINK))
+                return; /* |Accumulator| (|ACC|) has the result. */
+        else if (!note_p(CLINK))                      siglongjmp(*failure, LERR_INTERNAL);
+        else if (note(CLINK) == Sym_COMBINE_BUILD)    LOG(goto Combine_Build);
+        else if (note(CLINK) == Sym_COMBINE_DISPATCH) LOG(goto Combine_Dispatch);
+        else if (note(CLINK) == Sym_COMBINE_FINISH)   LOG(goto Combine_Finish);
+        else if (note(CLINK) == Sym_DEFINITION)       LOG(goto Mutate_Environment);
+        else if (note(CLINK) == Sym_EVALUATE)         LOG(goto Sequence);
+        else
+                siglongjmp(*failure, LERR_INTERNAL); /* Unknown note. */
+
+@ An expression which looks like list (other than the empty list)
+represents a {\it combination\/} --- a function/procedure call or
+an operator. Because the value in first pair of the list determines
+what to do with the list (and even if it has to {\it be\/} a list)
+it has to be evaluated in full before the evaluator can perform or
+even prepare the combination.
+
+A note is left to continue by dispatching to the appropriate
+(applicative/operative/primitive) combiner and evaluation re-starts
+with the unknown expression. The unevaluated arguments are recorded
+in the note.
 
 @<Eval...@>=
 Combine_Start: /* Save any |ARGS| in progress and |ENV| on |CLINK| to
                         resume later. */
         LOG(CLINK = cons(ARGS, CLINK, failure));
         LOG(CLINK = cons(ENV, CLINK, failure));
-        LOG(ARGS  = lcdr(EXPR)); /* Save the combination's arguments. */
+        LOG(ARGS  = lcdr(EXPR)); /* Unevaluated arguments */
         LOG(CLINK = note_new(Sym_COMBINE_DISPATCH, ARGS, CLINK, failure));
-        LOG(EXPR  = lcar(EXPR)); /* Prepare to evaluate the combiner. */
-        goto Begin;
+        LOG(EXPR  = lcar(EXPR)); /* Unevaluated combiner */
+        LOG(goto Begin);
 
-Combine_Dispatch: /* Apply or operate based on the evaluated combinator
-                        expression. */
-        LOG(ARGS  = note_car(CLINK)); /* Restore the combination's arguments. */
+@ When control resumes after discovering the combiner the dispatch
+note is removed and the combiner determines how to proceed after
+restoring the unevaluated arguments. Note that all primitives will
+test true for one of |applicative_p| or |operative_p| and so the
+order of the tests is significant.
+
+@<Eval...@>=
+Combine_Dispatch: /* Restore the combination arguments and decide
+                        how to process them. */
+        LOG(ARGS  = note_car(CLINK)); /* Unevaluated arguments */
         LOG(CLINK = note_cdr(CLINK));
-        if (operative_p(ACC))        goto Combine_Operate;
-        else if (applicative_p(ACC)) goto Applicative_Start;
-        else                         siglongjmp(*failure, LERR_UNCOMBINABLE);
+        if (primitive_p(ACC))
+                LOG(goto Combine_Primitive);
+        else if (applicative_p(ACC))
+                LOG(goto Combine_Applicative);
+        else if (operative_p(ACC))
+                LOG(goto Combine_Operate);
+        else
+                siglongjmp(*failure, LERR_UNCOMBINABLE);
 
-@ When combination finished with its result in the accumulator the
-previous arguments and environment are popped from the control link
-stack.
+@ A primitive combiner can be applicative or operative. The first
+two bytes of a primitive schema are an ASCII digit if the primitive
+is applicative and they indicate the minimum and maximum number of
+arguments expected (if they're both zero the distinction between
+applicative and operative is moot and the primitive presents as an
+applicative).
+
+When the evaluator has finished scanning the unevaluated arguments
+as directed it falls through to the beginning of the argument
+evaluation co-routine, |Combine_Continue| who's job is to distinguish
+between yet more unevaluated arguments and completed list which is
+ready to combine.
+
+@<Eval...@>=
+Combine_Primitive: /* Validate the arity of primitive arguments and prepare any
+                        necessary for evaluation (née |Applicative_Start|). */
+        LOG(CLINK = note_new(Sym_COMBINE_READY, ACC, CLINK, failure));
+        LOG(EXPR  = NIL);
+        schema = Iprimitive[primitive(ACC)].schema;
+        assert(*schema != '_');
+        if (schema[0] >= '0' && schema[0] <= '9') {
+                @<Copy an applicative primitive's arguments@>
+        } else {
+                @<Copy arguments according to a primitive's schema@>
+        }
+LOG(goto Combine_Continue);
+Combine_Continue: /* ie.~{\bf comefrom\/} above \AM\ |Applicative_Build|. */
+        if (pair_p(EXPR)) LOG(goto Combine_Pair);
+        else              LOG(goto Combine_Ready);
+
+@ Applicative combinations expect their arguments to be a proper
+list constrained to within a minimum and maximum size, often the
+same. Each unevaluated argument is appended to |Expression| wrapped
+in a marker with |LTRUE| indicating that it needs evaluation.
+
+Note that this routine reverses the argument list.
+
+@<Copy an applicative primitive's arguments@>=
+count = 0;
+min = schema[0] - '0';
+max = (schema[1] == '.') ? -1 : schema[1] - '0';
+while (pair_p(ARGS)) {
+        count++;
+        LOG(ACC   = lcar(ARGS));
+        LOG(ACC   = cons(LTRUE, ACC, failure));
+        LOG(EXPR  = cons(ACC, EXPR, failure));
+        LOG(ARGS  = lcdr(ARGS));
+}
+if (!null_p(ARGS))
+        siglongjmp(*failure, LERR_IMPROPER);
+if (((max >= 0) && (count > max)) || (count < min))
+        evaluate_incompatible(__LINE__, failure);
+assert(max >= 0); /* There aren't any open-ended primitive applicatives. */
+
+@ Operative primitives can likewise ensure a minimum and maximum
+number of arguments but positionally. The schema of an operative
+primitive is a sequence of tokens indicating how to process the
+next argument(s). An argument must be present if the byte is \.E
+or \.! but is optional if \.e or \.?. If the byte is \.E or \.e the
+argument will be evaluated before calling the primitive's implementation.
+
+The token \.: indicates that the remainder of the argument list
+will be processed by the primitive and should not be scanned any
+further. In particular the arguments which have been processed
+already will have been copied to |Expression| {\it in reverse\/}
+while the remaining have not.
+
+@<Copy arguments according to a primitive's schema@>=
+count = 0;
+while (count++ < PRIMITIVE_PREFIX) {
+        if ((*schema == 'E') || (*schema == '!')) { /* Required (\AM\
+                                                        \.Evaluate). */
+                if (null_p(ARGS))
+                        evaluate_incompatible(__LINE__, failure);
+                else if (!pair_p(ARGS))
+                        siglongjmp(*failure, LERR_IMPROPER);
+                else {
+                        LOG(ACC   = lcar(ARGS));
+                        LOG(ACC   = cons(predicate(*schema == 'E'), ACC, failure));
+                        LOG(EXPR  = cons(ACC, EXPR, failure));
+                        LOG(ARGS  = lcdr(ARGS));
+                }
+        } else if ((*schema == 'e') || (*schema == '?')) { /* Optional (\AM\
+                                                                \.evaluate). */
+                if (pair_p(ARGS)) {
+                        LOG(ACC   = lcar(ARGS));
+                        LOG(ACC   = cons(predicate(*schema == 'e'), ACC, failure));
+                        LOG(EXPR  = cons(ACC, EXPR, failure));
+                        LOG(ARGS  = lcdr(ARGS));
+                } else if (!null_p(ARGS))
+                        siglongjmp(*failure, LERR_IMPROPER);
+        } else if (*schema == ':') { /* Collect remaining arguments unevaluated. */;
+                LOG(ACC   = cons(LFALSE, ARGS, failure));
+                LOG(EXPR  = cons(ACC, EXPR, failure));
+                LOG(ARGS  = NIL);
+        } else if (*schema == '_') { /* No more arguments permitted. */
+                if (pair_p(ARGS))
+                        siglongjmp(*failure, LERR_IMPROPER);
+                else if (!null_p(ARGS))
+                        evaluate_incompatible(__LINE__, failure);
+                break;
+        }
+        LOG(schema++);
+}
+
+@ Arguments to an applicative closure are all evaluated. While
+preparing the argument list for evaluation the closure's formals
+list is used to verify that the number of arguments is correct.
+
+@<Eval...@>=
+Combine_Applicative: /* Store the closure and evaluate its arguments. */
+        LOG(CLINK = note_new(Sym_COMBINE_READY, ACC, CLINK, failure));
+        LOG(EXPR  = NIL);
+        LOG(formals = closure_formals(ACC));
+        count = 0;
+        while (pair_p(ARGS)) {
+                if (null_p(formals))
+                        count = 1;
+                else if (pair_p(formals))
+                        LOG(formals = lcdr(formals));
+                LOG(ACC   = lcar(ARGS));
+                LOG(ACC   = cons(LTRUE, ACC, failure));
+                LOG(EXPR  = cons(ACC, EXPR, failure));
+                LOG(ARGS  = lcdr(ARGS));
+        }
+        if (!null_p(ARGS))
+                siglongjmp(*failure, LERR_IMPROPER);
+        if (count || pair_p(formals))
+                evaluate_incompatible(__LINE__, failure);
+        LOG(goto Combine_Continue);
+
+@ After the arguments have been scanned for validity each is processed
+in turn and evaluated if necessary. An evaluator return note is
+prepared with the remaining arguments and control flows to the
+evaluator's beginning if the argument must be evaluated or its end
+if it must not.
+
+@d next_argument(VAR, ARGS) do {
+        (VAR) = lcar(ARGS);
+        (ARGS) = lcdr(ARGS);
+} while (0)
+@d validated_argument(VAR, ARGS, NULLABLE, PREDICATE, FAILURE) do {
+        next_argument((VAR), (ARGS));
+        if ((!(NULLABLE) && null_p(VAR)) || !PREDICATE(VAR))
+                evaluate_incompatible(__LINE__, (FAILURE));
+} while (0)
+@<Eval...@>=
+Combine_Pair: /* Prepare to append an argument, possibly after evaluation. */
+        LOG(next_argument(ACC, EXPR));
+        LOG(CLINK = note_new(Sym_COMBINE_BUILD, EXPR, CLINK, failure));
+        LOG(EXPR  = lcdr(ACC)); /* (remaining) arguments to combination */
+        if (true_p(lcar(ACC)))
+                LOG(goto Begin);
+        else
+                LOG(goto Finish);
+
+@ Whether evaluated or not the next item in an argument list is
+prepended to the |Arguments|, ultimately restoring them to their
+original order and control resumes at |Combine_Continue| to determine
+whether there are yet more arguments.
+
+@<Eval...@>=
+Combine_Build: /* Continue building a combination after evaluating
+                        one expression. */
+        LOG(ARGS  = cons(ACC, ARGS, failure));
+        LOG(EXPR  = note_car(CLINK));
+        LOG(CLINK = note_cdr(CLINK));
+        LOG(goto Combine_Continue);
+
+@ When the combination's arguments are ready they have been built
+piecemeal into |Arguments| or copied there as-is if the combiner
+is an operative closure.
+
+|Combine_Ready| and |Combine_Operate| implement the evaluator's
+MAGIC by doing whatever it is primitives do, or by ``opening'' a
+closure --- restoring its program and environment --- and ``entering''
+it by recursing back into the evaluator.
+
+@<Eval...@>=
+Combine_Ready: /* Restore the saved closure or primitive. */
+        assert(note(CLINK) == Sym_COMBINE_READY);
+        LOG(ACC   = note_car(CLINK));
+        LOG(CLINK = note_cdr(CLINK));
+LOG(goto Combine_Operate);
+Combine_Operate:@;
+        LOG(CLINK = note_new(Sym_COMBINE_FINISH, EXPR, CLINK, failure));
+        if (primitive_p(ACC))
+                switch (primitive(ACC)) {
+                default:
+                        siglongjmp(*failure, LERR_INTERNAL);
+@t\4@>          @<Primitive implementations@>@;
+                }
+        else if (applicative_p(ACC)) {
+                LOG(EXPR  = ACC);                      /* Closure */
+                LOG(ACC   = lcar(EXPR));               /* Formals */
+                LOG(EXPR  = lcdr(EXPR));
+                LOG(ENV   = lcar(EXPR));               /* Environment */
+                LOG(EXPR  = lcdr(EXPR));
+                LOG(ENV   = env_extend(ENV, failure));
+                LOG(EXPR  = lcar(EXPR));               /* Body */
+                LOG(validate_arguments(failure));
+                LOG(goto Begin);
+        }
+        else if (operative_p(ACC)) {
+                LOG(EXPR  = ACC);                      /* Closure */
+                LOG(ACC   = lcar(EXPR));
+                LOG(ARGS  = cons(ACC, ARGS, failure)); /* \.(Formals \.. Arguments\.) */
+                LOG(EXPR  = lcdr(EXPR));
+                LOG(ACC   = ENV);
+                LOG(ENV   = lcar(EXPR));               /* Environment */
+                LOG(EXPR  = lcdr(EXPR));
+                LOG(ENV   = env_extend(ENV, failure));
+                LOG(EXPR  = lcar(EXPR));               /* Body */
+                LOG(validate_operative(failure));      /* Sets in |ENV| as required. */
+                LOG(goto Begin);
+        }
+        LOG(goto Return);
+
+@ A combiner places its result in the |Accumulator| if there is
+one. The arguments that the result are a part of and the environment
+the combiner was called from are restored and the evaluator, or one
+layer of recursion into it, can return the evaluated result.
 
 @<Eval...@>=
 Combine_Finish: /* Restore the |ENV| and |ARGS| in place before
                         evaluating the combinator. */
-        LOG(EXPR  = note_car(CLINK)); /* May include the arguments to an operative. */
+        LOG(EXPR  = note_car(CLINK));
         LOG(CLINK = note_cdr(CLINK));
         LOG(ENV   = lcar(CLINK));
         LOG(CLINK = lcdr(CLINK));
         LOG(ARGS  = lcar(CLINK));
         LOG(CLINK = lcdr(CLINK));
-        goto Return;
+        LOG(goto Return);
 
-@ Arguments to an applicative combiner are evaluated by the caller.
-This process begins in the |Applicative_Start| chunk by copying the
-unevaluated arguments into the expression register (in reverse) to
-validate that they are indeed a proper list. Control then repeatedly
-enters |Applicative_Pair| for each argument expression or |Combine_Apply|
-when the entire list has been evaluated.
+@ Parsed \Ls/ source code and the bodies of closures are evaluated
+by the \.{do} primitive which expects its arguments to be a list
+of expressions which it evaluates in turn, returning with the value
+of the last. If there are no expressions to evaluate the value
+|VOID| is returned.
 
-@<Eval...@>=
-Applicative_Start: /* Save the applicative for later and evaluate its
-                        arguments. */
-        LOG(CLINK = note_new(Sym_COMBINE_APPLY, ACC, CLINK, failure));
-        LOG(EXPR = NIL);
-Reverse_Arguments:
-        if (pair_p(ARGS)) {
-                LOG(ACC   = lcar(ARGS));
-                LOG(EXPR  = cons(ACC, EXPR, failure));
-                LOG(ARGS  = lcdr(ARGS));
-                goto Reverse_Arguments;
-        } else if (!null_p(ARGS))
-                siglongjmp(*failure, LERR_IMPROPER);
-Applicative_Dispatch: /* ie.~{\bf comefrom\/} above \AM\ |Applicative_Build|. */
-        if (pair_p(EXPR)) goto Applicative_Pair;
-        else              goto Combine_Apply;
+To avoid reversing and re-reversing the list a pointer to the tail
+is kept in the |Expression| register which is otherwise empty. This
+algorithm is rather odd in that the new control link node is created
+with the accumulator (the list head) in its tail position which is
+then replaced. This is so that the evaluator does not require any
+extra temporary storage.
 
-@ The chunk |Applicative_Pair| extracts the next expression and
-returns to |Begin| to evaluate it, noting in the control link stack
-that the result will be used to continue building a combination's
-arguments.
-
-@<Eval...@>=
-Applicative_Pair: /* Evaluate the next argument in the list. */
-        LOG(ACC   = lcdr(EXPR));
-        LOG(CLINK = note_new(Sym_COMBINE_BUILD, ACC, CLINK, failure));
-        LOG(EXPR  = lcar(EXPR));
-        goto Begin;
-
-@ Possibly misnamed ({\it Combine\_Build\/}? {\it
-Sym\_APPLICATIVE\_BUILD\/}?), |Applicative_Build| is where control
-will arrive at following evaluation of the expression extracted by
-|Applicative_Pair| above. The result is appended to the growing
-arguments, which have now been re-reversed and will end up in the
-correct order, and control returns to |Applicative_Dispatch| to
-continue evaluating arguments or combine them into the result.
-
-@.TODO@>
-@<Eval...@>=
-Applicative_Build: /* Continue building a combination after evaluating
-                        one expression. */
-        LOG(ARGS  = cons(ACC, ARGS, failure));
-        LOG(EXPR  = note_car(CLINK));
-        LOG(CLINK = note_cdr(CLINK));
-        goto Applicative_Dispatch;
-
-@ After evaluating all of the arguments control will eventually be
-passed to |Combine_Apply| to restore the saved applicative combiner
-from the control link stack and then proceed to combination. An
-operative combiner skips all of the above evaluation and jumps
-straight in to |Combine_Operate| with the combiner already in the
-accumulator.
-
-@<Eval...@>=
-Combine_Apply: /* Restore the saved applicative. */
-        LOG(ACC   = note_car(CLINK));
-        LOG(CLINK = note_cdr(CLINK));
-Combine_Operate:@;
-        LOG(CLINK = note_new(Sym_COMBINE_FINISH, EXPR, CLINK, failure));
-        combine(failure);
-        goto Return; /* May have pushed further work to |CLINK|. */
-
-@ Since a computer is at heart little more than a glorified transistor
-\Ls/ would be incomplete without conditional logic, implemented here.
-
-@<Eval...@>=
-Conditional: /* Evaluate the consequent or alternate of a conditional
-                operative. */
-        LOG(EXPR  = note_car(CLINK));
-        LOG(CLINK = note_cdr(CLINK));
-        LOG(EXPR  = false_p(ACC) ? lcdr(EXPR) : lcar(EXPR));
-        goto Begin;
-
-@ @<Eval...@>=
-Validate_Environment:
-        if (!environment_p(ACC))
-                evaluate_incompatible(__LINE__, failure);
-        LOG(EXPR  = note_car(CLINK));
-        LOG(CLINK = note_cdr(CLINK));
-#if 0 /* Test whether the environment can be mutated. */
-        if (!null_p(EXPR))
-                if (!environment_can_p(ACC, true_p(lcar(EXPR)), lcdr(EXPR)))
+@<Primitive imp...@>=
+case PRIMITIVE_DO: /* (Operative) */
+        next_argument(EXPR, ARGS);
+        assert(null_p(ARGS));
+        LOG(ARGS  = note_new(Sym_EVALUATE, VOID, NIL, failure));
+        LOG(ACC   = ARGS);
+        LOG(EXPR  = evaluate_desyntax(EXPR));
+        while (!null_p(EXPR)) {
+                if (!pair_p(EXPR))
                         evaluate_incompatible(__LINE__, failure);
-#endif
-        goto Return;
-
-@ @<Eval...@>=
-Save_And_Evaluate:
-        LOG(EXPR  = note_car(CLINK));
-        LOG(CLINK = note_cdr(CLINK));
-        LOG(CLINK = note_new(Sym_ENVIRONMENT_M, ACC, CLINK, failure));
-        goto Begin;
-Restore_Environment:
-        LOG(ENV   = note_car(CLINK));
-        LOG(CLINK = note_cdr(CLINK));
-        goto Return;
-
-@ @<Eval...@>=
-Mutate_Environment:
-        LOG(EXPR  = note_car(CLINK));
-        LOG(CLINK = note_cdr(CLINK));
-        LOG(ARGS  = lcar(EXPR));
-        LOG(EXPR  = lcdr(EXPR));
-        if (true_p(ARGS))
-                LOG(env_define(ENV, EXPR, ACC, failure));
-        else
-                LOG(env_set(ENV, EXPR, ACC, failure));
-        goto Return;
-
-@ @<Eval...@>=
-Evaluate_Dispatch:
-        LOG(EXPR  = note_cdr(CLINK)); /* For |assert| --- replaced by |Evaluate|. */
-        assert(note_p(EXPR) && note(EXPR) == Sym_COMBINE_FINISH);
-        LOG(ENV   = ACC);
-        goto Evaluate;
-
-@ Primitive combiners are implemented right here in the evaluator
-(|combine| is only called from a single location in |evalulate|).
-
-@c
-void
-combine (sigjmp_buf *failure)
-{
-        bool flag;
-        int count;
-        cell nsin, ndex;
-        cell value;
-
-        if (primitive_p(ACC)) {
-                if (Iprimitive[primitive(ACC)].applicative ||
-                            Iprimitive[primitive(ACC)].min == -1)
-                        validate_primitive(failure);
-                switch (primitive(ACC)) {
-                @<Implement primitive programs@>
-                }
-        } else if (applicative_p(ACC))
-                LOG(CLINK = note_new(Sym_APPLICATIVE, ACC, CLINK, failure));
-        else if (operative_p(ACC))
-                LOG(CLINK = note_new(Sym_OPERATIVE, ACC, CLINK, failure));
-}
-
-@ @<Implement...@>=
-default:
-        siglongjmp(*failure, LERR_INTERNAL);
-
-@ Primitive in |Iprimitive[primitive(ACC)]| has from |.min| to
-|.max| arguments, to put into |EXPR|. If |.min| is -1 only |.max|
-is checked (for eg.~1 or 3 arguments).
-
-This should be merged with |validate_arguments| and moved prior to
-evaluation (TODO).
-
-@.TODO@>
-@c
-void
-validate_primitive (sigjmp_buf *failure)
-{
-        int count;
-
-        count = 0;
-        EXPR = NIL;
-        while (pair_p(ARGS)) {
-                count++;
-                if (Iprimitive[primitive(ACC)].max != 0 &&
-                            count > Iprimitive[primitive(ACC)].max)
-                        evaluate_incompatible(__LINE__, failure);
-                EXPR = cons(lcar(ARGS), EXPR, failure);
-                ARGS = lcdr(ARGS);
+                LOG(value = note_new(Sym_EVALUATE,
+                        evaluate_desyntax(lcar(EXPR)), NIL, failure));
+                LOG(note_set_cdr_m(ACC, value));
+                LOG(ACC   = value);
+                LOG(EXPR  = lcdr(EXPR));
+                LOG(EXPR  = evaluate_desyntax(EXPR));
         }
-        if (Iprimitive[primitive(ACC)].min >= 0 &&
-                    count < Iprimitive[primitive(ACC)].min)
-                evaluate_incompatible(__LINE__, failure);
-        if (Iprimitive[primitive(ACC)].max &&
-                    Iprimitive[primitive(ACC)].max != Iprimitive[primitive(ACC)].min)
-                EXPR = cons(fix(count), EXPR, failure);
-        ARGS = EXPR;
-        EXPR = NIL;
-}
-
-@ Entering a closure is similar regardless of whether it's applicative
-or operative, except that an operative closure needs access to the
-caller's environment in addition to its own.
-
-The closure is ``opened'' by extending its environment and restoring
-its body to the |Environment| and |Expression| registers respectively
-and re-entering the evaluator (with the appropriate instructions
-added to the control link stack).
-
-TODO: Refactor into one chunk?
-
-@.TODO@>
-@<Eval...@>=
-Operative_Closure: /* |EXPR| has unevaluated arguments, |ARGS| unused. */
-        LOG(EXPR  = note_car(CLINK));     /* Closure */
-        LOG(CLINK = note_cdr(CLINK));
-        LOG(ACC   = lcar(EXPR));
-        LOG(ARGS  = cons(ACC, ARGS, failure)); /* \.{(Formals \.. Arguments\.)} */
-        LOG(EXPR  = lcdr(EXPR));
-        LOG(ACC   = ENV);
-        LOG(ENV   = lcar(EXPR));          /* Environment */
-        LOG(EXPR  = lcdr(EXPR));
-        LOG(ENV   = env_extend(ENV, failure));
-        LOG(EXPR  = lcar(EXPR));          /* Body */
-        LOG(validate_operative(failure)); /* Sets in |ENV| as required. */
-        goto Begin;
-
-Applicative_Closure:
-        LOG(EXPR  = note_car(CLINK));     /* Closure */
-        LOG(CLINK = note_cdr(CLINK));
-        LOG(ACC   = lcar(EXPR));          /* Formals */
-        LOG(EXPR  = lcdr(EXPR));
-        LOG(ENV   = lcar(EXPR));          /* Environment */
-        LOG(EXPR  = lcdr(EXPR));
-        LOG(ENV   = env_extend(ENV, failure));
-        LOG(EXPR  = lcar(EXPR));          /* Body */
-        LOG(validate_arguments(failure)); /* Copies from |ARGS| to |ENV|. */
-        goto Begin;
-
-@ Each kind of closure is created similarly --- by validating its
-{\it formals\/} expression (ie.~the argument names) and copying
-those, the body of code and the current run-time environment into
-the appropriately tagged object.
-
-The \.{do} primitive (notably {\it not\/} the symbol representing
-it but the already-evaluated primitive itself) is prepended to the
-closure body in a manner which definitely needs improvement. This
-not only saves an unnecessary environment search at run-time but
-also means that the meaning of {\it this\/} \.{do} is fixed by the
-evaluator and cannot be overridden in {\it any\/} environment.
-
-@.TODO@>
-@<Implement...@>=
-case PRIMITIVE_LAMBDA:@; /* Return an applicative closure. */
-case PRIMITIVE_VOV:@;    /* Return an operative closure. */
-        flag = (primitive(ACC) == PRIMITIVE_LAMBDA);
-        if (null_p(ARGS))
-                evaluate_incompatible(__LINE__, failure);
-        LOG(ACC = lcar(ARGS)); /* Formals */
-        LOG(EXPR = lcdr(ARGS)); /* Body */
-                        cell lame = symbol_new_const("do");
-                        lame = env_search(Root, lame, true, failure);
-        LOG(EXPR = cons(lame, EXPR, failure));
-        LOG(validate_formals(flag, failure));
-        LOG(ACC = closure_new(flag, ARGS, ENV, EXPR, failure));
+        LOG(note_set_cdr_m(ACC, CLINK));
+        LOG(CLINK = ARGS);
         break;
 
-@ At this stage in evaluation the source code representing the
-formals is in the accumulator and the argument list is empty ---
-these are swapped so the arguments are in the |Arguments|
-register --- and the |Expression| register is occupied with the
-closure's body.
+@ The \.{do} primitive is the only user of this co-routine.
+
+@<Evaluate a complex expression@>=
+Sequence:
+        LOG(EXPR = note_car(CLINK));
+        LOG(CLINK = note_cdr(CLINK));
+        LOG(goto Begin);
+
+@ Closures are created in the same way whether they are applicative
+or operative. The formals (which is where they do differ) are
+validated and they along with the program body and the current
+environment are saved.
 
 @.TODO@>
-@c
+@<Primitive imp...@>=
+case PRIMITIVE_LAMBDA:@;
+case PRIMITIVE_VOV:@;
+        flag = (primitive(ACC) == PRIMITIVE_LAMBDA);
+        LOG(next_argument(ACC, ARGS)); /* Formals */
+        LOG(next_argument(EXPR, ARGS)); /* Body */
+        LOG(EXPR  = cons(Iprimitive[PRIMITIVE_DO].box, EXPR, failure));
+        LOG(validate_formals(flag, failure));
+        LOG(ACC   = closure_new(flag, ARGS, ENV, EXPR, failure));
+        break;
+
+@ @c
+@.TODO@>
 void
 validate_formals (bool        is_applicative,
                   sigjmp_buf *failure)
@@ -6241,10 +6342,9 @@ validate_formals (bool        is_applicative,
 
 @ The {\it formals\/} argument to an applicative (\.{lambda})
 expression take the shape of a symbol or a (possibly improper) list
-of symbols. The symbols, which have bypassed the evaluator, are
-copied first into the accumulator (backwards) with their syntax
-wrapping removed, then copied back into the accumulator to restore
-their original order.
+of symbols. The symbols are copied first into the accumulator
+(backwards) with their syntax wrapping removed, then copied back
+into the accumulator in their original order.
 
 Each symbol should be unique but this is not validated (TODO).
 
@@ -6270,14 +6370,13 @@ while (!null_p(ACC)) {
 
 @ The formals (or {\it informals\/}) argument to an operative
 (\.{vov}) expression is a list of lists of two symbols. The first
-such symbol is a variable name to bind to; the second symbol is
-what to bind to it, one of the caller's environment, (unevaluated)
-arguments or (unimplemented) continuation delimiter.
+such symbol is the variable name to bind; the second symbol is what
+to bind to it: one of the caller's environment, the caller's
+(unevaluated) arguments or (unimplemented) a continuation delimiter.
 
 Each piece of state can be referenced once, and at least one piece
-of state must be (TODO: not demanding this may be profitable for
-global operators without arguments), and this is validated although
-each binding (variable) name must be unique and this is not (TODO).
+of state must be, and this is validated although each binding
+(variable) name must be unique and this is not (TODO).
 
 @.TODO@>
 @d Sym_VOV_ARGS         (symbol_new_const("vov/args"))
@@ -6328,13 +6427,11 @@ ARGS = cons(SO(Svenv), ARGS, failure);
 ARGS = cons(SO(Svargs), ARGS, failure);
 stack_clear(3);
 
-@ A closure object is simply the three pieces of virtual machine
-state saved in an opaque list.
-
-@ From the |Applicative_Closure| evaluator chunk, the arguments
-have been evaluated and the number of them is validated while each
-is bound --- in the extended environment --- to the symbol named
-in the formals which have been saved in the accumulator.
+@ After an applicative closure's arguments have been fully evaluated
+a new environment is created by extending the saved closure environment
+and the evaluated arguments are bound within this new environment.
+The arguments have already been validated prior to being evaluated
+so ``validate'' is a bit of a misnomer and may have to change.
 
 Although the |env_define| call here will have the effect of forcing
 the formals symbols to be unique, this is the wrong place to rely
@@ -6357,29 +6454,21 @@ validate_arguments (sigjmp_buf *failure)
         while (pair_p(SO(Sname))) {
                 LOG(name = lcar(SO(Sname)));
                 LOG(SS(Sname, lcdr(SO(Sname))));
-                if (null_p(SO(Sarg)))
-                        evaluate_incompatible(__LINE__, failure);
+                assert(!null_p(SO(Sarg)));
                 LOG(arg = lcar(SO(Sarg)));
                 LOG(SS(Sarg, lcdr(SO(Sarg))));
-                LOG(env_define(ENV, name, arg, failure));
+                LOG(env_define_m(ENV, name, arg, failure));
         }
         if (!null_p(SO(Sname))) {
                 LOG(assert(symbol_p(SO(Sname))));
-                LOG(env_define(ENV, SO(Sname), SO(Sarg), failure));
-        } else if (!null_p(SO(Sarg)))
-                evaluate_incompatible(__LINE__, failure);
+                LOG(env_define_m(ENV, SO(Sname), SO(Sarg), failure));
+        } else
+                assert(null_p(SO(Sarg)));
         stack_clear(2);
 }
 
-@ An operative closure has in place of its formals a list of three
-symbols (or |NIL|). Their location in the list determines what will
-be bound to that symbol so the order must match that in |validate_formals|
-above.
-
-The run-time environment of the caller has been saved in the
-accumulator prior to the closure's environment being restored and
-extended. Note that the arguments {\it still\/} have not been seen
-by the evaluator and so retain the syntax wrapping.
+@ Similarly an operative closure saves pieces of interpreter state
+into the directed bindingd.
 
 @c
 void
@@ -6397,12 +6486,12 @@ validate_operative (sigjmp_buf *failure)
 
         assert(pair_p(SO(Sinformal)));
         if (symbol_p(lcar(SO(Sinformal))))
-                LOG(env_define(ENV, lcar(SO(Sinformal)), ARGS, failure));
+                LOG(env_define_m(ENV, lcar(SO(Sinformal)), ARGS, failure));
         SS(Sinformal, lcdr(SO(Sinformal)));
 
         assert(pair_p(SO(Sinformal)));
         if (symbol_p(lcar(SO(Sinformal))))
-                LOG(env_define(ENV, lcar(SO(Sinformal)), ACC, failure));
+                LOG(env_define_m(ENV, lcar(SO(Sinformal)), ACC, failure));
         SS(Sinformal, lcdr(SO(Sinformal)));
 
         assert(pair_p(SO(Sinformal)));
@@ -6413,171 +6502,58 @@ validate_operative (sigjmp_buf *failure)
         stack_clear(1);
 }
 
-@* Primitives. Core primitives are primarily operatives and some
-applicatives to manipulate lists, the environment and closures.
-Primitives which are applicative have their argument lists checked
-for length. Operatives enforce a maximum number of arguments (which
-may be zero) if the minimum indicated is $-1$ or that they will
-process the argument list entirely (minimum is zero) and the maximum
-value is not used.
+@* \.{eval} Primitive.
 
-@<Symbolic...@>=
-PRIMITIVE_BREAK,@/
-PRIMITIVE_CAR,@/
-PRIMITIVE_CDR,@/
-PRIMITIVE_CONS,@/
+@<Primitive \C...@>=
+PRIMITIVE_EVAL@&,
+
+@ @<Primitive schema...@>=
+[PRIMITIVE_EVAL] = { "12__eval", NIL, }@&,
+
+@ @<Primitive imp...@>=
+case PRIMITIVE_EVAL:
+        LOG(next_argument(EXPR, ARGS)); /* Expression */
+        if (null_p(ARGS))
+                LOG(ACC   = ENV);
+        else
+                LOG(next_argument(ACC, ARGS)); /* Environment */
+        if (!environment_p(ACC))
+                evaluate_incompatible(__LINE__, failure);
+        LOG(ENV   = ACC);
+        LOG(goto Begin);
+
+@* \.{if} (Conditional) Primitive. \.{cond} is defined later as an
+operative closure.
+
+@<Primitive \C...@>=
+PRIMITIVE_IF@&,
+
+@ @<Primitive schema...@>=
+[PRIMITIVE_IF] = { "E!?_if", NIL, }@&,
+
+@ @<Primitive imp...@>=
+case PRIMITIVE_IF: /* (Operative) */
+        LOG(next_argument(ACC, ARGS)); /* Condition */
+        LOG(next_argument(EXPR, ARGS)); /* Consequent */
+        LOG(EXPR  = cons(EXPR, VOID, failure));
+        if (!null_p(ARGS))
+                LOG(lcdr_set_m(EXPR, lcar(ARGS))); /* Alternate */
+        LOG(EXPR  = false_p(ACC) ? lcdr(EXPR) : lcar(EXPR));
+        goto Begin;
+
+@* Mutation Primitives \.{define!} \AM\ \.{set!}.
+
+@<Primitive \C...@>=
 PRIMITIVE_CURRENT_ENVIRONMENT,@/
 PRIMITIVE_DEFINE_M,@/
-PRIMITIVE_DO,@/
-PRIMITIVE_DUMP,@/
-PRIMITIVE_EVAL,@/
-PRIMITIVE_IF,@/
-PRIMITIVE_LAMBDA,@/
-PRIMITIVE_NULL_P,@/
-PRIMITIVE_PAIR_P,@/
 PRIMITIVE_ROOT_ENVIRONMENT,@/
-PRIMITIVE_SET_M,@/
-PRIMITIVE_VOV,@/
+PRIMITIVE_SET_M@&,@/
 
-@ @<Primitive...@>=
-[PRIMITIVE_BREAK]               = { "break",      NIL, false, -1, 0, },@|
-[PRIMITIVE_CURRENT_ENVIRONMENT] = { "current-environment",
-                                                  NIL, false, -1, 0, },@|
-[PRIMITIVE_DO]                  = { "do",         NIL, false,  0, 0, },@|
-[PRIMITIVE_DEFINE_M]            = { "define!",    NIL, false,  0, 0, },@|
-[PRIMITIVE_IF]                  = { "if",         NIL, false, -1, 3, },@|
-[PRIMITIVE_LAMBDA]              = { "lambda",     NIL, false,  0, 0, },@|
-[PRIMITIVE_ROOT_ENVIRONMENT]    = { "root-environment",
-                                                  NIL, false, -1, 0, },@|
-[PRIMITIVE_SET_M]               = { "set!",       NIL, false,  0, 0, },@|
-[PRIMITIVE_VOV]                 = { "vov",        NIL, false,  0, 0, },@/
-@#
-[PRIMITIVE_CAR]                 = { "car",        NIL, true,   1, 1, },@|
-[PRIMITIVE_CDR]                 = { "cdr",        NIL, true,   1, 1, },@|
-[PRIMITIVE_CONS]                = { "cons",       NIL, true,   2, 2, },@|
-[PRIMITIVE_DUMP]                = { "dump",       NIL, true,   1, 1, },@|
-[PRIMITIVE_EVAL]                = { "eval",       NIL, true,   1, 2, },@|
-[PRIMITIVE_NULL_P]              = { "null?",      NIL, true,   1, 1, },@|
-[PRIMITIVE_PAIR_P]              = { "pair?",      NIL, true,   1, 1, },@|
-
-@ The pair constructor \.{cons} along with its accessors
-\.{car}, \.{cdr}, etc. |ARGS| has been scanned sufficient to be
-certain it is a proper list (or |NIL|).
-
-@<Implement...@>=
-case PRIMITIVE_CONS:
-        LOG(Tmp_DEX = lcar(ARGS));
-        LOG(ARGS = lcdr(ARGS));
-        LOG(Tmp_SIN = lcar(ARGS));
-        LOG(ARGS = lcdr(ARGS));
-        assert(null_p(ARGS));
-        LOG(ACC = cons(Tmp_SIN, Tmp_DEX, failure)); /* \.{Tmp\_*} reset by |cons|. */
-        break;
-
-case PRIMITIVE_CAR:
-        LOG(EXPR = lcar(ARGS));
-        LOG(ARGS = lcdr(ARGS));
-        assert(null_p(ARGS));
-        if (!pair_p(EXPR))
-                evaluate_incompatible(__LINE__, failure);
-        LOG(ACC = lcar(EXPR));
-        break;
-
-case PRIMITIVE_CDR:
-        LOG(EXPR = lcar(ARGS));
-        LOG(ARGS = lcdr(ARGS));
-        assert(null_p(ARGS));
-        if (!pair_p(EXPR))
-                evaluate_incompatible(__LINE__, failure);
-        LOG(ACC = lcdr(EXPR));
-        break;
-
-@ Perform a list of evaluations sequentially, terminating with the
-result of the last in the accumulator. This validates that the body
-of the expression is a proper list building up instructions to
-evaluate in a new list in the accumulator.
-
-To avoid reversing and re-reversing the list a pointer to the tail
-is kept in the |Expression| register which is otherwise empty. This
-algorithm is rather odd in that the new control link node is created
-with the accumulator (the list head) in its tail position which is
-then replaced. This is so that the evaluator does not require any
-temporary storage other than the five evaluator registers.
-
-@<Implement...@>=
-case PRIMITIVE_DO: /* (Operative) */
-        LOG(EXPR = note_new(Sym_EVALUATE, VOID, NIL, failure));
-        LOG(ACC = EXPR);
-        while (!null_p(ARGS)) {
-                if (!pair_p(ARGS))
-                        evaluate_incompatible(__LINE__, failure);
-                LOG(value = note_new(Sym_EVALUATE, evaluate_desyntax(lcar(ARGS)), NIL, failure));
-                LOG(note_set_cdr_m(ACC, value));
-                LOG(ACC = value);
-                LOG(ARGS = lcdr(ARGS));
-                ARGS = evaluate_desyntax(ARGS);
-        }
-        LOG(note_set_cdr_m(ACC, CLINK));
-        LOG(CLINK = EXPR);
-        break;
-
-@ @<Implement...@>=
-case PRIMITIVE_CURRENT_ENVIRONMENT:
-        assert(null_p(ARGS));
-        LOG(ACC = ENV);
-        break;
-case PRIMITIVE_ROOT_ENVIRONMENT:
-        assert(null_p(ARGS));
-        LOG(ACC = Root);
-        break;
-
-@ Set the stage to evaluate an expression and branch to the evaluation
-of one of two other expressions depending on its outcome's truth.
-
-The test is saved in the |Expression| register with the consequent
-and alternate (in case the test evaluates to false) expressions
-saved in a pair in the control link stack. An alternate expression
-is optional and in such a case a false test result will evaluate
-to |VOID|.
-
-@<Implement...@>=
-case PRIMITIVE_IF: /* (Operative) */
-        LOG(count = fix_value(lcar(ARGS)));
-        LOG(ARGS = lcdr(ARGS));
-        if (count == 3)
-                validated_argument(ACC, ARGS, false, defined_p, failure);
-        else if (count == 1)
-                LOG(ACC = VOID); /* No alternate */
-        else
-                evaluate_incompatible(__LINE__, failure);
-        validated_argument(EXPR, ARGS, false, defined_p, failure);
-        LOG(EXPR = cons(EXPR, ACC, failure));
-        validated_argument(ACC, ARGS, false, defined_p, failure);
-        LOG(CLINK = note_new(Sym_CONDITIONAL, EXPR, CLINK, failure));
-        LOG(CLINK = note_new(Sym_EVALUATE, ACC, CLINK, failure));
-        break;
-
-@ Debugging.
-
-@<Implement...@>=
-case PRIMITIVE_DUMP:
-        lprint("DUMP ");
-        ACC = lcar(ARGS);
-        serial(ACC, SERIAL_DETAIL, 42, NIL, NULL, failure);
-        lprint("\n");
-case PRIMITIVE_BREAK:
-        breakpoint();
-        break;
-
-@ @<Fun...@>=
-void breakpoint (void);
-
-@ @c
-void
-breakpoint (void)
-{
-        printf("Why did we ever allow GNU?\n");
-}
+@ @<Primitive schema...@>=
+[PRIMITIVE_CURRENT_ENVIRONMENT] = { "00__current-environment", NIL, },@/
+[PRIMITIVE_DEFINE_M]            = { "E!:_define!",             NIL, },@/
+[PRIMITIVE_ROOT_ENVIRONMENT]    = { "00__root-environment",    NIL, },@/
+[PRIMITIVE_SET_M]               = { "E!:_set!",                NIL, }@&,@/
 
 @ (define! <env> <sym> <expr>)
 
@@ -6587,262 +6563,149 @@ or (define! <env> (<sym> . <formals>) . <body>)
 == (define! <env> <pair?> . <rest>)
  == (define! <env> ,(car <pair>) (lambda ,(cdr <pair) . <rest>))
 
-@<Implement...@>=
+@<Primitive imp...@>=
+case PRIMITIVE_CURRENT_ENVIRONMENT:
+        assert(null_p(ARGS));
+        LOG(ACC = ENV);
+        break;
+case PRIMITIVE_ROOT_ENVIRONMENT:
+        assert(null_p(ARGS));
+        LOG(ACC = Root);
+        break;
 case PRIMITIVE_DEFINE_M:
 case PRIMITIVE_SET_M:
         flag = (primitive(ACC) == PRIMITIVE_DEFINE_M);
-        if (!pair_p(ARGS))
-                evaluate_incompatible(__LINE__, failure);
-        LOG(ACC   = lcar(ARGS)); /* Environment to mutate. */
-        ARGS = lcdr(ARGS);
-        if (!pair_p(ARGS))
-                evaluate_incompatible(__LINE__, failure);
-        EXPR = lcar(ARGS); /* Binding label. */
-        EXPR = evaluate_desyntax(EXPR);
-        if (pair_p(EXPR)) { /* Applicative closure: \.{(label . formals)} */
-                LOG(ARGS  = lcdr(ARGS)); /* Closure body. */
-                LOG(value = lcdr(EXPR)); /* Applicative formals. */
+        LOG(validated_argument(ACC, ARGS, false, environment_p, failure));
+        LOG(next_argument(EXPR, ARGS)); /* Label or named Formals */
+        LOG(EXPR  = evaluate_desyntax(EXPR));
+        if (pair_p(EXPR)) { /* Named applicative closure: \.(Label \.. Formals\.) */
+                LOG(ARGS  = cons(lcdr(EXPR), ARGS, failure)); /* Body */
+                LOG(ARGS  = cons(Iprimitive[PRIMITIVE_LAMBDA].box, ARGS,
+                        failure));
                 LOG(EXPR  = lcar(EXPR)); /* Real binding label. */
-                EXPR = evaluate_desyntax(EXPR);
-                LOG(ARGS  = cons(value, ARGS, failure));
+                LOG(EXPR  = evaluate_desyntax(EXPR));
                 LOG(ARGS  = cons(Iprimitive[PRIMITIVE_LAMBDA].box, ARGS,
                         failure));
         } else if (symbol_p(EXPR)) {
-                LOG(ARGS = lcdr(ARGS));
-                if (!pair_p(ARGS))
+                LOG(ARGS  = lcar(ARGS));
+                if (!pair_p(ARGS) || !null_p(lcdr(ARGS)))
                         evaluate_incompatible(__LINE__, failure);
-                LOG(value = lcar(ARGS)); /* Value (after evaluation). */
-                LOG(ARGS = lcdr(ARGS));
-                if (!null_p(ARGS))
-                        evaluate_incompatible(__LINE__, failure);
-                LOG(ARGS = value);
+                LOG(ARGS  = lcar(ARGS)); /* Value (after evaluation). */
         } else
                 evaluate_incompatible(__LINE__, failure);
-        LOG(EXPR  = cons(predicate(flag), EXPR, failure));
+        LOG(EXPR  = cons(predicate(flag), EXPR, failure)); /* Label */
+        LOG(EXPR  = cons(ACC, EXPR, failure)); /* Environment to mutate */
         LOG(CLINK = note_new(Sym_DEFINITION, EXPR, CLINK, failure));
-        LOG(CLINK = note_new(Sym_SAVE_AND_EVALUATE, ARGS, CLINK, failure));
-        LOG(CLINK = note_new(Sym_ENVIRONMENT_P, EXPR, CLINK, failure));
-        LOG(CLINK = note_new(Sym_EVALUATE, ACC, CLINK, failure));
-        break;
+        LOG(EXPR  = ARGS); /* Value to evaluate. */
+        LOG(goto Begin);
 
-@ @d primitive_predicate(O) do {
-        ACC  = lcar(ARGS);
-        ARGS = lcdr(ARGS);
+@ To mutate the environment needs support from the evaluator (or
+another primitive to |Return| to).
+
+@<Eval...@>=
+Mutate_Environment:
+        LOG(EXPR  = note_car(CLINK)); /* \.(Environment new? \.. Label\.) */
+        LOG(CLINK = note_cdr(CLINK));
+        LOG(next_argument(ENV, EXPR));
+        LOG(next_argument(ARGS, EXPR));
+        if (true_p(ARGS))
+                LOG(env_define_m(ENV, EXPR, ACC, failure));
+        else
+                LOG(env_set_m(ENV, EXPR, ACC, failure));
+        LOG(goto Return);
+
+@* Pairs \AM\ other simple objects.
+
+@<Primitive \C...@>=
+PRIMITIVE_APPLICATIVE_P,@/
+PRIMITIVE_BOOLEAN_P,@/
+PRIMITIVE_CAR,@/
+PRIMITIVE_CDR,@/
+PRIMITIVE_CONS,@/
+PRIMITIVE_EOF_P,@/
+PRIMITIVE_FALSE_P,@/
+PRIMITIVE_NULL_P,@/
+PRIMITIVE_OPERATIVE_P,@/
+PRIMITIVE_PAIR_P,@/
+PRIMITIVE_SYMBOL_P,@/
+PRIMITIVE_TRUE_P,@/
+PRIMITIVE_VOID_P@&,@/
+
+@ @<Primitive schema...@>=
+[PRIMITIVE_APPLICATIVE_P] = { "11__applicative?", NIL, },@/
+[PRIMITIVE_BOOLEAN_P]     = { "11__boolean?",     NIL, },@/
+[PRIMITIVE_CAR]           = { "11__car",          NIL, },@/
+[PRIMITIVE_CDR]           = { "11__cdr",          NIL, },@/
+[PRIMITIVE_CONS]          = { "22__cons",         NIL, },@/
+[PRIMITIVE_EOF_P]         = { "11__eof?",         NIL, },@/
+[PRIMITIVE_FALSE_P]       = { "11__false?",       NIL, },@/
+[PRIMITIVE_NULL_P]        = { "11__null?",        NIL, },@/
+[PRIMITIVE_OPERATIVE_P]   = { "11__operative?",   NIL, },@/
+[PRIMITIVE_PAIR_P]        = { "11__pair?",        NIL, },@/
+[PRIMITIVE_SYMBOL_P]      = { "11__symbol?",      NIL, },@/
+[PRIMITIVE_TRUE_P]        = { "11__true?",        NIL, },@/
+[PRIMITIVE_VOID_P]        = { "11__void?",        NIL, }@&,@/
+
+@ Note that the |break| is {\it outside\/} the while-wart.
+
+@d primitive_predicate(O) do {
+        next_argument(ACC, ARGS);
         assert(null_p(ARGS));
         ACC  = predicate(O(ACC));
 } while (0); break
-@<Implement...@>=
+@<Primitive imp...@>=
+case PRIMITIVE_APPLICATIVE_P:
+        primitive_predicate(applicative_p);
+case PRIMITIVE_BOOLEAN_P:
+        primitive_predicate(boolean_p);
+case PRIMITIVE_FALSE_P:
+        primitive_predicate(false_p);
 case PRIMITIVE_NULL_P:
         primitive_predicate(null_p);
+case PRIMITIVE_OPERATIVE_P:
+        primitive_predicate(operative_p);
 case PRIMITIVE_PAIR_P:
         primitive_predicate(pair_p);
+case PRIMITIVE_TRUE_P:
+        primitive_predicate(true_p);
+case PRIMITIVE_VOID_P:
+        primitive_predicate(void_p);
 
-@ @<Implement...@>=
-case PRIMITIVE_EVAL:
-        LOG(count = fix_value(lcar(ARGS)));
-        LOG(ARGS = lcdr(ARGS));
-        if (count == 2)
-                validated_argument(ACC, ARGS, false, environment_p, failure);
-        else if (count == 1)
-                LOG(ACC = ENV);
-        else
+@ The pair constructor \.{cons} along with its accessors
+\.{car}, \.{cdr}, etc. |ARGS| has been scanned sufficient to be
+certain it is a proper list (or |NIL|).
+
+@<Primitive imp...@>=
+case PRIMITIVE_CONS:
+        LOG(next_argument(ACC, ARGS));
+        LOG(next_argument(EXPR, ARGS));
+        assert(null_p(ARGS));
+        LOG(ACC = cons(ACC, EXPR, failure));
+        break;
+
+case PRIMITIVE_CAR:
+        LOG(next_argument(EXPR, ARGS));
+        assert(null_p(ARGS));
+        if (!pair_p(EXPR))
                 evaluate_incompatible(__LINE__, failure);
-        LOG(EXPR  = lcar(ARGS)); /* Expression to evaluate. */
-        LOG(CLINK = note_new(Sym_EVALUATE_DISPATCH, EXPR, CLINK, failure));
+        LOG(ACC = lcar(EXPR));
         break;
 
-@ @d validated_argument(VAR, ARGS, NULLABLE, PREDICATE, FAILURE) do {
-        (VAR) = lcar(ARGS);
-        (ARGS) = lcdr(ARGS);
-        if ((!(NULLABLE) && null_p(VAR)) || !PREDICATE(VAR))
-                evaluate_incompatible(__LINE__, (FAILURE));
-} while (0)
-
-@*1 Object primitives.
-
-@<Symbolic...@>=
-PRIMITIVE_NEW_TREE_PLAIN_NODE,
-PRIMITIVE_NEW_TREE_BIWARD_NODE,
-PRIMITIVE_NEW_TREE_SINWARD_NODE,
-PRIMITIVE_NEW_TREE_DEXWARD_NODE,
-PRIMITIVE_TREE_SIN_HAS_THREAD_P,
-PRIMITIVE_TREE_DEX_HAS_THREAD_P,
-PRIMITIVE_TREE_DEX_IS_LIVE_P,
-PRIMITIVE_TREE_SIN_IS_LIVE_P,
-PRIMITIVE_TREE_P,
-PRIMITIVE_TREE_PLAIN_P,
-PRIMITIVE_TREE_RETHREAD_M,
-PRIMITIVE_TREE_SIN_THREADABLE_P,
-PRIMITIVE_TREE_DEX_THREADABLE_P,
-PRIMITIVE_TREE_DATUM,
-@#
-PRIMITIVE_NEW_ROPE_PLAIN_NODE,
-PRIMITIVE_ROPE_P,
-PRIMITIVE_ROPE_PLAIN_P,
-PRIMITIVE_ROPE_SIN_THREADABLE_P,
-PRIMITIVE_ROPE_DEX_THREADABLE_P,
-PRIMITIVE_ROPE_SEGMENT,
-
-@ @<Primitive...@>=
-[PRIMITIVE_NEW_TREE_PLAIN_NODE] = { "new-tree%plain-node",
-                                                NIL, true, 3, 3, },@|
-[PRIMITIVE_NEW_TREE_BIWARD_NODE] = { "new-tree%bi-threadable-node",
-                                                NIL, true, 3, 3, },@|
-[PRIMITIVE_NEW_TREE_DEXWARD_NODE] = { "new-tree%sin-threadable-node",
-                                                NIL, true, 3, 3, },@|
-[PRIMITIVE_NEW_TREE_SINWARD_NODE] = { "new-tree%dex-threadable-node",
-                                                NIL, true, 3, 3, },@|
-[PRIMITIVE_TREE_SIN_HAS_THREAD_P] = { "tree/sin-has-thread?",
-                                                NIL, true, 1, 1, },@|
-[PRIMITIVE_TREE_DEX_HAS_THREAD_P] = { "tree/dex-has-thread?",
-                                                NIL, true, 1, 1, },@|
-[PRIMITIVE_TREE_SIN_IS_LIVE_P] = { "tree/live-sin",
-                                                NIL, true, 1, 1, },@|
-[PRIMITIVE_TREE_DEX_IS_LIVE_P] = { "tree/live-dex",
-                                                NIL, true, 1, 1, },@|
-[PRIMITIVE_TREE_P] = { "tree?",
-                                                NIL, true, 1, 1, },@|
-[PRIMITIVE_TREE_PLAIN_P] = { "tree%plain?",
-                                                NIL, true, 1, 1, },@|
-[PRIMITIVE_TREE_RETHREAD_M] = { "tree/rethread!",
-                                                NIL, true, 3, 3, },@|
-[PRIMITIVE_TREE_SIN_THREADABLE_P] = { "tree%sin-threadable?",
-                                                NIL, true, 1, 1, },@|
-[PRIMITIVE_TREE_DEX_THREADABLE_P] = { "tree%dex-threadable?",
-                                                NIL, true, 1, 1, },@|
-[PRIMITIVE_TREE_DATUM] = { "tree/datum",
-                                                NIL, true, 1, 1, },@|
-@#
-[PRIMITIVE_ROPE_P] = { "rope?",
-                                                NIL, true, 1, 1, },@|
-[PRIMITIVE_ROPE_PLAIN_P] = { "rope%plain?",
-                                                NIL, true, 1, 1, },@|
-[PRIMITIVE_ROPE_SIN_THREADABLE_P] = { "rope%sin-threadable?",
-                                                NIL, true, 1, 1, },@|
-[PRIMITIVE_ROPE_DEX_THREADABLE_P] = { "rope%dex-threadable?",
-                                                NIL, true, 1, 1, },@|
-[PRIMITIVE_NEW_ROPE_PLAIN_NODE] = { "new-rope%plain-node",
-                                                NIL, true, 1, 3, },@|
-[PRIMITIVE_ROPE_SEGMENT] = { "rope/segment",
-                                                NIL, true, 1, 1, },@|
-
-@ @<Implement...@>=
-case PRIMITIVE_ROPE_P:
-        ACC = predicate(rope_p(lcar(ARGS)));
-        break;
-case PRIMITIVE_ROPE_PLAIN_P:
-        ACC = predicate(plain_rope_p(lcar(ARGS)));
-        break;
-case PRIMITIVE_ROPE_SIN_THREADABLE_P:
-        ACC = predicate(rope_sin_threadable_p(lcar(ARGS)));
-        break;
-case PRIMITIVE_ROPE_DEX_THREADABLE_P:
-        ACC = predicate(rope_dex_threadable_p(lcar(ARGS)));
-        break;
-
-@ @<Implement...@>=
-case PRIMITIVE_NEW_ROPE_PLAIN_NODE:
-        count = fix_value(lcar(ARGS));
-        ARGS = lcdr(ARGS);
-        if (count == 3) {
-                validated_argument(ndex, ARGS, true, plain_rope_p, failure);
-                validated_argument(nsin, ARGS, true, plain_rope_p, failure);
-        } else if (count != 1)
+case PRIMITIVE_CDR:
+        LOG(next_argument(EXPR, ARGS));
+        assert(null_p(ARGS));
+        if (!pair_p(EXPR))
                 evaluate_incompatible(__LINE__, failure);
-        else
-                nsin = ndex = NIL;
-        validated_argument(ACC, ARGS, true, rope_p, failure);
-        if (null_p(ACC))
-                ACC = rope_node_new_length(false, false, 0, nsin, ndex, failure);
-        else
-                ACC = rope_node_new_clone(false, false, ACC, nsin, ndex,
-                        failure);
+        LOG(ACC = lcdr(EXPR));
         break;
 
-@ @<Implement...@>=
-case PRIMITIVE_TREE_P:
-        ACC = predicate(tree_p(lcar(ARGS)));
-        break;
-case PRIMITIVE_TREE_PLAIN_P:
-        ACC = predicate(plain_tree_p(lcar(ARGS)));
-        break;
-case PRIMITIVE_TREE_SIN_THREADABLE_P:
-        ACC = predicate(tree_sin_threadable_p(lcar(ARGS)));
-        break;
-case PRIMITIVE_TREE_DEX_THREADABLE_P:
-        ACC = predicate(tree_dex_threadable_p(lcar(ARGS)));
-        break;
+@* Object primitives.
 
-@ @<Implement...@>=
-case PRIMITIVE_TREE_SIN_HAS_THREAD_P:
-        if (!tree_sin_threadable_p(lcar(ARGS)))
-                ACC = LFALSE;
-        else
-                ACC = tree_sin_has_thread_p(lcar(ARGS));
-        break;
-case PRIMITIVE_TREE_DEX_HAS_THREAD_P:
-        if (!tree_dex_threadable_p(lcar(ARGS)))
-                ACC = LFALSE;
-        else
-                ACC = tree_dex_has_thread_p(lcar(ARGS));
-        break;
-case PRIMITIVE_TREE_SIN_IS_LIVE_P:
-        ACC = predicate(dryad_sin_p(lcar(ARGS)));
-        break;
-case PRIMITIVE_TREE_DEX_IS_LIVE_P:
-        ACC = predicate(dryad_dex_p(lcar(ARGS)));
-        break;
+@ @<Primitive \C...@>=
 
-@ @<Implement...@>=
-case PRIMITIVE_NEW_TREE_PLAIN_NODE:
-        validated_argument(ndex, ARGS, true, plain_tree_p, failure);
-        validated_argument(nsin, ARGS, true, plain_tree_p, failure);
-#if 0
-        ACC = tree_node_new(lcar(ARGS), nsin, ndex, failure);
-#endif
-        break;
-case PRIMITIVE_NEW_TREE_BIWARD_NODE:
-        validated_argument(ndex, ARGS, true, tree_threadable_p, failure);
-        validated_argument(nsin, ARGS, true, tree_threadable_p, failure);
-#if 0
-        ACC = tree_threadable_node_new(lcar(ARGS), nsin, ndex, failure);
-#endif
-        break;
-case PRIMITIVE_NEW_TREE_SINWARD_NODE:
-        validated_argument(ndex, ARGS, true, tree_sin_threadable_p, failure);
-        validated_argument(nsin, ARGS, true, tree_sin_threadable_p, failure);
-        if (tree_dex_threadable_p(nsin) || tree_dex_threadable_p(ndex))
-                evaluate_incompatible(__LINE__, failure);
-#if 0
-        ACC = tree_sin_threadable_node_new(lcar(ARGS), nsin, ndex, failure);
-#endif
-        break;
-case PRIMITIVE_NEW_TREE_DEXWARD_NODE:
-        validated_argument(ndex, ARGS, true, tree_dex_threadable_p, failure);
-        validated_argument(nsin, ARGS, true, tree_dex_threadable_p, failure);
-        if (tree_sin_threadable_p(nsin) || tree_sin_threadable_p(ndex))
-                evaluate_incompatible(__LINE__, failure);
-#if 0
-        ACC = tree_dex_threadable_node_new(lcar(ARGS), nsin, ndex, failure);
-#endif
-        break;
-@#
-case PRIMITIVE_TREE_RETHREAD_M:
-        validated_argument(ndex, ARGS, false, boolean_p, failure);
-        validated_argument(nsin, ARGS, false, boolean_p, failure);
-        if (!tree_p(lcar(ARGS)))
-                evaluate_incompatible(__LINE__, failure);
-#if 0
-        ACC = treeish_rethread_m(lcar(ARGS), true_p(nsin), true_p(ndex),
-                failure);
-#endif
-        break;
+@ @<Primitive schema...@>=
 
-@ @<Implement...@>=
-case PRIMITIVE_TREE_DATUM:
-        validated_argument(value, ARGS, false, tree_p, failure);
-        ACC = dryad_datum(value);
-        break;
+@ @<Primitive imp...@>=
 
 @* Serialisation.
 
@@ -7219,7 +7082,7 @@ if (pair_p(o)) {
                 }
                 if (!null_p(o)) {
                         if (detail)
-                                serial_append(buffer, " . ", 1, failure);
+                                serial_append(buffer, " . ", 3, failure);
                         serial_imp(o, detail, maxdepth - 1, true, buffer,
                                 cycles, failure);
                 }
@@ -7307,8 +7170,8 @@ serial_rope (cell        o,
 else if (primitive_p(o) && detail != SERIAL_ROUND) {
         if (detail) {
                 serial_append(buffer, "#{primitive ", 13, failure);
-                serial_append(buffer, Iprimitive[primitive(o)].label,
-                        (int) strlen (Iprimitive[primitive(o)].label), failure);
+                serial_append(buffer, Iprimitive[primitive(o)].schema,
+                        (int) strlen (Iprimitive[primitive(o)].schema), failure);
                 serial_append(buffer, "}", 1, failure);
         }
         append = "\0";
@@ -7336,27 +7199,27 @@ else if (environment_p(o) && detail != SERIAL_ROUND) {
 @ \.{table free/length (id . value)} (|id = hash % length|).
 
 @<Serialise an object@>=
-else if (keytable_p(o) && detail != SERIAL_ROUND) {
+else if (hashtable_p(o) && detail != SERIAL_ROUND) {
         if (!maxdepth)
-                append = "\014#{table ...}";
+                append = "\014#{hash ...}";
         else {
                 if (detail)
-                        serial_append(buffer, "#{table ", 8, failure);
-                serial_imp(fix(keytable_free(o)), SERIAL_ROUND, 1, true,
+                        serial_append(buffer, "#{hash ", 8, failure);
+                serial_imp(fix(hashtable_free(o)), SERIAL_ROUND, 1, true,
                         buffer, cycles, failure);
                 if (detail)
                         serial_append(buffer, "/", 1, failure);
-                serial_imp(fix(keytable_length(o)), SERIAL_ROUND, 1, true,
+                serial_imp(fix(hashtable_length(o)), SERIAL_ROUND, 1, true,
                         buffer, cycles, failure);
-                for (i = 0; i < keytable_length(o); i++) {
-                        if (!null_p(keytable_ref(o, i))) {
+                for (i = 0; i < hashtable_length(o); i++) {
+                        if (!null_p(hashtable_ref(o, i))) {
                                 if (detail)
                                         serial_append(buffer, " (", 2, failure);
                                 serial_imp(fix(i), detail, maxdepth - 1, true,
                                         buffer, cycles, failure);
                                 if (detail)
                                         serial_append(buffer, " . ", 3, failure);
-                                serial_imp(keytable_ref(o, i), detail, maxdepth - 1, true,
+                                serial_imp(hashtable_ref(o, i), detail, maxdepth - 1, true,
                                         buffer, cycles, failure);
                                 if (detail)
                                         serial_append(buffer, ")", 1, failure);
@@ -7494,11 +7357,6 @@ else if (lexeme_p(o) && detail != SERIAL_ROUND) {
         }
 }
 
-@ @<Serialise an object@>=
-else if (keytable_p(o)) {
-        append = NULL;
-}
-
 @** Miscellanea.
 
 @<Fun...@>=
@@ -7515,6 +7373,16 @@ high_bit (digit o)
                         return i + 1;
         return o;
 }
+
+@ |CANNOT| is negative so that negative numbers mean mean no while
+|CAN| is zero so that a test of zero is the most permisssive.
+
+@<Type def...@>=
+typedef enum {
+        CANNOT = -1,
+        CAN    = 0,
+        MUST   = 1,
+} Vmaybe;
 
 @ @<Repair the system headers@>=
 #ifdef __GNUC__ /* \AM\ clang */
@@ -7656,7 +7524,7 @@ lapi_env_search (cell        env,
                 env = Environment;
         if (!environment_p(env) || !symbol_p(label))
                 siglongjmp(*failure, LERR_INCOMPATIBLE);
-        r = env_search(env, label, true, failure);
+        r = env_search(env, label, failure);
         if (undefined_p(r))
                 siglongjmp(*failure, LERR_MISSING);
         else
@@ -7673,7 +7541,7 @@ lapi_env_define (cell        env,
                 env = Environment;
         if (!environment_p(env) || !symbol_p(label) || !defined_p(value))
                 siglongjmp(*failure, LERR_INCOMPATIBLE);
-        env_define(env, label, value, failure);
+        env_define_m(env, label, value, failure);
 }
 
 void
@@ -7686,7 +7554,7 @@ lapi_env_set (cell        env,
                 env = Environment;
         if (!environment_p(env) || !symbol_p(label) || !defined_p(value))
                 siglongjmp(*failure, LERR_INCOMPATIBLE);
-        env_set(env, label, value, failure);
+        env_set_m(env, label, value, failure);
 }
 
 void
@@ -7698,7 +7566,7 @@ lapi_env_clear (cell        env,
                 env = Environment;
         if (!environment_p(env) || !symbol_p(label))
                 siglongjmp(*failure, LERR_INCOMPATIBLE);
-        env_clear(env, label, failure);
+        env_clear_m(env, label, failure);
 }
 
 void
@@ -7710,7 +7578,7 @@ lapi_env_unset (cell        env,
                 env = Environment;
         if (!environment_p(env) || !symbol_p(label))
                 siglongjmp(*failure, LERR_INCOMPATIBLE);
-        env_unset(env, label, failure);
+        env_unset_m(env, label, failure);
 }
 
 @ @<Fun...@>=
@@ -7752,7 +7620,6 @@ mem_init (void)
         @<Save register locations@>@;
         @<Initialise storage@>@;
         @<Register primitive operators@>@;
-        @<Prepare constants \AM\ symbols@>@;
         ENV = env_extend(Root, failure);
 }
 

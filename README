@@ -6,7 +6,7 @@ To build on OpenBSD:
         export DEBUG=-DLDEBUG
 
         No optimisation and better debugging symbols are also helpful:
-        export DEBUG=-DLDEBUG -O0 -g
+        export DEBUG='-DLDEBUG -O0 -g'
 
 Useful targets:
 
@@ -33,8 +33,8 @@ Dependencies:
 
         The makefile has been tuned to work equally with BSD and GNU make.
 
-        The REPL, which is very much a work in progress, depends on the
-        editline library built into BSD.
+The REPL, which is very much a work in progress, depends on the
+editline library built into BSD.
 
 CWEB and TeX are both part of the astronomically huge TeX Live
 distribution. The necessary parts can be installed on OpenBSD with
@@ -43,6 +43,7 @@ require "texlive-extra-utils". Reports for other systems and
 distributions are welcome --- the file you need which will ultimately
 pull in all the necessary TeX parts is "cwebmac.tex".
 
-[*] Optional; TeX is required to produce the PDF files which aren't
-needed to build and run lossless and CWEB generates the C source
-and header files which are already included in the tarball distribution.
+[*] Optional; TeX is required to produce the PDF files which
+    aren't needed to build and run lossless and CWEB generates the
+    C source and header files which are already included in the
+    tarball distribution.

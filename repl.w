@@ -110,13 +110,15 @@ main (int    argc,
 
         lprint("Initialising...\n%s\n", INITIALISE);
         stack_push(NIL, &cleanup);
+#if 1
         SS(0, x = rope_new_buffer(false, false, INITIALISE,
                 sizeof (INITIALISE) - 1, &cleanup));
-        SS(0, x = lex_rope(x, &cleanup));
+        SS(0, x = lex_rope(SO(0), &cleanup));
         valid = true;
-        SS(0, x = parse(x, &valid, &cleanup));
+        SS(0, x = parse(SO(0), &valid, &cleanup));
         assert(valid);
         evaluate_program(SO(0), &cleanup);
+#endif
         ACC = VOID;
 
 stack_push(NIL, &cleanup);
@@ -161,7 +163,7 @@ if (length > 0) {
                 history(H, &event, H_ENTER, line);
         SS(0, x = rope_new_buffer(false, false, line, length, &cleanup));
         if (pending) {
-        serial(lapi_User_Register(UNDEFINED), SERIAL_DETAIL, 12, NIL, NULL, &cleanup);
+        serial(lapi_User_Register(UNDEFINED), SERIAL_DETAIL, 4, NIL, NULL, &cleanup);
                 SS(0, x = cons(SO(0), NIL, &cleanup));
                 SS(0, x = cons(lapi_User_Register(UNDEFINED), x, &cleanup));
                 SS(0, x = cons(symbol_new_const("rope/append"), x, &cleanup));
@@ -192,7 +194,7 @@ if (length > 0) {
                 while (pair_p(x)) {
                         printf("  %d %s == ", fix_value(lcar(lcar(x))),
                                 Ierror[fix_value(lcar(lcar(x)))].message);
-                        serial(lcar(x), SERIAL_DETAIL, 12, NIL, NULL, &cleanup);
+                        serial(lcar(x), SERIAL_DETAIL, 4, NIL, NULL, &cleanup);
                         printf("\n");
                         SS(0, x = lcdr(x));
                 }
@@ -201,7 +203,7 @@ if (length > 0) {
                 pending = false;
         }
         printf("DONE ");
-        serial(Accumulator, SERIAL_DETAIL, 12, NIL, NULL, &cleanup);
+        serial(Accumulator, SERIAL_DETAIL, 4, NIL, NULL, &cleanup);
         printf("\n");
 } else
         printf("\n");
