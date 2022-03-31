@@ -43,6 +43,11 @@ llfig-1.pdf: llfig.mp
 	mpost llfig.mp
 	mptopdf llfig.?
 
+repl.o: barbaroi.h
+
+barbaroi.h: barbaroi.ll
+	bin/lloader INITIALISE <barbaroi.ll >barbaroi.h
+
 # Compilers:
 # The LDFLAGS are repeated here to build on linux; there's likely a better way
 lossless: lossless.o ffi.o repl.o

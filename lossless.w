@@ -1424,7 +1424,7 @@ segment_resize_m (cell        o,
         assert(header == 0);
         assert(segment_stride(o) == 0);
         assert(null_p(Tmp_ier));
-        Tmp_ier = o;
+        Tmp_ier = o; /* BUG: |o| must mutate not be discarded. */
         if (failure_p(reason = sigsetjmp(cleanup, 1)))
                 unwind(failure, reason, true, 0);
         r = segment_new(0, nlength, 0, 0, &cleanup);
@@ -2119,11 +2119,13 @@ cell hashtable_new_imp (long, sigjmp_buf *);
 Vhash hashtable_rehash (cell, sigjmp_buf *);
 void hashtable_remove_m (cell, long);
 cell hashtable_replace_m (cell, cell, cell, bool, sigjmp_buf *);
-void hashtable_save_m (cell, long, cell);
+void hashtable_save_m (cell, long, cell, bool);
 int hashtable_scan (cell, Vhash, int (*)(cell, void *, sigjmp_buf *),
         void *, sigjmp_buf *);
 cell hashtable_search (cell, cell, sigjmp_buf *);
 cell hashtable_set_imp (cell, cell, cell, Vmaybe, sigjmp_buf *);
+cell hashtable_fetch (cell, cell, sigjmp_buf *);
+cell hashtable_pairs (cell, cell (*accessor)(cell), sigjmp_buf *);
 
 @ If the table is small enough then the cost of a hash collision
 is low so it is permitted to fill up otherwise the number of cells
@@ -2165,8 +2167,8 @@ hashtable_enlarge_m (cell        o,
                      Vhash     (*hashfn)(cell, sigjmp_buf *),
                      sigjmp_buf *failure)
 {
-        static int Sobject = 1, Sret = 0;
-        cell r = NIL, s;
+        static int Sobject = 1, Stmp = 0;
+        cell n, s;
         long i, j, nlength;
         long nfree;
         Vhash nhash;
@@ -2187,25 +2189,30 @@ hashtable_enlarge_m (cell        o,
         stack_protect(2, o, NIL, failure);
         if (failure_p(reason = sigsetjmp(cleanup, 1)))
                 unwind(failure, reason, false, 2);
-        SS(Sret, r = hashtable_new(nlength, &cleanup));
+        SS(Stmp, n = hashtable_new(nlength, &cleanup));
         for (i = 0; i < hashtable_length(SO(Sobject)); i++)
                 if (Interrupt)
                         siglongjmp(cleanup, LERR_INTERRUPT);
                 else if (!null_p((s = array_ref(SO(Sobject), i))) && defined_p(s)) {
                         nhash = hashfn(s, &cleanup);
                         for (j = nhash % nlength;
-                            !null_p(hashtable_ref(r, j));
+                            !null_p(hashtable_ref(n, j));
                             j--)
                                 if (j == 0)
                                         j = nlength - 1;
-                        array_set_m(r, j, s);
+                        array_set_m(n, j, s);
                         nfree--;
                 }
-        r = SO(Sret);
-        hashtable_set_blocked_m(r, 0);
-        hashtable_set_free_m(r, nfree);
+        n = SO(Stmp);
+        hashtable_set_blocked_m(n, 0);
+        hashtable_set_free_m(n, nfree);
+        if (pointer_p(SO(Sobject)) && !null_array_p(SO(Sobject))) {
+                o = SO(Sobject);
+                pointer_set_m(o, pointer(n));
+        } else
+                o = n;
         stack_clear(2);
-        return r;
+        return o;
 }
 
 @ If the location indicated by a hash value is in use the next
@@ -2247,14 +2254,17 @@ claimed.
 void
 hashtable_save_m (cell o,
                   long idx,
-                  cell datum)
+                  cell datum,
+                  bool replace)
 {
         assert(hashtable_p(o));
         assert(idx >= 0 && idx < hashtable_length(o));
         assert(hashtable_free_p(o));
-        assert(null_p(hashtable_ref(o, idx)));
+        if (!replace)
+                assert(null_p(hashtable_ref(o, idx)));
+        if (null_p(hashtable_ref(o, idx)))
+                hashtable_set_free_m(o, hashtable_free(o) - 1);
         array_set_m(o, idx, datum);
-        hashtable_set_free_m(o, hashtable_free(o) - 1);
 }
 
 @ If a value is removed from a hash table then it will no longer
@@ -2378,8 +2388,8 @@ again:
                 }
         } else if (replace == CANNOT)
                 siglongjmp(*failure, LERR_EXISTS);
-        hashtable_save_m(SO(Sobject), idx, cons(SO(Slabel), SO(Sdatum),
-                &cleanup));
+        hashtable_save_m(SO(Sobject), idx,
+                cons(SO(Slabel), SO(Sdatum), &cleanup), replace != CANNOT);
         r = SO(Sobject);
         stack_clear(3);
         return r;
@@ -2428,6 +2438,57 @@ hashtable_search (cell        o,
                 return UNDEFINED;
         else
                 return r;
+}
+
+@ @c
+cell
+hashtable_pairs (cell        o,
+                 cell      (*accessor)(cell),
+                 sigjmp_buf *failure)
+{
+        static int Sobject = 2, Stmp = 1, Sret = 0;
+        cell next, p, r;
+        int i;
+        sigjmp_buf cleanup;
+        Verror reason = LERR_NONE;
+
+        assert(hashtable_p(o));
+        if (null_p(o))
+                return o;
+        stack_protect(3, o, NIL, NIL, failure);
+        if (failure_p(reason = sigsetjmp(cleanup, 1)))
+                unwind(failure, reason, false, 3);
+        SS(Sret, cons(NIL, NIL, &cleanup));
+        SS(Stmp, SO(Sret));
+        for (i = 0; i < hashtable_length(SO(Sobject)); i++) {
+                p = hashtable_ref(SO(Sobject), i);
+                if (null_p(p) || undefined_p(p) || undefined_p(lcar(p)))
+                        continue;
+                if (accessor == NULL)
+                        next = p;
+                else
+                        next = accessor(p);
+                next = cons(next, NIL, &cleanup);
+                lcdr_set_m(SO(Stmp), next);
+                SS(Stmp, next);
+        }
+        r = lcdr(SO(Sret));
+        stack_clear(3);
+        return r;
+}
+
+@ @c
+cell
+hashtable_fetch (cell        o,
+                 cell        label,
+                 sigjmp_buf *failure)
+{
+        cell r;
+
+        assert(hashtable_p(o));
+        assert(symbol_p(label));
+        r = hashtable_search(o, label, failure);
+        return r;
 }
 
 @ @d SYMBOL_MAX        INT_MAX
@@ -2569,7 +2630,7 @@ search:
         }
         for (i = 0; i < length; i++)
                 symbol_buffer(r)[i] = buf[i];
-        hashtable_save_m(Symbol_Table, idx, r);
+        hashtable_save_m(Symbol_Table, idx, r, false);
         return r;
 }
 
@@ -5014,7 +5075,6 @@ noisy_false_symbol:
         WARN();
 default:@;
 false_symbol:
-        lexar_putback(Silex);@+
         goto symbol;
 
 @ Curious numbers aside, numbers might not be a number --- the
@@ -5900,7 +5960,7 @@ pattern although a few liberties have been taken with some functional
 accessors and \CEE/ contstructs.
 
 @.TODO@>
-@d evaluate_desyntax(O) (syntax_p(O) ? syntax_datum(O) : (O))
+@d desyntax(O) (syntax_p(O) ? syntax_datum(O) : (O))
 @d evaluate_incompatible(L,F) do { /* Inadquate arity-mismatch handling. */
         lprint("incompatibility at line %d\n", (L));
         siglongjmp(*(F), LERR_INCOMPATIBLE);
@@ -5911,8 +5971,7 @@ evaluate (cell        o,
           sigjmp_buf *failure)
 {
         cell formals, value;
-        bool flag;
-        int count, min, max;
+        int count, flag, min, max;
         char *schema;
 
         assert(null_p(CLINK) && null_p(ARGS));
@@ -5928,7 +5987,7 @@ is (re-)started here.
 
 @<Evaluate a complex expression@>=
 Begin:@;
-        EXPR = evaluate_desyntax(EXPR);
+        EXPR = desyntax(EXPR);
         if (pair_p(EXPR))         LOG(goto Combine_Start);
         else if (!symbol_p(EXPR)) LOG(goto Finish);
         LOG(ACC = env_search(ENV, EXPR, failure));
@@ -6142,7 +6201,7 @@ Combine_Applicative: /* Store the closure and evaluate its arguments. */
         LOG(EXPR  = NIL);
         LOG(formals = closure_formals(ACC));
         count = 0;
-        while (pair_p(ARGS)) {
+        while (pair_p(desyntax(ARGS))) {
                 if (null_p(formals))
                         count = 1;
                 else if (pair_p(formals))
@@ -6150,11 +6209,11 @@ Combine_Applicative: /* Store the closure and evaluate its arguments. */
                 LOG(ACC   = lcar(ARGS));
                 LOG(ACC   = cons(LTRUE, ACC, failure));
                 LOG(EXPR  = cons(ACC, EXPR, failure));
-                LOG(ARGS  = lcdr(ARGS));
+                LOG(ARGS  = lcdr(desyntax(ARGS)));
         }
         if (!null_p(ARGS))
                 siglongjmp(*failure, LERR_IMPROPER);
-        if (count || pair_p(formals))
+        if (count || pair_p(desyntax(formals)))
                 evaluate_incompatible(__LINE__, failure);
         LOG(goto Combine_Continue);
 
@@ -6168,10 +6227,11 @@ if it must not.
         (VAR) = lcar(ARGS);
         (ARGS) = lcdr(ARGS);
 } while (0)
-@d validated_argument(VAR, ARGS, NULLABLE, PREDICATE, FAILURE) do {
-        next_argument((VAR), (ARGS));
-        if ((!(NULLABLE) && null_p(VAR)) || !PREDICATE(VAR))
-                evaluate_incompatible(__LINE__, (FAILURE));
+@d validated_argument(V,A,S,N,P,F) do {
+        next_argument((V), (A));
+        if ((!(N) && (null_p((S) ? desyntax(V) : (V)))) ||
+                    !P((S) ? desyntax(V) : (V)))
+                evaluate_incompatible(__LINE__, (F));
 } while (0)
 @<Eval...@>=
 Combine_Pair: /* Prepare to append an argument, possibly after evaluation. */
@@ -6280,16 +6340,16 @@ case PRIMITIVE_DO: /* (Operative) */
         assert(null_p(ARGS));
         LOG(ARGS  = note_new(Sym_EVALUATE, VOID, NIL, failure));
         LOG(ACC   = ARGS);
-        LOG(EXPR  = evaluate_desyntax(EXPR));
+        LOG(EXPR  = desyntax(EXPR));
         while (!null_p(EXPR)) {
                 if (!pair_p(EXPR))
                         evaluate_incompatible(__LINE__, failure);
                 LOG(value = note_new(Sym_EVALUATE,
-                        evaluate_desyntax(lcar(EXPR)), NIL, failure));
+                        desyntax(lcar(EXPR)), NIL, failure));
                 LOG(note_set_cdr_m(ACC, value));
                 LOG(ACC   = value);
                 LOG(EXPR  = lcdr(EXPR));
-                LOG(EXPR  = evaluate_desyntax(EXPR));
+                LOG(EXPR  = desyntax(EXPR));
         }
         LOG(note_set_cdr_m(ACC, CLINK));
         LOG(CLINK = ARGS);
@@ -6350,18 +6410,18 @@ Each symbol should be unique but this is not validated (TODO).
 
 @.TODO@>
 @<Validate applicative (\.{lambda}) formals@>=
-while (pair_p(evaluate_desyntax(ARGS))) {
-        arg = lcar(evaluate_desyntax(ARGS));
-        LOG(ARGS = lcdr(evaluate_desyntax(ARGS)));
+while (pair_p(desyntax(ARGS))) {
+        arg = lcar(desyntax(ARGS));
+        LOG(ARGS = lcdr(desyntax(ARGS)));
         assert(syntax_p(arg));
         arg = syntax_datum(arg);
         if (!symbol_p(arg))
                 evaluate_incompatible(__LINE__, failure);
         LOG(ACC = cons(arg, ACC, failure));
 }
-if (symbol_p(evaluate_desyntax(ARGS)))
-        LOG(ARGS = evaluate_desyntax(ARGS));
-else if (!null_p(evaluate_desyntax(ARGS)))
+if (symbol_p(desyntax(ARGS)))
+        LOG(ARGS = desyntax(ARGS));
+else if (!null_p(desyntax(ARGS)))
         evaluate_incompatible(__LINE__, failure);
 while (!null_p(ACC)) {
         LOG(ARGS = cons(lcar(ACC), ARGS, failure));
@@ -6396,19 +6456,19 @@ of state must be, and this is validated although each binding
 stack_reserve(3, failure);
 if (failure_p(reason = sigsetjmp(cleanup, 1)))
         unwind(failure, reason, false, 3);
-ARGS = evaluate_desyntax(ARGS);
+ARGS = desyntax(ARGS);
 while (pair_p(ARGS)) {
         arg = lcar(ARGS);
-        arg = evaluate_desyntax(arg);
+        arg = desyntax(arg);
         if (!pair_p(arg))
                 evaluate_incompatible(__LINE__, failure);
         state = lcdr(arg);
         arg = lcar(arg);
-        arg = evaluate_desyntax(arg);
+        arg = desyntax(arg);
         if (!symbol_p(arg) || !pair_p(state) || !null_p(lcdr(state)))
                 evaluate_incompatible(__LINE__, failure);
         state = lcar(state);
-        state = evaluate_desyntax(state);
+        state = desyntax(state);
         if (state == Sym_VOV_ARGS || state == Sym_VOV_ARGUMENTS)@/
                 save_vov_informal(arg, Svargs);
         else if (state == Sym_VOV_ENV || state == Sym_VOV_ENVIRONMENT)
@@ -6449,7 +6509,7 @@ validate_arguments (sigjmp_buf *failure)
         stack_reserve(2, failure);
         if (failure_p(reason = sigsetjmp(cleanup, 1)))
                 unwind(failure, reason, false, 2);
-        LOG(SS(Sname, evaluate_desyntax(ACC)));
+        LOG(SS(Sname, desyntax(ACC)));
         LOG(SS(Sarg, ARGS));
         while (pair_p(SO(Sname))) {
                 LOG(name = lcar(SO(Sname)));
@@ -6538,7 +6598,7 @@ case PRIMITIVE_IF: /* (Operative) */
         LOG(EXPR  = cons(EXPR, VOID, failure));
         if (!null_p(ARGS))
                 LOG(lcdr_set_m(EXPR, lcar(ARGS))); /* Alternate */
-        LOG(EXPR  = false_p(ACC) ? lcdr(EXPR) : lcar(EXPR));
+        LOG(EXPR  = false_p(desyntax(ACC)) ? lcdr(EXPR) : lcar(EXPR));
         goto Begin;
 
 @* Mutation Primitives \.{define!} \AM\ \.{set!}.
@@ -6546,12 +6606,16 @@ case PRIMITIVE_IF: /* (Operative) */
 @<Primitive \C...@>=
 PRIMITIVE_CURRENT_ENVIRONMENT,@/
 PRIMITIVE_DEFINE_M,@/
+PRIMITIVE_ENVIRONMENT_EXTEND,@/
+PRIMITIVE_ENVIRONMENT_P,@/
 PRIMITIVE_ROOT_ENVIRONMENT,@/
 PRIMITIVE_SET_M@&,@/
 
 @ @<Primitive schema...@>=
 [PRIMITIVE_CURRENT_ENVIRONMENT] = { "00__current-environment", NIL, },@/
 [PRIMITIVE_DEFINE_M]            = { "E!:_define!",             NIL, },@/
+[PRIMITIVE_ENVIRONMENT_EXTEND]  = { "11__environment/extend",  NIL, },@/
+[PRIMITIVE_ENVIRONMENT_P]       = { "11__environment?",        NIL, },@/
 [PRIMITIVE_ROOT_ENVIRONMENT]    = { "00__root-environment",    NIL, },@/
 [PRIMITIVE_SET_M]               = { "E!:_set!",                NIL, }@&,@/
 
@@ -6564,6 +6628,12 @@ or (define! <env> (<sym> . <formals>) . <body>)
  == (define! <env> ,(car <pair>) (lambda ,(cdr <pair) . <rest>))
 
 @<Primitive imp...@>=
+case PRIMITIVE_ENVIRONMENT_P:
+        primitive_predicate(environment_p);
+case PRIMITIVE_ENVIRONMENT_EXTEND:
+        LOG(validated_argument(ACC, ARGS, false, false, environment_p, failure));
+        LOG(ACC = env_extend(ACC, failure));
+        break;
 case PRIMITIVE_CURRENT_ENVIRONMENT:
         assert(null_p(ARGS));
         LOG(ACC = ENV);
@@ -6575,17 +6645,15 @@ case PRIMITIVE_ROOT_ENVIRONMENT:
 case PRIMITIVE_DEFINE_M:
 case PRIMITIVE_SET_M:
         flag = (primitive(ACC) == PRIMITIVE_DEFINE_M);
-        LOG(validated_argument(ACC, ARGS, false, environment_p, failure));
+        LOG(validated_argument(ACC, ARGS, false, false, environment_p, failure));
         LOG(next_argument(EXPR, ARGS)); /* Label or named Formals */
-        LOG(EXPR  = evaluate_desyntax(EXPR));
+        LOG(EXPR  = desyntax(EXPR));
         if (pair_p(EXPR)) { /* Named applicative closure: \.(Label \.. Formals\.) */
-                LOG(ARGS  = cons(lcdr(EXPR), ARGS, failure)); /* Body */
+                LOG(ARGS  = cons(lcdr(EXPR), lcar(ARGS), failure)); /* Body */
                 LOG(ARGS  = cons(Iprimitive[PRIMITIVE_LAMBDA].box, ARGS,
                         failure));
                 LOG(EXPR  = lcar(EXPR)); /* Real binding label. */
-                LOG(EXPR  = evaluate_desyntax(EXPR));
-                LOG(ARGS  = cons(Iprimitive[PRIMITIVE_LAMBDA].box, ARGS,
-                        failure));
+                LOG(EXPR  = desyntax(EXPR));
         } else if (symbol_p(EXPR)) {
                 LOG(ARGS  = lcar(ARGS));
                 if (!pair_p(ARGS) || !null_p(lcdr(ARGS)))
@@ -6606,8 +6674,8 @@ another primitive to |Return| to).
 Mutate_Environment:
         LOG(EXPR  = note_car(CLINK)); /* \.(Environment new? \.. Label\.) */
         LOG(CLINK = note_cdr(CLINK));
-        LOG(next_argument(ENV, EXPR));
-        LOG(next_argument(ARGS, EXPR));
+        LOG(next_argument(ENV, EXPR)); /* Already validated */
+        LOG(next_argument(ARGS, EXPR)); /* \ditto\ */
         if (true_p(ARGS))
                 LOG(env_define_m(ENV, EXPR, ACC, failure));
         else
@@ -6651,6 +6719,7 @@ PRIMITIVE_VOID_P@&,@/
 @d primitive_predicate(O) do {
         next_argument(ACC, ARGS);
         assert(null_p(ARGS));
+        ACC  = desyntax(ACC);
         ACC  = predicate(O(ACC));
 } while (0); break
 @<Primitive imp...@>=
@@ -6666,6 +6735,8 @@ case PRIMITIVE_OPERATIVE_P:
         primitive_predicate(operative_p);
 case PRIMITIVE_PAIR_P:
         primitive_predicate(pair_p);
+case PRIMITIVE_SYMBOL_P:
+        primitive_predicate(symbol_p);
 case PRIMITIVE_TRUE_P:
         primitive_predicate(true_p);
 case PRIMITIVE_VOID_P:
@@ -6684,28 +6755,111 @@ case PRIMITIVE_CONS:
         break;
 
 case PRIMITIVE_CAR:
-        LOG(next_argument(EXPR, ARGS));
-        assert(null_p(ARGS));
-        if (!pair_p(EXPR))
-                evaluate_incompatible(__LINE__, failure);
-        LOG(ACC = lcar(EXPR));
+        LOG(validated_argument(ACC, ARGS, true, false, pair_p, failure));
+        LOG(ACC = lcar(desyntax(ACC)));
         break;
 
 case PRIMITIVE_CDR:
-        LOG(next_argument(EXPR, ARGS));
-        assert(null_p(ARGS));
-        if (!pair_p(EXPR))
-                evaluate_incompatible(__LINE__, failure);
-        LOG(ACC = lcdr(EXPR));
+        LOG(validated_argument(ACC, ARGS, true, false, pair_p, failure));
+        LOG(ACC = lcdr(desyntax(ACC)));
         break;
 
 @* Object primitives.
 
-@ @<Primitive \C...@>=
+@<Primitive \C...@>=
+PRIMITIVE_NEW_HASHTABLE,
+PRIMITIVE_HASHTABLE_DELETE_M,@/
+PRIMITIVE_HASHTABLE_EXISTS_P,
+PRIMITIVE_HASHTABLE_FETCH,@/
+PRIMITIVE_HASHTABLE_FORGET_M,
+PRIMITIVE_HASHTABLE_INSERT_M,@/
+PRIMITIVE_HASHTABLE_KEYPAIRS,
+PRIMITIVE_HASHTABLE_KEYS,@/
+PRIMITIVE_HASHTABLE_P,
+PRIMITIVE_HASHTABLE_REPLACE_M,@/
+PRIMITIVE_HASHTABLE_STORE_M,
+PRIMITIVE_HASHTABLE_VALUES@&,@/
 
 @ @<Primitive schema...@>=
+[PRIMITIVE_NEW_HASHTABLE]       = { "00__new-hashtable", NIL, },@/
+[PRIMITIVE_HASHTABLE_DELETE_M]  = { "E!__delete!",       NIL, },@/
+[PRIMITIVE_HASHTABLE_EXISTS_P]  = { "E!__exists?",       NIL, },@/
+[PRIMITIVE_HASHTABLE_FETCH]     = { "E!__fetch",         NIL, },@/
+[PRIMITIVE_HASHTABLE_FORGET_M]  = { "E!__forget!",       NIL, },@/
+[PRIMITIVE_HASHTABLE_INSERT_M]  = { "E!E_insert!",       NIL, },@/
+[PRIMITIVE_HASHTABLE_KEYPAIRS]  = { "11__keypairs",      NIL, },@/
+[PRIMITIVE_HASHTABLE_KEYS]      = { "11__keys",          NIL, },@/
+[PRIMITIVE_HASHTABLE_P]         = { "11__hashtable?",    NIL, },@/
+[PRIMITIVE_HASHTABLE_REPLACE_M] = { "E!E_replace!",      NIL, },@/
+[PRIMITIVE_HASHTABLE_STORE_M]   = { "E!E_store!",        NIL, },@/
+[PRIMITIVE_HASHTABLE_VALUES]    = { "11__values",        NIL, }@&,@/
 
 @ @<Primitive imp...@>=
+case PRIMITIVE_HASHTABLE_P:
+        primitive_predicate(hashtable_p);
+case PRIMITIVE_NEW_HASHTABLE:
+        ACC = hashtable_new(1, failure);
+        break;
+
+@ @<Primitive imp...@>=
+{
+        cell (*accessor)(cell) = NULL;
+case PRIMITIVE_HASHTABLE_KEYS:
+        accessor = lcar;@+
+        goto Hash_Table_Scan;
+case PRIMITIVE_HASHTABLE_VALUES:
+        accessor = lcdr;@+
+        goto Hash_Table_Scan;
+case PRIMITIVE_HASHTABLE_KEYPAIRS:
+        accessor = NULL;
+Hash_Table_Scan:
+        validated_argument(ACC, ARGS, false, false, hashtable_p, failure);
+        ACC = hashtable_pairs(ACC, accessor, failure);
+        break;
+}
+
+@ @<Primitive imp...@>=
+case PRIMITIVE_HASHTABLE_EXISTS_P:@;
+case PRIMITIVE_HASHTABLE_FETCH:
+        flag = (primitive(ACC) == PRIMITIVE_HASHTABLE_EXISTS_P);
+        validated_argument(ACC, ARGS, false, false, hashtable_p, failure);
+        validated_argument(EXPR, ARGS, true, false, symbol_p, failure);
+        ACC = hashtable_fetch(ACC, desyntax(EXPR), failure);
+        if (flag)
+                ACC = predicate(defined_p(ACC));
+        else if (undefined_p(ACC))
+                siglongjmp(*failure, LERR_MISSING);
+        else
+                ACC = lcdr(ACC);
+        break;
+
+@ @<Primitive imp...@>=
+case PRIMITIVE_HASHTABLE_INSERT_M:
+        flag = CANNOT;@+
+        goto Hash_Table_Mutate;
+case PRIMITIVE_HASHTABLE_REPLACE_M:
+        flag = MUST;@+
+        goto Hash_Table_Mutate;
+case PRIMITIVE_HASHTABLE_STORE_M:
+        flag = CAN;
+Hash_Table_Mutate:
+        validated_argument(ACC, ARGS, false, false, hashtable_p, failure);
+        validated_argument(EXPR, ARGS, true, false, symbol_p, failure);
+        hashtable_set_imp(ACC, desyntax(EXPR), lcar(ARGS), flag, failure);
+        ACC = lcar(ARGS);
+        break;
+
+@ @<Primitive imp...@>=
+case PRIMITIVE_HASHTABLE_DELETE_M:@;
+case PRIMITIVE_HASHTABLE_FORGET_M:
+        flag = (primitive(ACC) == PRIMITIVE_HASHTABLE_DELETE_M) ? MUST : CAN;
+        validated_argument(ACC, ARGS, false, false, hashtable_p, failure);
+        validated_argument(EXPR, ARGS, true, false, symbol_p, failure);
+        hashtable_delete_m(ACC, desyntax(EXPR), false, flag, failure);
+        ACC = VOID;
+        break;
+
+
 
 @* Serialisation.
 
@@ -7261,8 +7415,9 @@ else if (closure_p(o) && detail != SERIAL_ROUND) {
 
 @ @<Serialise an object@>=
 else if (dlist_p(o) && detail != SERIAL_ROUND) {
-        if (!maxdepth)
+        if (!maxdepth||1)
                 append = "\006<LIST>";
+#if 0
         else {
                 if (prefix) {
                         if (detail)
@@ -7284,6 +7439,7 @@ else if (dlist_p(o) && detail != SERIAL_ROUND) {
                                 buffer, cycles, failure);
                 append = "\0";
         }
+#endif
 }
 
 @ @<Serialise an object@>=
@@ -7316,6 +7472,7 @@ else if (syntax_p(o) && detail != SERIAL_ROUND) {
                         serial_append(buffer, "#{syntax ", 9, failure);
                 serial_imp(syntax_datum(o), detail, maxdepth - 1, true, buffer,
                         cycles, failure);
+#if 0
                 if (detail)
                         serial_append(buffer, " ", 1, failure);
                 serial_imp(syntax_start(o), detail, maxdepth - 1, true, buffer,
@@ -7324,6 +7481,7 @@ else if (syntax_p(o) && detail != SERIAL_ROUND) {
                         serial_append(buffer, " ", 1, failure);
                 serial_imp(syntax_end(o), detail, maxdepth - 1, true, buffer,
                         cycles, failure);
+#endif
                 if (detail)
                         serial_append(buffer, "}", 1, failure);
                 append = "\0";

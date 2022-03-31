@@ -30,6 +30,8 @@ rope which \Ls/ parses and evaluates.
 
 #include "lossless.h"
 
+#include "barbaroi.h"
+
 @<Function declarations@>@;
 
 @<Global variables@>@;
@@ -46,49 +48,6 @@ History *H;
 
 @ The main application --- initialise editline \AM\ \Ls/ and process
 a line at a time.
-
-@d INITIALISE "(do\n\n"@/
-"(define! (root-environment) list? ((lambda ()\n"@/
-"        (define! (current-environment) list? (lambda (OBJECT)\n"@/
-"                (if (null? OBJECT)\n"@/
-"                        #t\n"@/
-"                        (if (pair? OBJECT)\n"@/
-"                                (list? (cdr OBJECT))\n"@/
-"                                #f))))\n"@/
-"        list?)))\n"@/
-"\n\n"@/
-"(define! (root-environment) and ((lambda ()\n"@/
-"        (define! (current-environment) and (vov ((ARGS vov/args) (ENV vov/env))\n"@/
-"                (arity! ARGS list?)\n"@/
-"                (if (null? ARGS)\n"@/
-"                        #t\n"@/
-"                        (do     (define! (current-environment) ARG (eval (car ARGS) ENV))\n"@/
-"                                (if ARG (if (null? (cdr ARGS))\n"@/
-"                                                ARG\n"@/
-"                                                (eval (cons and (cdr ARGS)) ENV))\n"@/
-"                                        #f)))))\n"@/
-"        and)))\n"@/
-"\n"@/
-"(define! (root-environment) or ((lambda ()\n"@/
-"        (define! (current-environment) or (vov ((ARGS vov/args) (ENV vov/env))\n"@/
-"                (arity! ARGS list?)\n"@/
-"                (if (null? ARGS)\n"@/
-"                        #f\n"@/
-"                        (do     (define! (current-environment) ARG (eval (car ARGS) ENV))\n"@/
-"                                (if ARG ARG (eval (cons or (cdr ARGS)) ENV))))))\n"@/
-"        or)))\n"@/
-"\n"@/
-"(define! (root-environment) not (lambda (OBJECT) (if OBJECT #f #t)))\n"@/
-"\n"@/
-"(define! (root-environment) so (lambda (OBJECT) (if OBJECT #t #f)))\n"@/
-"\n"@/
-"(define! (root-environment) arity! (lambda ARGS\n"@/
-"        #f))\n"@/
-"\n"@/
-"(define! (root-environment) maybe (lambda (PREDICATE)\n"@/
-"        (lambda (OBJECT)\n"@/
-"                (or (null? OBJECT) (PREDICATE OBJECT)))))\n"@/
-"\n\n)"
 
 @c
 int
@@ -203,7 +162,7 @@ if (length > 0) {
                 pending = false;
         }
         printf("DONE ");
-        serial(Accumulator, SERIAL_DETAIL, 4, NIL, NULL, &cleanup);
+        serial(Accumulator, SERIAL_DETAIL, 12, NIL, NULL, &cleanup);
         printf("\n");
 } else
         printf("\n");
