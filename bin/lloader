@@ -1,0 +1,14 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+print "#define " . shift . " \\\n" if @ARGV;
+
+while (<>) {
+        chomp;
+        s/[\"\'\?\\]/\\$&/g;
+        print "\"$_\\n\" \\\n";
+}
+
+print "\"\"\n";
