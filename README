@@ -10,6 +10,10 @@ To build on OpenBSD:
 
 Useful targets:
 
+        make # or make all      Everything
+
+        make clean all          Everything from scratch
+
         make lossless           Lossless executable
 
         make liblossless.so     As a linkable object
@@ -46,4 +50,5 @@ pull in all the necessary TeX parts is "cwebmac.tex".
 [*] Optional; TeX is required to produce the PDF files which
     aren't needed to build and run lossless and CWEB generates the
     C source and header files which are already included in the
-    tarball distribution.
+    tarball distribution, which lags behind this repository at
+    http://zeus.jtan.com/~chohag/lossless/ or http://chohag.github.io/.
