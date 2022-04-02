@@ -321,6 +321,7 @@ typedef enum {
         LERR_UNOPENED_CLOSE, /* Premature \.), \.] or \.\}. */
         LERR_UNPRINTABLE,    /* Failed serialisation attempt. */
         LERR_UNSCANNABLE,    /* Parser encountered |LEXICAT_INVALID|. */
+        LERR_USER,           /* A user-defined error. */
         LERR_LENGTH
 } Verror;
 
@@ -363,6 +364,7 @@ Oerror Ierror[LERR_LENGTH] = {@|
         [LERR_UNPRINTABLE]    = { "unprintable" },@|
         [LERR_UNSCANNABLE]    = { "unscannable-lexeme" },@|
         [LERR_EMPTY_TAIL]     = { "unterminated-tail" },@/
+        [LERR_USER]           = { "user-error" },@|
 };
 
 @ @<Extern...@>=
@@ -2259,7 +2261,7 @@ hashtable_save_m (cell o,
 {
         assert(hashtable_p(o));
         assert(idx >= 0 && idx < hashtable_length(o));
-        assert(hashtable_free_p(o));
+        assert(replace || hashtable_free_p(o));
         if (!replace)
                 assert(null_p(hashtable_ref(o, idx)));
         if (null_p(hashtable_ref(o, idx)))
@@ -5443,7 +5445,6 @@ and the current lexeme is {\it not\/} |LEXICAT_END| this indicates
 an attempt to close a list which was not opened.
 
 @<Finalise items stacked into |Swork|@>=
-c++;
 if (Interrupt)
         siglongjmp(cleanup, LERR_INTERRUPT);
 llex = SO(Sllex);
@@ -5460,6 +5461,7 @@ if (!syntax_p(x)) {
 }
 SS(Sbuild, cons(lcar(SO(Swork)), SO(Sbuild), &cleanup));
 SS(Swork, lcdr(SO(Swork)));
+c++;
 
 @ |LEXICAT_DOT| can only appear under constrained circumstances (or
 not at all). If |LEXICAT_OPEN| is found and the current lexeme {\it
@@ -6064,6 +6066,13 @@ Combine_Start: /* Save any |ARGS| in progress and |ENV| on |CLINK| to
         LOG(ARGS  = lcdr(EXPR)); /* Unevaluated arguments */
         LOG(CLINK = note_new(Sym_COMBINE_DISPATCH, ARGS, CLINK, failure));
         LOG(EXPR  = lcar(EXPR)); /* Unevaluated combiner */
+        if (Trace) {
+                lprint("(");
+                serial(EXPR, SERIAL_DETAIL, 1, NIL, NULL, failure);
+                lprint("\t");
+                serial(ARGS, SERIAL_DETAIL, 2, NIL, NULL, failure);
+                lprint(")\n");
+        }
         LOG(goto Begin);
 
 @ When control resumes after discovering the combiner the dispatch
@@ -6200,6 +6209,13 @@ Combine_Applicative: /* Store the closure and evaluate its arguments. */
         LOG(CLINK = note_new(Sym_COMBINE_READY, ACC, CLINK, failure));
         LOG(EXPR  = NIL);
         LOG(formals = closure_formals(ACC));
+#if 0
+        lprint("formals ");
+        serial(formals, SERIAL_DETAIL, 12, NIL, NULL, failure);
+        lprint("\nARGS ");
+        serial(ARGS, SERIAL_DETAIL, 12, NIL, NULL, failure);
+        lprint("\n");
+#endif
         count = 0;
         while (pair_p(desyntax(ARGS))) {
                 if (null_p(formals))
@@ -6561,6 +6577,30 @@ validate_operative (sigjmp_buf *failure)
 
         stack_clear(1);
 }
+
+@* \.{error} Primitive.
+
+@<Primitive \C...@>=
+PRIMITIVE_ERROR, PRIMITIVE_TRACE@&,
+
+@ @<Primitive schema...@>=
+[PRIMITIVE_ERROR] = { ":___error", NIL, }@&,
+[PRIMITIVE_TRACE] = { "11__trace", NIL, }@&,
+
+@ @<Global...@>=
+shared bool Trace = false;
+
+@ @<Extern...@>=
+extern shared bool Trace;
+
+@ @<Primitive imp...@>=
+case PRIMITIVE_ERROR:
+        LOG(next_argument(ACC, ARGS));
+        siglongjmp(failure, LERR_USER);
+case PRIMITIVE_TRACE:
+        LOG(validated_argument(ACC, ARGS, true, false, boolean_p, failure));
+        Trace = true_p(ACC);
+        break;
 
 @* \.{eval} Primitive.
 

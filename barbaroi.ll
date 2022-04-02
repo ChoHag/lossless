@@ -43,25 +43,49 @@
 
 (-: Grab-bag of various little utilities :-)
 
-(define! (root-environment) (arity! . ARGS)
-        #f) (-: To be defined later... :-)
-
 (define! (root-environment) quote (vov ((ARGS vov/args)) ARGS))
 
-(define! (root-environment) caar  (lambda (O)      (car (car O))))
-(define! (root-environment) cadr  (lambda (O)      (car (cdr O))))
-(define! (root-environment) cdar  (lambda (O)      (cdr (car O))))
-(define! (root-environment) cddr  (lambda (O)      (cdr (cdr O))))
+(define! (root-environment) caar   (lambda (O)           (car (car O))))
+(define! (root-environment) cadr   (lambda (O)           (car (cdr O))))
+(define! (root-environment) cdar   (lambda (O)           (cdr (car O))))
+(define! (root-environment) cddr   (lambda (O)           (cdr (cdr O))))
 
-(define! (root-environment) caaar (lambda (O) (car (car (car O)))))
-(define! (root-environment) caadr (lambda (O) (car (car (cdr O)))))
-(define! (root-environment) cadar (lambda (O) (car (cdr (car O)))))
-(define! (root-environment) caddr (lambda (O) (car (cdr (cdr O)))))
-(define! (root-environment) cdaar (lambda (O) (cdr (car (car O)))))
-(define! (root-environment) cdadr (lambda (O) (cdr (car (cdr O)))))
-(define! (root-environment) cddar (lambda (O) (cdr (cdr (car O)))))
-(define! (root-environment) cdddr (lambda (O) (cdr (cdr (cdr O)))))
+(define! (root-environment) caaar  (lambda (O)      (car (car (car O)))))
+(define! (root-environment) caadr  (lambda (O)      (car (car (cdr O)))))
+(define! (root-environment) cadar  (lambda (O)      (car (cdr (car O)))))
+(define! (root-environment) caddr  (lambda (O)      (car (cdr (cdr O)))))
+(define! (root-environment) cdaar  (lambda (O)      (cdr (car (car O)))))
+(define! (root-environment) cdadr  (lambda (O)      (cdr (car (cdr O)))))
+(define! (root-environment) cddar  (lambda (O)      (cdr (cdr (car O)))))
+(define! (root-environment) cdddr  (lambda (O)      (cdr (cdr (cdr O)))))
 
+(define! (root-environment) caaaar (lambda (O) (car (car (car (car O))))))
+(define! (root-environment) caaadr (lambda (O) (car (car (car (cdr O))))))
+(define! (root-environment) caadar (lambda (O) (car (car (cdr (car O))))))
+(define! (root-environment) caaddr (lambda (O) (car (car (cdr (cdr O))))))
+(define! (root-environment) cadaar (lambda (O) (car (cdr (car (car O))))))
+(define! (root-environment) cadadr (lambda (O) (car (cdr (car (cdr O))))))
+(define! (root-environment) caddar (lambda (O) (car (cdr (cdr (car O))))))
+(define! (root-environment) cadddr (lambda (O) (car (cdr (cdr (cdr O))))))
+(define! (root-environment) cdaaar (lambda (O) (cdr (car (car (car O))))))
+(define! (root-environment) cdaadr (lambda (O) (cdr (car (car (cdr O))))))
+(define! (root-environment) cdadar (lambda (O) (cdr (car (cdr (car O))))))
+(define! (root-environment) cdaddr (lambda (O) (cdr (car (cdr (cdr O))))))
+(define! (root-environment) cddaar (lambda (O) (cdr (cdr (car (car O))))))
+(define! (root-environment) cddadr (lambda (O) (cdr (cdr (car (cdr O))))))
+(define! (root-environment) cdddar (lambda (O) (cdr (cdr (cdr (car O))))))
+(define! (root-environment) cddddr (lambda (O) (cdr (cdr (cdr (cdr O))))))
+
+(define! (root-environment) arity! ((lambda ()
+        (define! (current-environment) (-arity!/validate! ARGS)
+                (if (null? ARGS)
+                        (do)
+                        (do     (define! (current-environment) VAL (car ARGS))
+                                (define! (current-environment) PREDICATE (cadr ARGS))
+                                (if (PREDICATE VAL)
+                                        (-arity!/validate! (cddr ARGS))
+                                        (eval (list error (quote . arity) PREDICATE VAL))))))
+        (lambda ARGS (-arity!/validate! ARGS)))))
 
 (-: Generic list traversal :-)
 
@@ -96,23 +120,46 @@
                 LIST list?)
         (define! (current-environment) (-fold FIRST REST)
                 (if (null? (cdr REST))
-                        (BUILD FIRST (FINISH (car REST)))
-                        (BUILD FIRST (-fold (car REST) (cdr REST)))))
+                        (BUILD FIRST (lambda () (FINISH (car REST))))
+                        (BUILD FIRST (lambda () (-fold (car REST) (cdr REST))))))
         (if (null? (cdr LIST))
                 (FINISH (car LIST))
                 (-fold (car LIST) (cdr LIST))))
 
-(define! (root-environment) (anti-penfold BUILD LIST)
+(define! (root-environment) (back-penfold BUILD LIST)
         (antifold BUILD (lambda (LAST) LAST) LIST))
 
-(define! (root-environment) (anti-fold BUILD FIX LIST)
+(define! (root-environment) (back-fold BUILD FIX LIST)
         (antifold BUILD (lambda (LAST) LAST) (cons FIX LIST)))
 
-(define! (root-environment) (penfold BUILD LIST)
-        (manifold BUILD (lambda (LAST) LAST) LIST))
+(define! (root-environment) (foldable BUILD FIX LIST)
+        (manifold BUILD (lambda (LAST) (BUILD LAST (lambda () FIX))) LIST))
 
-(define! (root-environment) (fold BUILD FIX LIST)
-        (manifold BUILD (lambda (LAST) (BUILD LAST FIX)) LIST))
+((lambda ()
+        (define! (current-environment) (-fold/continue BUILD)
+                (lambda (NEXT CONTINUE) (BUILD NEXT (CONTINUE))))
+
+        (define! (root-environment) (penfold BUILD LIST)
+                (manifold (-fold/continue BUILD) (lambda (LAST) LAST) LIST))
+
+        (define! (root-environment) (fold BUILD FIX LIST)
+                (foldable (-fold/continue BUILD) FIX LIST))))
+
+
+(define! (root-environment) (map FN LIST)
+        (arity! FN so
+                LIST list?)
+        (back-fold (lambda (NEXT REST) (cons (FN NEXT) REST)) () LIST))
+
+(define! (root-environment) (filter PREDICATE LIST)
+        (arity! PREDICATE so
+                LIST list?)
+        (fold (lambda (THIS THAT) (if (PREDICATE THIS) (cons THIS THAT) THAT))
+                () LIST))
+
+
+
+(-: ::::: :-)
 
 
 
@@ -171,22 +218,6 @@
 
 
 
-(-: A (small...) collection of complex predicates :-)
-
-(define! (root-environment) anti (lambda (PREDICATE)
-        (lambda (OBJECT)
-                (not (PREDICATE OBJECT)))))
-
-(define! (root-environment) (maybe PREDICATE)
-        (lambda (OBJECT)
-                (or (null? OBJECT) (PREDICATE OBJECT))))
-
-(define! (root-environment) truth? (anti false?))
-
-(define! (root-environment) something? (anti null?))
-
-
-
 (-: Let there be let :-)
 
 (-: TODO: Named let doesn't check whether one of the formals is NAME :-)
@@ -208,11 +239,31 @@
                         (define! (current-environment) -LET (-let/build (car SPLIT) BODY EVAL-ENV))
                         (eval (list define! EVAL-ENV NAME -LET))
                         (eval (cons -LET (cdr SPLIT)) EVAL-ENV))
-                (define! (current-environment) (-let BINDINGS BODY)
+                (define! (current-environment) (-let BINDINGS . BODY)
                         (define! (current-environment) SPLIT (-let/unwrap-bindings BINDINGS))
                         (eval (cons (-let/build (car SPLIT) BODY ENV) (cdr SPLIT)) ENV))
                 (if (symbol? (car ARGS))
                         (apply -let/named ARGS)
                         (apply -let ARGS))))))
+
+
+
+(-: A (small...) collection of complex predicates :-)
+
+(define! (root-environment) (anti PREDICATE)
+        (lambda (OBJECT)
+                (not (PREDICATE OBJECT))))
+
+(define! (root-environment) (maybe PREDICATE)
+        (lambda (OBJECT)
+                (or (null? OBJECT) (PREDICATE OBJECT))))
+
+(define! (root-environment) truth? (anti false?))
+
+(-: However that's needlessly complicated so use this equivalent instead :-)
+(set! (root-environment) truth? so)
+
+(define! (root-environment) something? (anti null?))
+
 
 )

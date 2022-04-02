@@ -114,6 +114,10 @@ if (failure_p(reason = sigsetjmp(cleanup, 1))) {
         default: die:
                 fprintf(stderr, "FATAL %u: %s.\n",
                         reason, Ierror[reason].message);
+                if (reason == LERR_USER) {
+                        serial(ACC, SERIAL_DETAIL, 12, NIL, NULL, NULL);
+                        lprint("\n");
+                }
                 abort();
         }
 }
