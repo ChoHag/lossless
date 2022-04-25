@@ -56,7 +56,8 @@ main (int    argc,
 {
         HistEvent event;
         int length;
-        const char *line;
+        const char *line = NULL;
+        const wchar_t *wline;
         bool pending = false, valid;
         cell x;
         sigjmp_buf cleanup;
@@ -103,8 +104,15 @@ else {
         el_set(E, EL_HIST, history, H);
 }
 
-@ @<Read and dispatch a line@>=
-line = el_gets(E, &length);
+@ Ugly but functional.
+
+@<Read and dispatch a line@>=
+wline = el_wgets(E, &length);
+if (line != NULL)
+        free(line);
+line = malloc(length * 2);
+assert(line != NULL);
+wcsrtombs(line, &wline, length * 2, NULL);
 
 if (failure_p(reason = sigsetjmp(cleanup, 1))) {
         switch (reason) {

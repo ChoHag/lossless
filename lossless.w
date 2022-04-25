@@ -447,6 +447,7 @@ also when unused segments are returned to the master allocator).
 
 @<Fun...@>=
 void *mem_alloc (void *, size_t, size_t, sigjmp_buf *);
+void *mem_free (void *);
 
 @ @c
 void *
@@ -470,6 +471,13 @@ mem_alloc (void       *old,
         if (r == NULL)
                 siglongjmp(*failure, LERR_OOM);
         return r;
+}
+
+@ @c
+void *
+mem_free (void *o)
+{
+        free(o);
 }
 
 @ There is a lot of blank space here for future versions of \Ls/
@@ -1471,7 +1479,7 @@ segment_release_imp (Osegment *o,
                 o->next->prev = o->prev;
         o->next = o->prev = o; /* For safety. */
         if (reclaim)
-                free(o);
+                mem_free(o);
 }
 
 @* Registers. To collect unused memory the garbage collector
@@ -3152,8 +3160,8 @@ typedef struct {
 } Outfio;
 
 @ @<Fun...@>=
-Vutfio_parse utfio_read (Outfio *, char);
-Vutfio_parse utfio_reread (Outfio *, char);
+Vutfio_parse utfio_read (Outfio *, uint8_t);
+Vutfio_parse utfio_reread (Outfio *, uint8_t);
 Outfio utfio_scan_start (void);
 Outfio utfio_write (int32_t);
 
@@ -3168,7 +3176,7 @@ utfio_scan_start (void)
 @ @c
 Vutfio_parse
 utfio_read (Outfio *ctx,
-            char    byte)
+            uint8_t byte)
 {
         int32_t vbyte = byte;
         int i;
@@ -3208,7 +3216,7 @@ utfio_read (Outfio *ctx,
 @c
 Vutfio_parse
 utfio_reread (Outfio *ctx,
-              char    byte)
+              uint8_t byte)
 {
         int32_t vbyte = byte;
         int i;
@@ -3922,12 +3930,13 @@ typedef enum {@/
         LEXICAT_ESCAPED_SYMBOL,@/ /* ... 8 */
         LEXICAT_NUMBER,
         LEXICAT_OPEN,
-        LEXICAT_RAW_STRING,
-        LEXICAT_RAW_SYMBOL,@/ /* ... 12 */
+        LEXICAT_QUOTE,
+        LEXICAT_RAW_STRING,@/ /* ... 12 */
+        LEXICAT_RAW_SYMBOL,
         LEXICAT_RECURSE_HERE,
         LEXICAT_RECURSE_IS,
-        LEXICAT_SPACE,
-        LEXICAT_SYMBOL,@/ /* ... 16 */
+        LEXICAT_SPACE,@/ /* ... 16 */
+        LEXICAT_SYMBOL,
         LEXICAT_INVALID
 } Vlexicat;
 
@@ -4554,6 +4563,7 @@ else@+
         switch (rune(c)) {
         @<Look for blank space@>@;
         @<Look for a bracketing token@>@;
+        @<Look for other syntactic tokens@>@;
         @<Look for a symbol@>@;
         @<Look for a string@>@;
         @<Look for a curious token@>@;
@@ -4592,12 +4602,16 @@ case '(':@; /* List */
 case '[':@; /* Vector */
 case '{':@; /* Relation */
         return lexar_append(Silex, Sret, LEXICAT_OPEN, LLF_NONE, failure);
-case '.':@;
-        return lexar_append(Silex, Sret, LEXICAT_DOT, LLF_NONE, failure);
 case ')':
 case ']':
 case '}':@;
         return lexar_append(Silex, Sret, LEXICAT_CLOSE, LLF_NONE, failure);
+
+@ @<Look for other syntactic tokens@>=
+case '.':@;
+        return lexar_append(Silex, Sret, LEXICAT_DOT, LLF_NONE, failure);
+case '\'':@;
+        return lexar_append(Silex, Sret, LEXICAT_QUOTE, LLF_NONE, failure);
 
 @*1 Strings and Symbols. Symbols are begun by any character which
 isn't matched by anything else; the syntactic runes above or those
@@ -4637,7 +4651,6 @@ escaping rules as strings by preceeding the opening \qo\.\Lt\qc\
 delimiter with \qo\.\#\qc: \qo\.{\#\Lt...\Lt}\qc.
 
 @<Look for a string@>=
-case '\'':
 case '"':
         return lexar_append(Silex, Silex, LEXICAT_INVALID, LLF_NONE, failure);
 case '|':
@@ -5345,6 +5358,7 @@ while (cat != LEXICAT_END) {
         assert(lexeme_p(lex));
         cat = lexeme(lex)->cat;
         switch (cat) { @<Process the next lexeme@> }
+        @<Parse quoted expression(s)@>@;
         SS(Sllex, llex = dlist_next(SO(Sllex)));
 }
 assert(null_p(SO(Swork))); /* I think... */
@@ -5370,8 +5384,8 @@ failure.
 case LEXICAT_SPACE:
         break; /* Space is meaningless\footnote{$^1$}{There's {\it
                         literally everything\/} in space.}. */
-case LEXICAT_INVALID:
 default:
+case LEXICAT_INVALID:
         x = syntax_invalid(lex, llex, llex, &cleanup);
         if (cat == LEXICAT_INVALID)
                 parse_fail(Sfail, LERR_UNSCANNABLE, x, &cleanup);
@@ -5531,6 +5545,42 @@ else if (a == ']') {
         SS(Sbuild, x);
 } else if (a == '}')
         parse_fail(Sfail, pfail = LERR_UNIMPLEMENTED, llex, &cleanup);
+
+@ As with a |LEXICAT_OPEN| or |LEXICAT_DOT| which cannot be processed
+until a |LEXICAT_CLOSE| is reached, a |LEXICAT_QUOTE| lexeme cannot
+be constructed into a complete syntax object until the object it's
+quoting has been parsed.
+
+@<Process the next lexeme@>=
+case LEXICAT_QUOTE:
+        SS(Swork, cons(llex, SO(Swork), &cleanup));
+        break;
+
+@ After a complete (or invalid) expression has been parsed the
+working stack is checked to see if it should be passed as-is or
+wrapped in a \.{quote} operator.
+
+@<Parse quoted expression(s)@>=
+if (!null_p(SO(Swork)))
+        while (syntax_p(lcar(SO(Swork)))) {
+                x = lcar(SO(Swork)); /* To be quoted? */
+                if (null_p(lcdr(SO(Swork))))
+                        break; /* Nope --- nothing prior. */
+                y = lcadr(SO(Swork)); /* Previously parsed... */
+                if (syntax_p(y))
+                        break; /* Nope --- not quoted. */
+                assert(dlist_p(y) && lexeme_p(dlist_datum(y)));
+                z = dlist_datum(y);
+                if (lexeme(z)->cat != LEXICAT_QUOTE)
+                        break; /* Nope --- something else. */
+                z = cons(Iprimitive[PRIMITIVE_QUOTE].box, x, &cleanup);
+                x = lcar(SO(Swork));@+ y = lcadr(SO(Swork)); /* Maybe lost. */
+                assert(syntax_p(x));
+                assert(dlist_p(y) && lexeme_p(dlist_datum(y)));
+                z = syntax_new(z, y, syntax_end(x), &cleanup);
+                SS(Swork, lcddr(SO(Swork))); /* Pop expression \AM\ quote. */
+                SS(Swork, cons(z, SO(Swork), &cleanup));
+        }
 
 @ A simple |LEXICAT_SYMBOL| can be read directly into a segment and
 converted into a symbol.
@@ -5864,6 +5914,7 @@ PRIMITIVE_BREAK,@/
 PRIMITIVE_DO,@/
 PRIMITIVE_DUMP,@/
 PRIMITIVE_LAMBDA,@/
+PRIMITIVE_QUOTE,@/
 PRIMITIVE_VOV@&,@/
 
 @ @<Primitive schema...@>=
@@ -5871,7 +5922,13 @@ PRIMITIVE_VOV@&,@/
 [PRIMITIVE_DO]     = { ":___do",     NIL, },@/
 [PRIMITIVE_DUMP]   = { "11__dump",   NIL, },@/
 [PRIMITIVE_LAMBDA] = { "!:__lambda", NIL, },@/
+[PRIMITIVE_QUOTE]  = { ":___quote",  NIL, },@/
 [PRIMITIVE_VOV]    = { "!:__vov",    NIL, }@&,@/
+
+@ @<Primitive imp...@>=
+case PRIMITIVE_QUOTE:
+        LOG(ACC = lcar(ARGS));
+        break;
 
 @ While building and debugging the evaluator it has proven invaluable
 to get a trace of the activity but it is exceptionally noisy. However
@@ -6212,7 +6269,7 @@ Combine_Applicative: /* Store the closure and evaluate its arguments. */
 #if 0
         lprint("formals ");
         serial(formals, SERIAL_DETAIL, 12, NIL, NULL, failure);
-        lprint("\nARGS ");
+        lprint(" ARGS ");
         serial(ARGS, SERIAL_DETAIL, 12, NIL, NULL, failure);
         lprint("\n");
 #endif
@@ -6901,7 +6958,7 @@ case PRIMITIVE_HASHTABLE_FORGET_M:
 
 
 
-@* Serialisation.
+@** Serialisation.
 
 @d serial_printable_p(O) ((O) >= ' ' && (O) < 0x7f)
 @d SERIAL_SILENT 0
@@ -7378,12 +7435,14 @@ else if (environment_p(o) && detail != SERIAL_ROUND) {
         else {
                 if (detail)
                         serial_append(buffer, "#{environment ", 14, failure);
+#if 0
                 serial_imp(env_layer(o), detail, maxdepth - 1, true, buffer,
                         cycles, failure);
                 if (detail)
                         serial_append(buffer, " on ", 4, failure);
                 serial_imp(env_previous(o), detail, maxdepth - 1, true, buffer,
                         cycles, failure);
+#endif
                 if (detail)
                         serial_append(buffer, "}", 1, failure);
                 append = "\0";

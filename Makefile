@@ -113,6 +113,9 @@ clean:
 .tex.pdf:
 	$(PDFTEX) $<
 
+.w.h:
+	$(CTANGLE) $< - $@
+
 .w.c:
 	$(CTANGLE) $< - $@
 

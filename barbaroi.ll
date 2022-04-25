@@ -43,8 +43,6 @@
 
 (-: Grab-bag of various little utilities :-)
 
-(define! (root-environment) quote (vov ((ARGS vov/args)) ARGS))
-
 (define! (root-environment) caar   (lambda (O)           (car (car O))))
 (define! (root-environment) cadr   (lambda (O)           (car (cdr O))))
 (define! (root-environment) cdar   (lambda (O)           (cdr (car O))))
@@ -181,7 +179,10 @@
                 (eval (cons (quote . PROGRAM)
                         (manifold
                                 -apply/qcons
-                                (lambda (LAST) (fold -apply/qcons () LAST))
+                                (lambda (LAST)
+                                        (if (null? LAST)
+                                                ()
+                                                (fold -apply/qcons () LAST)))
                                 ARGS)))))))
 
 
@@ -265,5 +266,20 @@
 
 (define! (root-environment) something? (anti null?))
 
+
+(-: (syntax-case <expression> (<literal> ---) <clause> ---) :-)
+
+(-: Macros... :-)
+
+(define! (root-environment) vau (vov ((AUTHOR-ARGS vov/args) (AUTHOR-ENV vov/env))
+        (eval   (apply  (lambda (FORMALS ENV-FORMAL . BODY)
+                                (eval   (list   vov
+                                                (list (list (quote . CALLER-ARGS) (quote . vov/arguments))
+                                                        (list ENV-FORMAL (quote . vov/environment)))
+                                                (list apply
+                                                        (cons lambda (cons FORMALS BODY))
+                                                        (list eval (cons quote (quote . CALLER-ARGS)))))))
+                        AUTHOR-ARGS)
+                AUTHOR-ENV)))
 
 )
