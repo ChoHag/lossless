@@ -6879,16 +6879,16 @@ PRIMITIVE_HASHTABLE_VALUES@&,@/
 
 @ @<Primitive schema...@>=
 [PRIMITIVE_NEW_HASHTABLE]       = { "00__new-hashtable", NIL, },@/
-[PRIMITIVE_HASHTABLE_DELETE_M]  = { "E!__delete!",       NIL, },@/
-[PRIMITIVE_HASHTABLE_EXISTS_P]  = { "E!__exists?",       NIL, },@/
-[PRIMITIVE_HASHTABLE_FETCH]     = { "E!__fetch",         NIL, },@/
-[PRIMITIVE_HASHTABLE_FORGET_M]  = { "E!__forget!",       NIL, },@/
-[PRIMITIVE_HASHTABLE_INSERT_M]  = { "E!E_insert!",       NIL, },@/
+[PRIMITIVE_HASHTABLE_DELETE_M]  = { "22__delete!",       NIL, },@/
+[PRIMITIVE_HASHTABLE_EXISTS_P]  = { "22__exists?",       NIL, },@/
+[PRIMITIVE_HASHTABLE_FETCH]     = { "22__fetch",         NIL, },@/
+[PRIMITIVE_HASHTABLE_FORGET_M]  = { "22__forget!",       NIL, },@/
+[PRIMITIVE_HASHTABLE_INSERT_M]  = { "33__insert!",       NIL, },@/
 [PRIMITIVE_HASHTABLE_KEYPAIRS]  = { "11__keypairs",      NIL, },@/
 [PRIMITIVE_HASHTABLE_KEYS]      = { "11__keys",          NIL, },@/
 [PRIMITIVE_HASHTABLE_P]         = { "11__hashtable?",    NIL, },@/
-[PRIMITIVE_HASHTABLE_REPLACE_M] = { "E!E_replace!",      NIL, },@/
-[PRIMITIVE_HASHTABLE_STORE_M]   = { "E!E_store!",        NIL, },@/
+[PRIMITIVE_HASHTABLE_REPLACE_M] = { "33__replace!",      NIL, },@/
+[PRIMITIVE_HASHTABLE_STORE_M]   = { "33__store!",        NIL, },@/
 [PRIMITIVE_HASHTABLE_VALUES]    = { "11__values",        NIL, }@&,@/
 
 @ @<Primitive imp...@>=

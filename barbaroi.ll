@@ -2,7 +2,7 @@
 
 
 
-(define! (root-environment) REMark (vov ((A vov/args)) ((lambda ()))))
+(define! (root-environment) REMark (vov ((E vov/env)) ((lambda ()))))
 
 (define! (root-environment) -: REMark) (-: Now we have comments. :-)
 
@@ -41,7 +41,10 @@
 :-)
 
 
-(-: Grab-bag of various little utilities :-)
+
+(-: Essential pair, list and other core operators :-)
+
+(define! (root-environment) (snoc a b) (cons b a)) (-: Mirror cons :-)
 
 (define! (root-environment) (caar O)             (car (car O)))
 (define! (root-environment) (cadr O)             (car (cdr O)))
@@ -74,20 +77,7 @@
 (define! (root-environment) (cdddar O) (cdr (cdr (cdr (car O)))))
 (define! (root-environment) (cddddr O) (cdr (cdr (cdr (cdr O)))))
 
-(define! (root-environment) arity! ((lambda ()
-        (define! (current-environment) (-arity!/validate! ARGS)
-                (if (null? ARGS)
-                        (do)
-                        (do     (define! (current-environment) VAL (car ARGS))
-                                (define! (current-environment) PREDICATE (cadr ARGS))
-                                (if (PREDICATE VAL)
-                                        (-arity!/validate! (cddr ARGS))
-                                        (eval (list error (quote . arity) PREDICATE VAL))))))
-        (lambda ARGS (-arity!/validate! ARGS)))))
-
-(-: Generic list traversal :-)
-
-(define! (root-environment) (list . list) list)
+(define! (root-environment) (list . LIST) LIST)
 
 (define! (root-environment) list? ((lambda ()
         (define! (current-environment) -list? (lambda (OBJECT)
@@ -98,188 +88,301 @@
                                 #f))))
         -list?)))
 
-(define! (root-environment) (antifold BUILD FINISH LIST)
-        (-: BUILD and FINISH should be a program with two and one
-                arguments respectively of any type :-)
-        (arity! BUILD so
-                FINISH so
-                LIST list?)
-        (define! (current-environment) (-fold REST FIRST)
-                (if (null? (cdr REST))
-                        (BUILD (FINISH (car REST)) FIRST)
-                        (-fold (cdr REST) (BUILD (car REST) FIRST))))
-        (if (null? (cdr LIST))
-                (FINISH (car LIST))
-                (-fold (cdr LIST) (car LIST))))
+(-: Having to type (current-environment) everywhere is tiresome and
+        ugly, these implement (define-here! LABEL VALUE) and its
+        mutating analogue set-here! to save on keyboard wear :-)
 
-(define! (root-environment) (manifold BUILD FINISH LIST)
-        (arity! BUILD so
-                FINISH so
-                LIST list?)
-        (define! (current-environment) (-fold FIRST REST)
-                (if (null? (cdr REST))
-                        (BUILD FIRST (lambda () (FINISH (car REST))))
-                        (BUILD FIRST (lambda () (-fold (car REST) (cdr REST))))))
-        (if (null? (cdr LIST))
-                (FINISH (car LIST))
-                (-fold (car LIST) (cdr LIST))))
-
-(define! (root-environment) (back-penfold BUILD LIST)
-        (antifold BUILD (lambda (LAST) LAST) LIST))
-
-(define! (root-environment) (back-fold BUILD FIX LIST)
-        (antifold BUILD (lambda (LAST) LAST) (cons FIX LIST)))
-
-(define! (root-environment) (foldable BUILD FIX LIST)
-        (manifold BUILD (lambda (LAST) (BUILD LAST (lambda () FIX))) LIST))
-
-((lambda ()
-        (define! (current-environment) (-fold/continue BUILD)
-                (lambda (NEXT CONTINUE) (BUILD NEXT (CONTINUE))))
-
-        (define! (root-environment) (penfold BUILD LIST)
-                (manifold (-fold/continue BUILD) (lambda (LAST) LAST) LIST))
-
-        (define! (root-environment) (fold BUILD FIX LIST)
-                (foldable (-fold/continue BUILD) FIX LIST))))
-
-
-(define! (root-environment) (map FN LIST)
-        (arity! FN so
-                LIST list?)
-        (back-fold (lambda (NEXT REST) (cons (FN NEXT) REST)) () LIST))
-
-(define! (root-environment) (filter PREDICATE LIST)
-        (arity! PREDICATE so
-                LIST list?)
-        (fold (lambda (THIS THAT) (if (PREDICATE THIS) (cons THIS THAT) THAT))
-                () LIST))
-
-
-
-(-: ::::: :-)
-
-
-
-(-: List construction and application :-)
-
-(define! (root-environment) (append . LIST-OF-LISTS)
-        (define! (current-environment) (next FIRST REST)
-                (if (null? REST)
-                        FIRST
-                        (fold cons (next (car REST) (cdr REST)) FIRST)))
-        (if (null? LIST-OF-LISTS)
-                ()
-                (next (car LIST-OF-LISTS) (cdr LIST-OF-LISTS))))
-
-(define! (root-environment) apply ((lambda ()
-        (define! (current-environment) (-apply/qcons THAT THOSE)
-                (cons (cons quote THAT) THOSE))
-        (lambda (PROGRAM . ARGS)
-                (eval (cons (quote . PROGRAM)
-                        (manifold
-                                -apply/qcons
-                                (lambda (LAST)
-                                        (if (null? LAST)
-                                                ()
-                                                (fold -apply/qcons () LAST)))
-                                ARGS)))))))
-
-
-
-(-: Boolean logic operators :-)
-
-(define! (root-environment) and ((lambda ()
-        (define! (current-environment) -and (vov ((ARGS vov/args) (ENV vov/env))
-                (arity! ARGS list?)
-                (if (null? ARGS)
-                        #t
-                        (do     (define! (current-environment) VAL
-                                        (eval (car ARGS) ENV))
-                                (if VAL (if (null? (cdr ARGS))
-                                                VAL
-                                                (eval (cons -and (cdr ARGS)) ENV))
-                                        #f)))))
-        -and)))
-
-(define! (root-environment) or ((lambda ()
-        (define! (current-environment) -or (vov ((ARGS vov/args) (ENV vov/env))
-                (arity! ARGS list?)
-                (if (null? ARGS)
-                        #f
-                        (do     (define! (current-environment) VAL
-                                        (eval (car ARGS) ENV))
-                                (if VAL VAL
-                                        (eval (cons -or (cdr ARGS)) ENV))))))
-        -or)))
+(define! (root-environment) define-here! (vov ((ARGS vov/args) (ENV vov/env))
+        (eval (cons define! (cons (list current-environment) ARGS)) ENV)))
+(define! (root-environment) set-here! (vov ((ARGS vov/args) (ENV vov/env))
+        (eval (cons set! (cons (list current-environment) ARGS)) ENV)))
 
 (define! (root-environment) (not OBJECT) (if OBJECT #f #t))
-
 (define! (root-environment) (so OBJECT) (if OBJECT #t #f))
+(define! (root-environment) (defined? OBJECT) (not (void? OBJECT)))
+
+(-: Compound predicates :-)
+
+(define! (root-environment) (anti PREDICATE)
+        (lambda (OBJECT)
+                (not (PREDICATE OBJECT))))
+(define! (root-environment) (maybe PREDICATE)
+        (lambda (OBJECT)
+                (or (null? OBJECT) (PREDICATE OBJECT))))
+
+(-: Rudimentary signature validation/type assertion :-)
+
+(define! (root-environment) signature/assert! ((lambda ()
+        (define-here! (-signature/assert/validate! ARGS)
+                (if (null? ARGS)
+                        (do)
+                        (do     (define-here! VAL (car ARGS))
+                                (define-here! PREDICATE (cadr ARGS))
+                                (if (PREDICATE VAL)
+                                        (-signature/assert/validate! (cddr ARGS))
+                                        (eval (list error 'arity PREDICATE VAL))))))
+        (lambda ARGS (-signature/assert/validate! ARGS)))))
 
 
 
 (-: Let there be let :-)
 
-(-: TODO: Named let doesn't check whether one of the formals is NAME :-)
-
-(define! (root-environment) let ((lambda ()
-        (define! (current-environment) (-let/unwrap-bindings BINDINGS)
+((lambda ()
+        (-: Separate a list of binding pairs ((a b) (c d) etc.) into two
+                lists of the labels (a c) and values (b d) :-)
+        (define-here! (-let/unwrap-bindings BINDINGS)
                 (if (null? BINDINGS)
                         (cons ()())
-                        (do     (define! (current-environment) NEXT
+                        (do     (define-here! NEXT
                                         (-let/unwrap-bindings (cdr BINDINGS)))
                                 (cons   (cons (caar BINDINGS) (car NEXT))
                                         (cons (cadar BINDINGS) (cdr NEXT))))))
+
+        (-: An instance of named let extends the caller's environment
+                and evaluates the constructed lambda expression in
+                that --- this is the environment which will be
+                closed over.
+
+            The new program is bound to the desired name in that
+                extended environment to make it available within
+                the closure's scope. The program and its arguments
+                are then evaluated in the caller's environment so
+                that arguments referring to the same symbol as the
+                let expression's name will be evaluated correctly.
+
+            :-)
+
+        (define-here! (-let/named LAMBDA NAME BINDINGS BODY CALLER-ENV)
+                (define-here! FORMALS (car BINDINGS))
+                (define-here! RUNNER-ENV (environment/extend CALLER-ENV))
+                (define-here! SELF
+                        (eval (cons LAMBDA (cons FORMALS BODY)) RUNNER-ENV))
+                (eval (list define! RUNNER-ENV NAME SELF))
+                (eval (cons SELF (cdr BINDINGS)) CALLER-ENV))
+
+        (-: Plain let constructs a lambda expression and evaluates
+                it with the arguments extracted from the let bindings
+                in the caller's environment :-)
+
+        (define-here! (-let/plain LAMBDA BINDINGS BODY CALLER-ENV)
+                (define-here! FORMALS (car BINDINGS))
+                (eval   (cons   (cons   LAMBDA
+                                        (cons FORMALS BODY))
+                                (cdr BINDINGS))
+                        CALLER-ENV))
+
+        (-: Validating variants of let are made possible using the
+                validating lambda operators which are defined below;
+                this program returns a new let-like operator :-)
+
+        (define-here! (-let LAMBDA) (vov ((CALLER-ARGS vov/args) (CALLER-ENV vov/env))
+                (signature/assert! CALLER-ARGS pair?)
+                (if (symbol? (car CALLER-ARGS))
+                        (do     (signature/assert!
+                                        (cdr CALLER-ARGS) pair?
+                                        (cadr CALLER-ARGS) list?)
+                                (-let/named LAMBDA (car CALLER-ARGS)
+                                        (-let/unwrap-bindings (cadr CALLER-ARGS))
+                                        (cddr CALLER-ARGS)
+                                        CALLER-ENV))
+                        (do     (signature/assert! CALLER-ARGS list?)
+                                (-let/plain LAMBDA
+                                        (-let/unwrap-bindings (car CALLER-ARGS))
+                                        (cdr CALLER-ARGS)
+                                        CALLER-ENV)))))
+
+        (-: This is all that we need for the plain let syntax, using
+                plain lambda :-)
+
+        (define! (root-environment) let (-let lambda))
+
+        (do (-: When literate lossless comes along this section should
+                be moved elsewhere :-)
+
+                (-: The advanced lambda/let forms, and Lossless generally,
+                        require programs for iterating over lists :-)
+
+                (-: Also known fold-right and similar names the most common iteration :-)
+                (define-here! (-walk FIX LIST EACH LAST)
+                        (-: FIX is unused --- it's for signature compatibility
+                                with klaw, below :-)
+                        (if (pair? (cdr LIST))
+                                (EACH (car LIST) (-walk FIX (cdr LIST) EACH LAST))
+                                (LAST (car LIST) (cdr LIST))))
+
+                (define-here! (-klaw FIX LIST EACH LAST)
+                        (if (pair? (cdr LIST))
+                                (-klaw (EACH FIX (car LIST)) (cdr LIST) EACH LAST)
+                                (let ((TAIL (LAST FIX (car LIST))))
+                                        (cons TAIL (cdr LIST)))))
+
+                (define-here! (-walklaw DIRECTION CONTAINER EACH LAST FIX)
+                        (if (null? EACH)
+                                (set! (current-environment) EACH cons))
+                        (if (null? LAST)
+                                (set! (current-environment) LAST cons))
+                        (-: signature/assert! (-: TODO: There is no (program?) predicate yet :-)
+                                EACH    program?
+                                LAST    program?
+                                CONTAINER
+                                        (maybe pair?))
+                        (if (null? CONTAINER)
+                                ()
+                                (DIRECTION FIX CONTAINER EACH LAST)))
+
+                (define! (root-environment) (walk/alt EACH LAST CONTAINER)
+                        (-walklaw -walk CONTAINER EACH LAST ()))
+                (define! (root-environment) (walk EACH CONTAINER)
+                        (-walklaw -walk CONTAINER EACH EACH ()))
+                (define! (root-environment) (klaw/alt EACH LAST FIX CONTAINER)
+                        (-walklaw -klaw CONTAINER EACH LAST FIX))
+                (define! (root-environment) (klaw EACH FIX CONTAINER)
+                        (-walklaw -klaw CONTAINER EACH EACH FIX))
+
+                (-: These are the two list iterators we especially needed :-)
+
+                (define-here! (-append LIST)
+                        (walk/alt
+                                cons
+                                (lambda (LAST NIL)
+                                        (signature/assert! LAST list?)
+                                        LAST)
+                                LIST))
+
+                (define! (root-environment) (append . LIST) (-append LIST))
+                (define! (root-environment) (apply PROGRAM . LIST)
+                        (-: This is nasty... :-)
+                        (eval (cons PROGRAM
+                                (walk   (lambda (NEXT REST)
+                                                (cons (cons quote NEXT) REST))
+                                        (-append LIST)))))
+
+                (-: Also define here other common iterators :-)
+
+                (define! (root-environment) (map PROGRAM LIST)
+                        (signature/assert! LIST list?)
+                        (walk (lambda (NEXT REST) (cons (PROGRAM NEXT) REST)) LIST))
+
+                (define! (root-environment) (for-each PROGRAM LIST)
+                        (signature/assert! LIST list?)
+                        (walk (lambda (NEXT REST) (PROGRAM NEXT)) LIST))
+
+                (define! (root-environment) (reverse LIST)
+                        (signature/assert! LIST list?)
+                        (car (klaw snoc () LIST))))
+
+        (-: vov is the most general operative constructor but rather
+                unweildy for everyday use. It was inspired by John
+                Shutt's vau so that's the face of the human-friendly
+                constructor: (vau (BINDINGS) ENVIRONMENT BODY) :-)
+
+        (define! (root-environment) vau (vov
+                ((AUTHOR-ARGS vov/args) (AUTHOR-ENV vov/env))
+                (apply (lambda (FORMAL-ARGS FORMAL-ENV . BODY)
+                        (eval   (list   vov
+                                        (list   '(CALLER-ARGS vov/arguments)
+                                                (list FORMAL-ENV
+                                                        'vov/environment))
+                                        (list   apply
+                                                (cons lambda
+                                                        (cons FORMAL-ARGS BODY))
+                                                'CALLER-ARGS))
+                                AUTHOR-ENV)
+                        ) AUTHOR-ARGS)))
+
+        (-: Used to scan the formals for any which are a list (of
+                two); those which are not are combined with the
+                defined? predicate :-)
+
+        (define-here! (-lambda/validating/expand-formal FORMAL)
+                (if (pair? FORMAL)
+                        (apply cons FORMAL)
+                        (cons FORMAL defined?)))
+
+        (-: Build an expression which will validate bound values :-)
+
+        (define-here! (-lambda/validating/build-validator SIGNATURE)
+                (cons signature/assert! (walk
+                        (lambda (NEXT REST)
+                                (cons (car NEXT) (cons (cdr NEXT) REST)))
+                        SIGNATURE)))
+
+        (-: Construct a program which validates its arguments :-)
+
+        (define-here! (-lambda/validating LAMBDA FORMALS BODY CREATOR)
+                (signature/assert! FORMALS list?)
+                (if (null? FORMALS)
+                        (eval (cons LAMBDA (cons () BODY)) CREATOR)
+                        (do     (define-here! SIGNATURE
+                                        (map -lambda/validating/expand-formal FORMALS))
+                                (define-here! VALIDATOR
+                                        (-lambda/validating/build-validator SIGNATURE))
+                                (eval   (cons   LAMBDA
+                                                (cons   (map car SIGNATURE)
+                                                        (cons VALIDATOR BODY)))
+                                        CREATOR))))
+
+        (-: Construct a program which validates its return value :-)
+
+        (define-here! (-lambda/validated LAMBDA FORMALS PREDICATE BODY CREATOR)
+                (set! (current-environment) PREDICATE (eval PREDICATE CREATOR))
+                (-: signature/assert! PREDICATE predicate?)
+                (let ((IMP (eval (cons lambda (cons FORMALS BODY)) CREATOR)))
+                        (LAMBDA ARGUMENTS
+                                (let ((VALUE (apply IMP ARGUMENTS)))
+                                        (signature/assert! VALUE PREDICATE)
+                                        VALUE))))
+
+        (-: Construct lambda and matching let forms for programs
+                which validate their arguments (validating), return
+                (validated) value and both (signed) :-)
+
+        (define! (root-environment) lambda/validating
+                (vau (FORMALS . BODY) CREATOR
+                        (-lambda/validating lambda
+                                FORMALS BODY CREATOR)))
+        (define! (root-environment) let/validating (-let lambda/validating))
+
+        (define! (root-environment) lambda/validated
+                (vau (FORMALS PREDICATE . BODY) CREATOR
+                        (-lambda/validated lambda
+                                FORMALS PREDICATE BODY CREATOR)))
+        (define! (root-environment) let/validated (-let lambda/validated))
+
+        (define! (root-environment) lambda/signed
+                (vau (FORMALS PREDICATE . BODY) CREATOR
+                        (-lambda/validated lambda/validating
+                                FORMALS PREDICATE BODY CREATOR)))
+        (define! (root-environment) let/signed (-let lambda/signed))
+
+        (-: TODO: decide what to wrt. evaluation and repeat for vau (NOT vov) :-)
+        ))
+
+
+
+(-: Boolean logic operators :-)
+
+(define! (root-environment) and (let ()
+        (define-here! (-and ARGS ENV)
+                (if (null? ARGS)
+                        #t
+                        (let ((VAL (eval (car ARGS) ENV)))
+                                (if VAL (if (null? (cdr ARGS))
+                                                VAL
+                                                (-and (cdr ARGS) ENV))
+                                        #f))))
         (vov ((ARGS vov/args) (ENV vov/env))
-                (define! (current-environment) (-let/build FORMALS BODY ENV)
-                        (eval (append (list lambda FORMALS) BODY) ENV))
-                (define! (current-environment) (-let/named NAME BINDINGS . BODY)
-                        (define! (current-environment) SPLIT (-let/unwrap-bindings BINDINGS))
-                        (define! (current-environment) EVAL-ENV (environment/extend ENV))
-                        (define! (current-environment) -LET (-let/build (car SPLIT) BODY EVAL-ENV))
-                        (eval (list define! EVAL-ENV NAME -LET))
-                        (eval (cons -LET (cdr SPLIT)) EVAL-ENV))
-                (define! (current-environment) (-let BINDINGS . BODY)
-                        (define! (current-environment) SPLIT (-let/unwrap-bindings BINDINGS))
-                        (eval (cons (-let/build (car SPLIT) BODY ENV) (cdr SPLIT)) ENV))
-                (if (symbol? (car ARGS))
-                        (apply -let/named ARGS)
-                        (apply -let ARGS))))))
+                (signature/assert! ARGS list?)
+                (-and ARGS ENV))))
+(define! (root-environment) or (let ()
+        (define-here! (-or ARGS ENV)
+                (if (null? ARGS)
+                        #f
+                        (let ((VAL (eval (car ARGS) ENV)))
+                                (if VAL VAL (-or (cdr ARGS) ENV)))))
+        (vov ((ARGS vov/args) (ENV vov/env))
+                (signature/assert! ARGS list?)
+                (-or ARGS ENV))))
 
-
-
-(-: A (small...) collection of complex predicates :-)
-
-(define! (root-environment) (anti PREDICATE)
-        (lambda (OBJECT)
-                (not (PREDICATE OBJECT))))
-
-(define! (root-environment) (maybe PREDICATE)
-        (lambda (OBJECT)
-                (or (null? OBJECT) (PREDICATE OBJECT))))
-
-(define! (root-environment) truth? (anti false?))
-
-(-: However that's needlessly complicated so use this equivalent instead :-)
-(set! (root-environment) truth? so)
-
-(define! (root-environment) something? (anti null?))
-
-
-(-: (syntax-case <expression> (<literal> ---) <clause> ---) :-)
-
-(-: Macros... :-)
-
-(define! (root-environment) vau (vov ((AUTHOR-ARGS vov/args) (AUTHOR-ENV vov/env))
-        (eval   (apply  (lambda (FORMALS ENV-FORMAL . BODY)
-                                (eval   (list   vov
-                                                (list (list (quote . CALLER-ARGS) (quote . vov/arguments))
-                                                        (list ENV-FORMAL (quote . vov/environment)))
-                                                (list apply
-                                                        (cons lambda (cons FORMALS BODY))
-                                                        (list eval (cons quote (quote . CALLER-ARGS)))))))
-                        AUTHOR-ARGS)
-                AUTHOR-ENV)))
 
 )
