@@ -672,9 +672,10 @@ atoms' tags will be one of the other values here.
 @d FORM_SYMBOL            (LTAG_NONE | 0x0a)
 @d FORM_SYMBOL_INTERN     (LTAG_NONE | 0x0b)
 @#
-@d FORM_PENDING           (LTAG_DDEX | 0x00)
-@d FORM_PRIMITIVE         (LTAG_DDEX | 0x01)
-@d FORM_SEGMENT           (LTAG_DDEX | 0x02)
+@d FORM_CONTINUATION      (LTAG_DDEX | 0x00)
+@d FORM_PENDING           (LTAG_DDEX | 0x01)
+@d FORM_PRIMITIVE         (LTAG_DDEX | 0x02)
+@d FORM_SEGMENT           (LTAG_DDEX | 0x03)
 @#
 @d FORM_PAIR              (LTAG_BOTH | 0x00)
 @d FORM_APPLICATIVE       (LTAG_BOTH | 0x01)
@@ -712,6 +713,7 @@ somewhat compensate for this the format of any |cell| arguments to
 @d array_p(O)             (form_p((O), ARRAY))
 @d null_array_p(O)        ((O) == Null_Array)
 @d collected_p(O)         (form_p((O), COLLECTED))
+@d continuation_p(O)      (form_p((O), CONTINUATION))
 @d environment_p(O)       (form_p((O), ENVIRONMENT))
 @d hashtable_p(O)         (form_p((O), HASHTABLE) || null_array_p(O))
 @d pending_p(O)           (form_p((O), PENDING))
@@ -4112,6 +4114,34 @@ pend (Vpending    stage,
         return r;
 }
 
+@ Draw some circles.
+
+@d continuation_delimiter_p(O)  (continuation_p(O) && cont_state(O) ==
+        CONTINUATION_DELIMITER)
+@d continuation_resumption_p(O) (continuation_p(O) && cont_state(O) ==
+        CONTINUATION_RESUMPTION)
+@d cont_pointer(O)              (lcdr(O))
+@d cont_state(O)                ((Vcontinuation) lcar(O))
+@<Type def...@>=
+typedef enum {
+        CONTINUATION_DELIMITER = 0,
+        CONTINUATION_RESUMPTION = 1,
+} Vcontinuation;
+
+@ @<Fun...@>=
+cell continuation_delimit (sigjmp_buf *);
+
+@ @c
+cell
+continuation_delimit (sigjmp_buf *failure)
+{
+        cell r;
+
+        r = atom(Theap, CONTINUATION_DELIMITER, Control_Link,
+                FORM_CONTINUATION, failure);
+        return r;
+}
+
 @* Programs (Closures). Programs in \Ls/ are divided into two
 categories: {\it operative\/} and {\it applicative\/}. Programs are
 also and more formally known as {\it combiners\/} when they are the
@@ -6097,6 +6127,12 @@ evaluate (sigjmp_buf *failure)
 @ Unevaluated expressions are placed in |Expression| and the evaluator
 is (re-)started here.
 
+\yskip\vbox{\halign{\quad#\hfil&\quad#\hfil&\quad#\hfil\cr
+{\bf Register}&{\bf Begins}&{\bf Becomes}\cr
+|Accumulator|&{\it ignored}&|Expression| is not a pair: {\it result}\cr
+&&otherwise: {\it ignored}\cr
+|Expression|&{\it expression to evaluate}&{\it unchanged}\cr}}
+
 @<Evaluate a complex expression@>=
 Begin:@;
         if (Halt_Next == LDB_HALT_BEGIN) {
@@ -6133,9 +6169,14 @@ have been renamed).
 Note that |PENDING_COMBINE_READY| is not detected here but the co-routine
 which places it ends up jumping directly into |Combine_Ready|.
 
+\yskip\vbox{\halign{\quad#\hfil&\quad#\hfil&\quad#\hfil\cr
+{\bf Register}&{\bf Begins}&{\bf Becomes}\cr
+|Accumulator|&---&{\it result}\cr
+|Control_Link|&{\it pending computation}&{\it unchanged}\cr}}
+
 @<Evaluate a complex expression@>=
-Finish:
-        ACC = EXPR;
+Finish: /* {\bf comefrom\/} expresions which remain unevaluated. */
+        ACC = venire(EXPR);
 Return: /* Check |CLINK| to see if there is more work after complete
                 evaluation. */
         if (Halt_Next == LDB_HALT_RETURN) {
@@ -6167,6 +6208,13 @@ A note is left to continue by dispatching to the appropriate
 with the unknown expression. The unevaluated arguments are recorded
 in the note.
 
+\yskip\vbox{\halign{\quad#\hfil&\quad#\hfil&\quad#\hfil\cr
+{\bf Register}&{\bf Begins}&{\bf Becomes}\cr
+|Arguments|&{\it partial argument list}&{\it saved}\cr
+|Expression|&{\it expression to evaluate}&{\it unevaluated combiner}\cr
+|Environment|&{\it run-time}&{\it saved}\cr
+|Control_Link|&---&... + {\it frame head\/} + {\it unevaluated arguments}\cr}}
+
 @<Eval...@>=
 Combine_Start: /* Save any |ARGS| in progress and |ENV| on |CLINK| to
                         resume later. */
@@ -6191,6 +6239,12 @@ restoring the unevaluated arguments. Note that all primitives will
 test true for one of |applicative_p| or |operative_p| and so the
 order of the tests is significant.
 
+\yskip\vbox{\halign{\quad#\hfil&\quad#\hfil&\quad#\hfil\cr
+{\bf Register}&{\bf Begins}&{\bf Becomes}\cr
+|Accumulator|&{\it evaluated combiner}&{\it unchanged}\cr
+|Arguments|&---&{\it unevaluated arguments}\cr
+|Control_Link|&{\it frame head\/} + {\it unevaluated arguments}&{\it frame head}\cr}}
+
 @<Eval...@>=
 Combine_Dispatch: /* Restore the combination arguments and decide
                         how to process them. */
@@ -6207,6 +6261,8 @@ Combine_Dispatch: /* Restore the combination arguments and decide
                 goto Combine_Applicative;
         else if (operative_p(ACC))
                 goto Combine_Operate;
+        else if (continuation_resumption_p(ACC))
+                goto Combine_Primitive;
         else
                 siglongjmp(*failure, LERR_UNCOMBINABLE);
 
@@ -6223,6 +6279,13 @@ evaluation co-routine, |Combine_Continue| who's job is to distinguish
 between yet more unevaluated arguments and completed list which is
 ready to combine.
 
+\yskip\vbox{\halign{\quad#\hfil&\quad#\hfil&\quad#\hfil\cr
+{\bf Register}&{\bf Begins}&{\bf Becomes}\cr
+|Accumulator|&{\it primitive}&{\it saved}\cr
+|Arguments|&{\it unevaluated arguments}&|NIL|\cr
+|Expression|&---&{\it argument plan}\cr
+|Control_Link|&{\it frame head}&... + {\it pending combination}\cr}}
+
 @<Eval...@>=
 Combine_Primitive: /* Validate the arity of primitive arguments and prepare any
                         necessary for evaluation (née |Applicative_Start|). */
@@ -6230,16 +6293,17 @@ Combine_Primitive: /* Validate the arity of primitive arguments and prepare any
         CLINK = cons(ACC, CLINK, failure);
         ACC = pending_datum(ACC);
         EXPR = NIL;
-        schema = Iprimitive[primitive(ACC)].schema;
+        if (continuation_resumption_p(ACC))
+                schema = "11__resume!";
+        else
+                schema = Iprimitive[primitive(ACC)].schema;
         assert(*schema != '_');
         if (schema[0] >= '0' && schema[0] <= '9') {
                 @<Copy an applicative primitive's arguments@>
         } else {
                 @<Copy arguments according to a primitive's schema@>
         }
-Combine_Continue: /* ie.~{\bf comefrom\/} above \AM\ |Applicative_Build|. */
-        if (pair_p(EXPR)) goto Combine_Pair;
-        else              goto Combine_Ready;
+        goto Combine_Continue;
 
 @ Applicative combinations expect their arguments to be a proper
 list constrained to within a minimum and maximum size, often the
@@ -6302,7 +6366,7 @@ while (count++ < PRIMITIVE_PREFIX) {
                         ARGS = lcdr(ARGS);
                 } else if (!null_p(ARGS))
                         siglongjmp(*failure, LERR_IMPROPER);
-        } else if (*schema == ':') { /* Collect remaining arguments unevaluated. */;
+        } else if (*schema == ':') { /* Collect remaining arguments unevaluated. */
                 ACC = cons(LFALSE, ARGS, failure);
                 EXPR = cons(ACC, EXPR, failure);
                 ARGS = NIL;
@@ -6319,6 +6383,13 @@ while (count++ < PRIMITIVE_PREFIX) {
 @ Arguments to an applicative closure are all evaluated. While
 preparing the argument list for evaluation the closure's formals
 list is used to verify that the number of arguments is correct.
+
+\yskip\vbox{\halign{\quad#\hfil&\quad#\hfil&\quad#\hfil\cr
+{\bf Register}&{\bf Begins}&{\bf Becomes}\cr
+|Accumulator|&{\it closure}&{\it saved}\cr
+|Arguments|&{\it unevaluated arguments}&|NIL|\cr
+|Expression|&---&{\it argument plan}\cr
+|Control_Link|&{\it frame head}&... + {\it pending combination}\cr}}
 
 @<Eval...@>=
 Combine_Applicative: /* Store the closure and evaluate its arguments. */
@@ -6351,12 +6422,32 @@ Combine_Applicative: /* Store the closure and evaluate its arguments. */
                 evaluate_incompatible(__LINE__, failure);
         goto Combine_Continue;
 
+@ \yskip\vbox{\halign{\quad#\hfil&\quad#\hfil&\quad#\hfil\cr
+{\bf Register}&{\bf Begins}&{\bf Becomes}\cr
+|Expression|&{\it argument plan}&{\it unchanged}\cr
+|Control_Link|&{\it frame head} + {\it pending combinaion}&{\it unchanged}\cr}}
+
+@<Eval...@>=
+Combine_Continue: /* ie.~{\bf comefrom\/} above \AM\ |Applicative_Build|. */
+        if (pair_p(EXPR)) goto Combine_Pair;
+        else              goto Combine_Ready;
+
 @ After the arguments have been scanned for validity each is processed
 in turn and evaluated if necessary. An evaluator return note is
 prepared with the remaining arguments and control flows to the
 evaluator's beginning if the argument must be evaluated or its end
 if it must not.
 
+TODO: Move these macros?
+
+\yskip\vbox{\halign{\quad#\hfil&\quad#\hfil&\quad#\hfil\cr
+{\bf Register}&{\bf Begins}&{\bf Becomes}\cr
+|Accumulator|&---&{\it discarded}\cr
+|Expression|&{\it argument plan}&{\it next argument}\cr
+|Control_Link|&{\it frame head\/} + {\it pending combination}&... +
+{\it remaining argument plan}\cr}}
+
+@.TODO@>
 @d next_argument(VAR, ARGS) do {
         (VAR) = lcar(ARGS);
         (ARGS) = lcdr(ARGS);
@@ -6372,7 +6463,7 @@ Combine_Pair: /* Prepare to append an argument, possibly after evaluation. */
         next_argument(ACC, EXPR);
         EXPR = pend(PENDING_COMBINE_BUILD, EXPR, failure);
         CLINK = cons(EXPR, CLINK, failure);
-        EXPR = lcdr(ACC); /* (remaining) arguments to combination */
+        EXPR = lcdr(ACC); /* Next argument. */
         if (true_p(lcar(ACC))) /* Needs evaluation? */
                 goto Begin;
         else
@@ -6383,13 +6474,21 @@ prepended to the |Arguments|, ultimately restoring them to their
 original order and control resumes at |Combine_Continue| to determine
 whether there are yet more arguments.
 
+\yskip\vbox{\halign{\quad#\hfil&\quad#\hfil&\quad#\hfil\cr
+{\bf Register}&{\bf Begins}&{\bf Becomes}\cr
+|Accumulator|&{\it next evaluated argument}&{\it saved}\cr
+|Arguments|&{\it growing argument list}&... + {\it next evaluated argument}\cr
+|Expression|&---&{\it remaining argument plan}\cr
+|Control_Link|&{\it frame head\/} + {\it pending combination\/} + {\it argument
+plan}&{\it frame head\/} + {\it pending combination}\cr}}
+
 @<Eval...@>=
 Combine_Build: /* Continue building a combination after evaluating
                         one expression. */
         ARGS = cons(ACC, ARGS, failure);
         next_argument(EXPR, CLINK);
         EXPR = pending_datum(EXPR);
-        goto Combine_Continue;
+        goto Combine_Continue; /* Straight to |Combine_Pair| if there's more. */
 
 @ When the combination's arguments are ready they have been built
 piecemeal into |Arguments| or copied there as-is if the combiner
@@ -6400,19 +6499,38 @@ MAGIC by doing whatever it is primitives do, or by ``opening'' a
 closure --- restoring its program and environment --- and ``entering''
 it by recursing back into the evaluator.
 
+\yskip\vbox{\halign{\quad#\hfil&\quad#\hfil&\quad#\hfil\cr
+{\bf Register}&{\bf Begins}&{\bf Becomes}\cr
+|Accumulator|&---&{\it closure\/} or {\it primitive}\cr
+|Arguments|&{\it [un]evaluated arguments}&---\cr
+|Control_Link|&{\it frame head\/} + {\it pending combination}&{\it frame head}\cr}}
+
 @<Eval...@>=
 Combine_Ready: /* Restore the saved closure or primitive. */
         next_argument(ACC, CLINK);
         assert(pending_stage(ACC) == PENDING_COMBINE_READY);
         ACC = pending_datum(ACC);
+        goto Combine_Operate;
+
+@
+\yskip\vbox{\halign{\quad#\hfil&\quad#\hfil&\quad#\hfil\cr
+{\bf Register}&{\bf Begins}&{\bf Becomes}\cr
+|Accumulator|&{\it closure\/} or {\it primitive}&---\cr
+|Arguments|&{\it [un]evaluated arguments}&{\it consumed}\cr
+|Expression|&Operative closure: {\it expression to evaluate}&{\it closure body}\cr
+&Othersise: |NIL|&\ditto\cr
+|Environment|&{\it discarded} (saved in {\it frame head\/})&{\it extended closure environment}\cr
+|Control_Link|&{\it frame head}&... + {\it pending result\/} + {\it ?}\cr}}
+
+@<Eval...@>=
 Combine_Operate:@;
-        EXPR = pend(PENDING_COMBINE_FINISH, EXPR, failure);
-        CLINK = cons(EXPR, CLINK, failure);
         if (Halt_Next == LDB_HALT_COMBINE) {
                 Halt_Next = Halt_At;
                 Halt_At = LDB_HALT_COMBINE;
                 return;
         }
+        EXPR = pend(PENDING_COMBINE_FINISH, EXPR, failure);
+        CLINK = cons(EXPR, CLINK, failure);
         if (primitive_p(ACC))
                 switch (primitive(ACC)) {
                 default:
@@ -6442,6 +6560,14 @@ Combine_Operate:@;
                 EXPR = lcar(EXPR);               /* Body */
                 validate_operative(failure);     /* Sets in |ENV| as required. */
                 goto Begin;
+        } else if (continuation_resumption_p(ACC)) {
+                ACC = cont_pointer(ACC);
+                next_argument(ENV, ACC);
+                next_argument(ARGS, ACC);
+                while (!null_p(ACC)) {
+                        CLINK = cons(lcar(ACC), CLINK, failure);
+                        ACC = lcdr(ACC);
+                }
         } else
                 siglongjmp(*failure, LERR_INTERNAL); /* Unreachable. */
         goto Return;
@@ -6450,6 +6576,15 @@ Combine_Operate:@;
 one. The arguments that the result are a part of and the environment
 the combiner was called from are restored and the evaluator, or one
 layer of recursion into it, can return the evaluated result.
+
+\yskip\vbox{\halign{\quad#\hfil&\quad#\hfil&\quad#\hfil\cr
+{\bf Register}&{\bf Begins}&{\bf Becomes}\cr
+|Accumulator|&{\it result}&---\cr
+|Arguments|&---&{\it restored}\cr
+|Expression|&---&If combining an operative closure: evaluated expression\cr
+&&Otherwise: |NIL|\cr
+|Environment|&---&{\it restored}\cr
+|Control_Link|&--- + {\it frame head} + {\it pending result}&{\it ---}\cr}}
 
 @<Eval...@>=
 Combine_Finish: /* Restore the |ENV| and |ARGS| in place before
@@ -6475,6 +6610,14 @@ with the accumulator (the list head) in its tail position which is
 then replaced. This is so that the evaluator does not require any
 extra temporary storage.
 
+\yskip\vbox{\halign{\quad#\hfil&\quad#\hfil&\quad#\hfil\cr
+{\bf Register}&{\bf Begins}&{\bf Becomes}\cr
+|Accumulator|&{\it primitive}&{\it discarded}\cr
+|Arguments|&{\it sequence to evaluate}&{\it consumed}\cr
+|Expression|&---&{\it discarded}\cr
+|Control_Link|&{\it frame head\/} + {\it pending result}&... +
+{\it evaluation plan}\cr}}
+
 @<Primitive imp...@>=
 case PRIMITIVE_DO: /* (Operative) */
         next_argument(EXPR, ARGS);
@@ -6498,6 +6641,12 @@ case PRIMITIVE_DO: /* (Operative) */
         break;
 
 @ The \.{do} primitive is the only user of this co-routine.
+
+\yskip\vbox{\halign{\quad#\hfil&\quad#\hfil&\quad#\hfil\cr
+{\bf Register}&{\bf Begins}&{\bf Becomes}\cr
+|Expression|&{\it discarded}&{\it next expression}\cr
+|Control_Link|&--- + {\it evaluation plan}&--- + shorter
+{\it evaluation plan}\cr}}
 
 @<Evaluate a complex expression@>=
 Sequence:
@@ -6697,8 +6846,10 @@ validate_operative (sigjmp_buf *failure)
         SS(Sinformal, lcdr(SO(Sinformal)));
 
         assert(pair_p(SO(Sinformal)));
-        if (symbol_p(lcar(SO(Sinformal))))
-                siglongjmp(cleanup, LERR_UNIMPLEMENTED); /* Continuation */
+        if (symbol_p(lcar(SO(Sinformal)))) {
+                ACC = continuation_delimit(failure);
+                env_define_m(ENV, lcar(SO(Sinformal)), ACC, failure);
+        }
         assert(null_p(lcdr(SO(Sinformal))));
 
         stack_clear(1);
@@ -6884,6 +7035,74 @@ Mutate_Environment:
                         env_unset_m(tmp, EXPR, failure);
         }
         goto Return;
+
+@* Delimited Continuations.
+
+@<Primitive \C...@>=
+PRIMITIVE_CONTINUATION_DELIMITER_P,@/
+PRIMITIVE_CONTINUATION_RESUMPTION_P,@/
+PRIMITIVE_ESCAPE@&,
+
+@ @<Primitive schema...@>=
+[PRIMITIVE_ESCAPE]                    = { "11__escape!",                  NIL, },@/
+[PRIMITIVE_CONTINUATION_DELIMITER_P]  = { "11__continuation/delimiter?",  NIL, },@/
+[PRIMITIVE_CONTINUATION_RESUMPTION_P] = { "11__continuation/resumption?", NIL, }@&,
+
+@ @<Primitive imp...@>=
+case PRIMITIVE_CONTINUATION_DELIMITER_P:
+        primitive_predicate(continuation_delimiter_p);
+case PRIMITIVE_CONTINUATION_RESUMPTION_P:
+        primitive_predicate(continuation_resumption_p);
+case PRIMITIVE_ESCAPE:
+        validated_argument(EXPR, ARGS, false, false,
+                continuation_delimiter_p, failure);
+        ARGS = CLINK;
+        ACC = NIL;
+        while (!null_p(ARGS)) { /* Copy |CLINK| from |cont_head(ACC)| to
+                                        current head \AM\ return */
+                serial(lcar(ARGS), SERIAL_DETAIL, 42, NIL, NULL, failure);
+                lprint("\n");
+                ARGS = lcdr(ARGS);
+        }
+        lprint("\n");
+        ARGS = CLINK;
+        while (!null_p(ARGS)) { /* Copy |CLINK| from |cont_head(ACC)| to
+                                        current head \AM\ return */
+                serial(lcar(ARGS), SERIAL_DETAIL, 42, NIL, NULL, failure);
+                lprint("\n");
+                assert(pending_p(lcar(ARGS)));
+                printf("pop %d\n", pending_stage(lcar(ARGS)));
+                if (ARGS == cont_pointer(EXPR))
+                        goto Found_Delimiter;
+                switch (pending_stage(lcar(ARGS))) {
+                case PENDING_COMBINE_BUILD: /* Skip argument plan */
+                case PENDING_EVALUATE: /* Skip evaluation */
+                case PENDING_MUTATE: /* Skip mutation */
+                        count = 1;
+                        break;
+                case PENDING_COMBINE_DISPATCH: /* Skip arguments + frame head */
+                case PENDING_COMBINE_FINISH: /* Skip result */
+                        count = 3;
+                        break;
+                default:
+                        siglongjmp(*failure, LERR_INTERNAL);
+                }
+                for (; count; count--) {
+                lprint("%d.\n",count);
+                        ACC = cons(lcar(ARGS), ACC, failure);
+                        ARGS = lcdr(ARGS);
+                }
+        }
+        if (null_p(cont_pointer(EXPR)))
+                goto Found_Delimiter;
+        siglongjmp(*failure, LERR_INCOMPATIBLE);
+Found_Delimiter:
+        ACC = cons(ARGS, ACC, failure);
+        ACC = cons(ENV, ACC, failure);
+        ACC = atom(Theap, CONTINUATION_RESUMPTION, ACC, FORM_CONTINUATION,
+                failure);
+        CLINK = ARGS;
+        break;
 
 @* Pairs \AM\ other simple objects.
 
@@ -7613,6 +7832,11 @@ else if (closure_p(o) && detail != SERIAL_ROUND) {
                         serial_append(buffer, "}", 1, failure);
                 append = "\0";
         }
+}
+
+@ @<Serialise an object@>=
+else if (continuation_p(o) && detail != SERIAL_ROUND) {
+        append = "\020#{continuation?}";
 }
 
 @ @<Serialise an object@>=
