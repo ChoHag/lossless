@@ -70,7 +70,8 @@ cell lapi_Accumulator (cell o)
 
 cell evaluate (cell o)
         CODE:
-                llcatch(evaluate(o, &catch));
+                Expression = o;
+                llcatch(evaluate(&catch));
                 RETVAL = Accumulator;
         OUTPUT: RETVAL
 

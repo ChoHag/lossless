@@ -5959,7 +5959,7 @@ PRIMITIVE_VOV@&,
 
 @ @<Primitive imp...@>=
 case PRIMITIVE_QUOTE:
-        LOG(ACC = lcar(ARGS));
+        ACC = lcar(ARGS);
         break;
 
 @ @<Type def...@>=
@@ -5978,16 +5978,10 @@ unique Vbreak Halt_At = LDB_HALT_NONE;
 @ @<Extern...@>=
 extern unique Vbreak Halt_Next, Halt_At;
 
-@ While building and debugging the evaluator it has proven invaluable
-to get a trace of the activity but it is exceptionally noisy. However
-\Ls/ is still in development so the macro is still here, disabled.
-
-@d LOG(cmd) cmd
-@d DONTLOG(cmd) do { printf("%s\n", #cmd); cmd; } while (0)
-@<Primitive imp...@>=
+@ @<Primitive imp...@>=
 case PRIMITIVE_DUMP:
         lprint("DUMP ");
-        LOG(next_argument(ACC, ARGS));
+        next_argument(ACC, ARGS);
         serial(ACC, SERIAL_DETAIL, 42, NIL, NULL, failure);
         lprint("\n");
 case PRIMITIVE_BREAK:
@@ -6029,11 +6023,11 @@ evaluate_program (cell        o,
         Expression = Iprimitive[PRIMITIVE_DO].box;
         syntactic = provenance_p(SO(Sprogram));
         if (syntactic) {
-                LOG(Expression = cons(Expression, prove_datum(SO(Sprogram)), &cleanup));
-                LOG(Expression = prove_new(Expression, prove_start(SO(Sprogram)),
-                        prove_end(SO(Sprogram)), &cleanup));
+                Expression = cons(Expression, prove_datum(SO(Sprogram)), &cleanup);
+                Expression = prove_new(Expression, prove_start(SO(Sprogram)),
+                        prove_end(SO(Sprogram)), &cleanup);
         } else
-                LOG(Expression = cons(Expression, SO(Sprogram), &cleanup));
+                Expression = cons(Expression, SO(Sprogram), &cleanup);
         stack_clear(1);
         evaluate(failure);
 }
@@ -6095,8 +6089,8 @@ evaluate (sigjmp_buf *failure)
         assert(null_p(CLINK) && null_p(ARGS));
         assert(environment_p(ENV));
         assert(!void_p(EXPR));
-        LOG(ACC = VOID);
-        LOG(goto Begin);
+        ACC = VOID;
+        goto Begin;
         @<Evaluate a complex expression@>@;
 }
 
@@ -6111,18 +6105,18 @@ Begin:@;
                 return;
         }
         EXPR = desyntax(EXPR);
-        if (pair_p(EXPR))         LOG(goto Combine_Start);
-        else if (!symbol_p(EXPR)) LOG(goto Finish);
-        LOG(ACC = env_search(ENV, EXPR, failure));
+        if (pair_p(EXPR))         goto Combine_Start;
+        else if (!symbol_p(EXPR)) goto Finish;
+        ACC = env_search(ENV, EXPR, failure);
         if (undefined_p(ACC)) { /* For simpler debugging --- |abort()|
                                         will soon follow. */
                 lprint("looking for %p ", EXPR);
                 serial(EXPR, SERIAL_ROUND, 1, NIL, NULL, failure);
                 lprint("\n");
-                LOG(ACC = VOID);
+                ACC = VOID;
                 siglongjmp(*failure, LERR_MISSING);
         }
-        LOG(goto Return);
+        goto Return;
 
 @ The evaluator recurses back into itself by saving the current
 state of computation (TODO: use the regular stack) and resuming at
@@ -6141,7 +6135,7 @@ which places it ends up jumping directly into |Combine_Ready|.
 
 @<Evaluate a complex expression@>=
 Finish:
-        LOG(ACC = EXPR);
+        ACC = EXPR;
 Return: /* Check |CLINK| to see if there is more work after complete
                 evaluation. */
         if (Halt_Next == LDB_HALT_RETURN) {
@@ -6176,12 +6170,12 @@ in the note.
 @<Eval...@>=
 Combine_Start: /* Save any |ARGS| in progress and |ENV| on |CLINK| to
                         resume later. */
-        LOG(CLINK = cons(ARGS, CLINK, failure));
-        LOG(CLINK = cons(ENV, CLINK, failure));
-        LOG(ARGS  = lcdr(EXPR)); /* Unevaluated arguments */
-        LOG(ARGS  = pend(PENDING_COMBINE_DISPATCH, ARGS, failure));
-        LOG(CLINK = cons(ARGS, CLINK, failure));
-        LOG(EXPR  = lcar(EXPR)); /* Unevaluated combiner */
+        CLINK = cons(ARGS, CLINK, failure);
+        CLINK = cons(ENV, CLINK, failure);
+        ARGS = lcdr(EXPR); /* Unevaluated arguments */
+        ARGS = pend(PENDING_COMBINE_DISPATCH, ARGS, failure);
+        CLINK = cons(ARGS, CLINK, failure);
+        EXPR = lcar(EXPR); /* Unevaluated combiner */
         if (Trace) {
                 lprint("(");
                 serial(EXPR, SERIAL_DETAIL, 1, NIL, NULL, failure);
@@ -6189,7 +6183,7 @@ Combine_Start: /* Save any |ARGS| in progress and |ENV| on |CLINK| to
                 serial(ARGS, SERIAL_DETAIL, 2, NIL, NULL, failure);
                 lprint(")\n");
         }
-        LOG(goto Begin);
+        goto Begin;
 
 @ When control resumes after discovering the combiner the dispatch
 note is removed and the combiner determines how to proceed after
@@ -6208,11 +6202,11 @@ Combine_Dispatch: /* Restore the combination arguments and decide
         next_argument(ARGS, CLINK);
         ARGS = pending_datum(ARGS); /* Unevaluated arguments */
         if (primitive_p(ACC))
-                LOG(goto Combine_Primitive);
+                goto Combine_Primitive;
         else if (applicative_p(ACC))
-                LOG(goto Combine_Applicative);
+                goto Combine_Applicative;
         else if (operative_p(ACC))
-                LOG(goto Combine_Operate);
+                goto Combine_Operate;
         else
                 siglongjmp(*failure, LERR_UNCOMBINABLE);
 
@@ -6235,7 +6229,7 @@ Combine_Primitive: /* Validate the arity of primitive arguments and prepare any
         ACC = pend(PENDING_COMBINE_READY, ACC, failure);
         CLINK = cons(ACC, CLINK, failure);
         ACC = pending_datum(ACC);
-        LOG(EXPR  = NIL);
+        EXPR = NIL;
         schema = Iprimitive[primitive(ACC)].schema;
         assert(*schema != '_');
         if (schema[0] >= '0' && schema[0] <= '9') {
@@ -6243,10 +6237,9 @@ Combine_Primitive: /* Validate the arity of primitive arguments and prepare any
         } else {
                 @<Copy arguments according to a primitive's schema@>
         }
-LOG(goto Combine_Continue);
 Combine_Continue: /* ie.~{\bf comefrom\/} above \AM\ |Applicative_Build|. */
-        if (pair_p(EXPR)) LOG(goto Combine_Pair);
-        else              LOG(goto Combine_Ready);
+        if (pair_p(EXPR)) goto Combine_Pair;
+        else              goto Combine_Ready;
 
 @ Applicative combinations expect their arguments to be a proper
 list constrained to within a minimum and maximum size, often the
@@ -6261,10 +6254,10 @@ min = schema[0] - '0';
 max = (schema[1] == '.') ? -1 : schema[1] - '0';
 while (pair_p(ARGS)) {
         count++;
-        LOG(ACC   = lcar(ARGS));
-        LOG(ACC   = cons(LTRUE, ACC, failure));
-        LOG(EXPR  = cons(ACC, EXPR, failure));
-        LOG(ARGS  = lcdr(ARGS));
+        ACC = lcar(ARGS);
+        ACC = cons(LTRUE, ACC, failure);
+        EXPR = cons(ACC, EXPR, failure);
+        ARGS = lcdr(ARGS);
 }
 if (!null_p(ARGS))
         siglongjmp(*failure, LERR_IMPROPER);
@@ -6295,24 +6288,24 @@ while (count++ < PRIMITIVE_PREFIX) {
                 else if (!pair_p(ARGS))
                         siglongjmp(*failure, LERR_IMPROPER);
                 else {
-                        LOG(ACC   = lcar(ARGS));
-                        LOG(ACC   = cons(predicate(*schema == 'E'), ACC, failure));
-                        LOG(EXPR  = cons(ACC, EXPR, failure));
-                        LOG(ARGS  = lcdr(ARGS));
+                        ACC = lcar(ARGS);
+                        ACC = cons(predicate(*schema == 'E'), ACC, failure);
+                        EXPR = cons(ACC, EXPR, failure);
+                        ARGS = lcdr(ARGS);
                 }
         } else if ((*schema == 'e') || (*schema == '?')) { /* Optional (\AM\
                                                                 \.evaluate). */
                 if (pair_p(ARGS)) {
-                        LOG(ACC   = lcar(ARGS));
-                        LOG(ACC   = cons(predicate(*schema == 'e'), ACC, failure));
-                        LOG(EXPR  = cons(ACC, EXPR, failure));
-                        LOG(ARGS  = lcdr(ARGS));
+                        ACC = lcar(ARGS);
+                        ACC = cons(predicate(*schema == 'e'), ACC, failure);
+                        EXPR = cons(ACC, EXPR, failure);
+                        ARGS = lcdr(ARGS);
                 } else if (!null_p(ARGS))
                         siglongjmp(*failure, LERR_IMPROPER);
         } else if (*schema == ':') { /* Collect remaining arguments unevaluated. */;
-                LOG(ACC   = cons(LFALSE, ARGS, failure));
-                LOG(EXPR  = cons(ACC, EXPR, failure));
-                LOG(ARGS  = NIL);
+                ACC = cons(LFALSE, ARGS, failure);
+                EXPR = cons(ACC, EXPR, failure);
+                ARGS = NIL;
         } else if (*schema == '_') { /* No more arguments permitted. */
                 if (pair_p(ARGS))
                         siglongjmp(*failure, LERR_IMPROPER);
@@ -6320,7 +6313,7 @@ while (count++ < PRIMITIVE_PREFIX) {
                         evaluate_incompatible(__LINE__, failure);
                 break;
         }
-        LOG(schema++);
+        schema++;
 }
 
 @ Arguments to an applicative closure are all evaluated. While
@@ -6332,8 +6325,8 @@ Combine_Applicative: /* Store the closure and evaluate its arguments. */
         ACC = pend(PENDING_COMBINE_READY, ACC, failure);
         CLINK = cons(ACC, CLINK, failure);
         ACC = pending_datum(ACC);
-        LOG(EXPR  = NIL);
-        LOG(formals = closure_formals(ACC));
+        EXPR = NIL;
+        formals = closure_formals(ACC);
 #if 0
         lprint("formals ");
         serial(formals, SERIAL_DETAIL, 12, NIL, NULL, failure);
@@ -6346,17 +6339,17 @@ Combine_Applicative: /* Store the closure and evaluate its arguments. */
                 if (null_p(formals))
                         count = 1;
                 else if (pair_p(formals))
-                        LOG(formals = lcdr(formals)); /* lost by cons */
-                LOG(ACC   = lcar(ARGS));
-                LOG(ACC   = cons(LTRUE, ACC, failure));
-                LOG(EXPR  = cons(ACC, EXPR, failure));
-                LOG(ARGS  = lcdr(desyntax(ARGS)));
+                        formals = lcdr(formals); /* lost by cons */
+                ACC = lcar(ARGS);
+                ACC = cons(LTRUE, ACC, failure);
+                EXPR = cons(ACC, EXPR, failure);
+                ARGS = lcdr(desyntax(ARGS));
         }
         if (!null_p(ARGS))
                 siglongjmp(*failure, LERR_IMPROPER);
         if (count || pair_p(desyntax(formals)))
                 evaluate_incompatible(__LINE__, failure);
-        LOG(goto Combine_Continue);
+        goto Combine_Continue;
 
 @ After the arguments have been scanned for validity each is processed
 in turn and evaluated if necessary. An evaluator return note is
@@ -6376,14 +6369,14 @@ if it must not.
 } while (0)
 @<Eval...@>=
 Combine_Pair: /* Prepare to append an argument, possibly after evaluation. */
-        LOG(next_argument(ACC, EXPR));
+        next_argument(ACC, EXPR);
         EXPR = pend(PENDING_COMBINE_BUILD, EXPR, failure);
         CLINK = cons(EXPR, CLINK, failure);
-        LOG(EXPR  = lcdr(ACC)); /* (remaining) arguments to combination */
+        EXPR = lcdr(ACC); /* (remaining) arguments to combination */
         if (true_p(lcar(ACC))) /* Needs evaluation? */
-                LOG(goto Begin);
+                goto Begin;
         else
-                LOG(goto Finish);
+                goto Finish;
 
 @ Whether evaluated or not the next item in an argument list is
 prepended to the |Arguments|, ultimately restoring them to their
@@ -6393,10 +6386,10 @@ whether there are yet more arguments.
 @<Eval...@>=
 Combine_Build: /* Continue building a combination after evaluating
                         one expression. */
-        LOG(ARGS  = cons(ACC, ARGS, failure));
+        ARGS = cons(ACC, ARGS, failure);
         next_argument(EXPR, CLINK);
         EXPR = pending_datum(EXPR);
-        LOG(goto Combine_Continue);
+        goto Combine_Continue;
 
 @ When the combination's arguments are ready they have been built
 piecemeal into |Arguments| or copied there as-is if the combiner
@@ -6412,7 +6405,6 @@ Combine_Ready: /* Restore the saved closure or primitive. */
         next_argument(ACC, CLINK);
         assert(pending_stage(ACC) == PENDING_COMBINE_READY);
         ACC = pending_datum(ACC);
-LOG(goto Combine_Operate);
 Combine_Operate:@;
         EXPR = pend(PENDING_COMBINE_FINISH, EXPR, failure);
         CLINK = cons(EXPR, CLINK, failure);
@@ -6428,31 +6420,31 @@ Combine_Operate:@;
 @t\4@>          @<Primitive implementations@>@;
                 }
         else if (applicative_p(ACC)) {
-                LOG(EXPR  = ACC);                      /* Closure */
-                LOG(ACC   = lcar(EXPR));               /* Formals */
-                LOG(EXPR  = lcdr(EXPR));
-                LOG(ENV   = lcar(EXPR));               /* Environment */
-                LOG(EXPR  = lcdr(EXPR));
-                LOG(ENV   = env_extend(ENV, failure));
-                LOG(EXPR  = lcar(EXPR));               /* Body */
-                LOG(validate_arguments(failure));
-                LOG(goto Begin);
+                EXPR = ACC;                      /* Closure */
+                ACC = lcar(EXPR);                /* Formals */
+                EXPR = lcdr(EXPR);
+                ENV = lcar(EXPR);                /* Environment */
+                EXPR = lcdr(EXPR);
+                ENV = env_extend(ENV, failure);
+                EXPR = lcar(EXPR);               /* Body */
+                validate_arguments(failure);
+                goto Begin;
         }
         else if (operative_p(ACC)) {
-                LOG(EXPR  = ACC);                      /* Closure */
-                LOG(ACC   = lcar(EXPR));
-                LOG(ARGS  = cons(ACC, ARGS, failure)); /* \.(Formals \.. Arguments\.) */
-                LOG(EXPR  = lcdr(EXPR));
-                LOG(ACC   = ENV);
-                LOG(ENV   = lcar(EXPR));               /* Environment */
-                LOG(EXPR  = lcdr(EXPR));
-                LOG(ENV   = env_extend(ENV, failure));
-                LOG(EXPR  = lcar(EXPR));               /* Body */
-                LOG(validate_operative(failure));      /* Sets in |ENV| as required. */
-                LOG(goto Begin);
+                EXPR = ACC;                      /* Closure */
+                ACC = lcar(EXPR);
+                ARGS = cons(ACC, ARGS, failure); /* \.(Formals \.. Arguments\.) */
+                EXPR = lcdr(EXPR);
+                ACC = ENV;
+                ENV = lcar(EXPR);                /* Environment */
+                EXPR = lcdr(EXPR);
+                ENV = env_extend(ENV, failure);
+                EXPR = lcar(EXPR);               /* Body */
+                validate_operative(failure);     /* Sets in |ENV| as required. */
+                goto Begin;
         } else
-                siglongjmp(*failure, LERR_INTERNAL);   /* Unreachable. */
-        LOG(goto Return);
+                siglongjmp(*failure, LERR_INTERNAL); /* Unreachable. */
+        goto Return;
 
 @ A combiner places its result in the |Accumulator| if there is
 one. The arguments that the result are a part of and the environment
@@ -6464,11 +6456,11 @@ Combine_Finish: /* Restore the |ENV| and |ARGS| in place before
                         evaluating the combinator. */
         next_argument(EXPR, CLINK);
         EXPR = pending_datum(EXPR);
-        LOG(ENV   = lcar(CLINK));
-        LOG(CLINK = lcdr(CLINK));
-        LOG(ARGS  = lcar(CLINK));
-        LOG(CLINK = lcdr(CLINK));
-        LOG(goto Return);
+        ENV = lcar(CLINK);
+        CLINK = lcdr(CLINK);
+        ARGS = lcar(CLINK);
+        CLINK = lcdr(CLINK);
+        goto Return;
 
 @ Parsed \Ls/ source code and the bodies of closures are evaluated
 by the \.{do} primitive which expects its arguments to be a list
@@ -6489,20 +6481,20 @@ case PRIMITIVE_DO: /* (Operative) */
         assert(null_p(ARGS));
         ARGS = pend(PENDING_EVALUATE, VOID, failure);
         ARGS = cons(ARGS, NIL, failure);
-        LOG(ACC   = ARGS);
-        LOG(EXPR  = desyntax(EXPR));
+        ACC = ARGS;
+        EXPR = desyntax(EXPR);
         while (!null_p(EXPR)) {
                 if (!pair_p(EXPR))
                         evaluate_incompatible(__LINE__, failure);
                 value = pend(PENDING_EVALUATE, desyntax(lcar(EXPR)), failure);
                 value = cons(value, NIL, failure);
                 lcdr_set_m(ACC, value);
-                LOG(ACC   = value);
-                LOG(EXPR  = lcdr(EXPR));
-                LOG(EXPR  = desyntax(EXPR));
+                ACC = value;
+                EXPR = lcdr(EXPR);
+                EXPR = desyntax(EXPR);
         }
         lcdr_set_m(ACC, CLINK);
-        LOG(CLINK = ARGS);
+        CLINK = ARGS;
         break;
 
 @ The \.{do} primitive is the only user of this co-routine.
@@ -6511,7 +6503,7 @@ case PRIMITIVE_DO: /* (Operative) */
 Sequence:
         next_argument(EXPR, CLINK);
         EXPR = pending_datum(EXPR);
-        LOG(goto Begin);
+        goto Begin;
 
 @ Closures are created in the same way whether they are applicative
 or operative. The formals (which is where they do differ) are
@@ -6523,11 +6515,11 @@ environment are saved.
 case PRIMITIVE_LAMBDA:@;
 case PRIMITIVE_VOV:@;
         flag = (primitive(ACC) == PRIMITIVE_LAMBDA);
-        LOG(next_argument(ACC, ARGS)); /* Formals */
-        LOG(next_argument(EXPR, ARGS)); /* Body */
-        LOG(EXPR  = cons(Iprimitive[PRIMITIVE_DO].box, EXPR, failure));
-        LOG(validate_formals(flag, failure));
-        LOG(ACC   = closure_new(flag, ARGS, ENV, EXPR, failure));
+        next_argument(ACC, ARGS); /* Formals */
+        next_argument(EXPR, ARGS); /* Body */
+        EXPR = cons(Iprimitive[PRIMITIVE_DO].box, EXPR, failure);
+        validate_formals(flag, failure);
+        ACC = closure_new(flag, ARGS, ENV, EXPR, failure);
         break;
 
 @ @c
@@ -6541,8 +6533,8 @@ validate_formals (bool        is_applicative,
         sigjmp_buf cleanup;
         Verror reason = LERR_NONE;
 
-        LOG(ARGS = ACC); /* TODO: Also check all symbols are unique. */
-        LOG(ACC = NIL);
+        ARGS = ACC; /* TODO: Also check all symbols are unique. */
+        ACC = NIL;
         if (is_applicative) {
                 @<Validate applicative (\.{lambda}) formals@>
         } else {
@@ -6562,20 +6554,20 @@ Each symbol should be unique but this is not validated (TODO).
 @<Validate applicative (\.{lambda}) formals@>=
 while (pair_p(desyntax(ARGS))) {
         arg = lcar(desyntax(ARGS));
-        LOG(ARGS = lcdr(desyntax(ARGS)));
+        ARGS = lcdr(desyntax(ARGS));
         assert(provenance_p(arg));
         arg = prove_datum(arg);
         if (!symbol_p(arg))
                 evaluate_incompatible(__LINE__, failure);
-        LOG(ACC = cons(arg, ACC, failure));
+        ACC = cons(arg, ACC, failure);
 }
 if (symbol_p(desyntax(ARGS)))
-        LOG(ARGS = desyntax(ARGS));
+        ARGS = desyntax(ARGS);
 else if (!null_p(desyntax(ARGS)))
         evaluate_incompatible(__LINE__, failure);
 while (!null_p(ACC)) {
-        LOG(ARGS = cons(lcar(ACC), ARGS, failure));
-        LOG(ACC = lcdr(ACC));
+        ARGS = cons(lcar(ACC), ARGS, failure);
+        ACC = lcdr(ACC);
 }
 
 @ The formals (or {\it informals\/}) argument to an operative
@@ -6600,7 +6592,7 @@ of state must be, and this is validated although each binding
         if (!null_p(SO(S)))
                 evaluate_incompatible(__LINE__, failure);
         else
-                LOG(SS((S), (O)));
+                SS((S), (O));
 } while (0)
 @<Validate operative (\.{vov}) formals@>=
 stack_reserve(3, failure);
@@ -6627,7 +6619,7 @@ while (pair_p(ARGS)) {
                 save_vov_informal(arg, Svcont);
         else
                 evaluate_incompatible(__LINE__, failure);
-        LOG(ARGS = lcdr(ARGS));
+        ARGS = lcdr(ARGS);
 }
 if (!null_p(ARGS) ||
             (null_p(SO(Svargs)) && null_p(SO(Svenv)) && null_p(SO(Svcont))))
@@ -6659,19 +6651,19 @@ validate_arguments (sigjmp_buf *failure)
         stack_reserve(2, failure);
         if (failure_p(reason = sigsetjmp(cleanup, 1)))
                 unwind(failure, reason, false, 2);
-        LOG(SS(Sname, desyntax(ACC)));
-        LOG(SS(Sarg, ARGS));
+        SS(Sname, desyntax(ACC));
+        SS(Sarg, ARGS);
         while (pair_p(SO(Sname))) {
-                LOG(name = lcar(SO(Sname)));
-                LOG(SS(Sname, lcdr(SO(Sname))));
+                name = lcar(SO(Sname));
+                SS(Sname, lcdr(SO(Sname)));
                 assert(!null_p(SO(Sarg)));
-                LOG(arg = lcar(SO(Sarg)));
-                LOG(SS(Sarg, lcdr(SO(Sarg))));
-                LOG(env_define_m(ENV, name, arg, failure));
+                arg = lcar(SO(Sarg));
+                SS(Sarg, lcdr(SO(Sarg)));
+                env_define_m(ENV, name, arg, failure);
         }
         if (!null_p(SO(Sname))) {
-                LOG(assert(symbol_p(SO(Sname))));
-                LOG(env_define_m(ENV, SO(Sname), SO(Sarg), failure));
+                assert(symbol_p(SO(Sname)));
+                env_define_m(ENV, SO(Sname), SO(Sarg), failure);
         } else
                 assert(null_p(SO(Sarg)));
         stack_clear(2);
@@ -6696,12 +6688,12 @@ validate_operative (sigjmp_buf *failure)
 
         assert(pair_p(SO(Sinformal)));
         if (symbol_p(lcar(SO(Sinformal))))
-                LOG(env_define_m(ENV, lcar(SO(Sinformal)), ARGS, failure));
+                env_define_m(ENV, lcar(SO(Sinformal)), ARGS, failure);
         SS(Sinformal, lcdr(SO(Sinformal)));
 
         assert(pair_p(SO(Sinformal)));
         if (symbol_p(lcar(SO(Sinformal))))
-                LOG(env_define_m(ENV, lcar(SO(Sinformal)), ACC, failure));
+                env_define_m(ENV, lcar(SO(Sinformal)), ACC, failure);
         SS(Sinformal, lcdr(SO(Sinformal)));
 
         assert(pair_p(SO(Sinformal)));
@@ -6729,10 +6721,10 @@ extern shared bool Trace;
 
 @ @<Primitive imp...@>=
 case PRIMITIVE_ERROR:
-        LOG(next_argument(ACC, ARGS));
+        next_argument(ACC, ARGS);
         siglongjmp(*failure, LERR_USER);
 case PRIMITIVE_TRACE:
-        LOG(validated_argument(ACC, ARGS, true, false, boolean_p, failure));
+        validated_argument(ACC, ARGS, true, false, boolean_p, failure);
         Trace = true_p(ACC);
         break;
 
@@ -6746,15 +6738,15 @@ PRIMITIVE_EVAL@&,
 
 @ @<Primitive imp...@>=
 case PRIMITIVE_EVAL:
-        LOG(next_argument(EXPR, ARGS)); /* Expression */
+        next_argument(EXPR, ARGS); /* Expression */
         if (null_p(ARGS))
-                LOG(ACC   = ENV);
+                ACC   = ENV;
         else
-                LOG(next_argument(ACC, ARGS)); /* Environment */
+                next_argument(ACC, ARGS); /* Environment */
         if (!environment_p(ACC))
                 evaluate_incompatible(__LINE__, failure);
-        LOG(ENV   = ACC);
-        LOG(goto Begin);
+        ENV   = ACC;
+        goto Begin;
 
 @* \.{if} (Conditional) Primitive. \.{cond} is defined later as an
 operative closure.
@@ -6767,12 +6759,12 @@ PRIMITIVE_IF@&,
 
 @ @<Primitive imp...@>=
 case PRIMITIVE_IF: /* (Operative) */
-        LOG(next_argument(ACC, ARGS)); /* Condition */
-        LOG(next_argument(EXPR, ARGS)); /* Consequent */
-        LOG(EXPR  = cons(EXPR, VOID, failure));
+        next_argument(ACC, ARGS); /* Condition */
+        next_argument(EXPR, ARGS); /* Consequent */
+        EXPR  = cons(EXPR, VOID, failure);
         if (!null_p(ARGS))
-                LOG(lcdr_set_m(EXPR, lcar(ARGS))); /* Alternate */
-        LOG(EXPR  = false_p(desyntax(ACC)) ? lcdr(EXPR) : lcar(EXPR));
+                lcdr_set_m(EXPR, lcar(ARGS)); /* Alternate */
+        EXPR  = false_p(desyntax(ACC)) ? lcdr(EXPR) : lcar(EXPR);
         goto Begin;
 
 @* Mutation Primitives \.{define!} \AM\ \.{set!}.
@@ -6805,42 +6797,42 @@ or (define! <env> (<sym> . <formals>) . <body>)
 case PRIMITIVE_ENVIRONMENT_P:
         primitive_predicate(environment_p);
 case PRIMITIVE_ENVIRONMENT_EXTEND:
-        LOG(validated_argument(ACC, ARGS, false, false, environment_p, failure));
-        LOG(ACC = env_extend(ACC, failure));
+        validated_argument(ACC, ARGS, false, false, environment_p, failure);
+        ACC = env_extend(ACC, failure);
         break;
 case PRIMITIVE_CURRENT_ENVIRONMENT:
         assert(null_p(ARGS));
-        LOG(ACC = ENV);
+        ACC = ENV;
         break;
 case PRIMITIVE_ROOT_ENVIRONMENT:
         assert(null_p(ARGS));
-        LOG(ACC = Root);
+        ACC = Root;
         break;
 case PRIMITIVE_DEFINE_M:
 case PRIMITIVE_SET_M:
         flag = (primitive(ACC) == PRIMITIVE_DEFINE_M);
-        LOG(validated_argument(ACC, ARGS, false, false, environment_p, failure));
-        LOG(next_argument(EXPR, ARGS)); /* Label or named Formals */
-        LOG(EXPR  = desyntax(EXPR));
+        validated_argument(ACC, ARGS, false, false, environment_p, failure);
+        next_argument(EXPR, ARGS); /* Label or named Formals */
+        EXPR  = desyntax(EXPR);
         if (pair_p(EXPR)) { /* Named applicative closure: \.(Label \.. Formals\.) */
-                LOG(ARGS  = cons(lcdr(EXPR), lcar(ARGS), failure)); /* Body */
-                LOG(ARGS  = cons(Iprimitive[PRIMITIVE_LAMBDA].box, ARGS,
-                        failure));
-                LOG(EXPR  = lcar(EXPR)); /* Real binding label. */
-                LOG(EXPR  = desyntax(EXPR));
+                ARGS  = cons(lcdr(EXPR), lcar(ARGS), failure); /* Body */
+                ARGS  = cons(Iprimitive[PRIMITIVE_LAMBDA].box, ARGS,
+                        failure);
+                EXPR  = lcar(EXPR); /* Real binding label. */
+                EXPR  = desyntax(EXPR);
         } else if (symbol_p(EXPR)) {
-                LOG(ARGS  = lcar(ARGS));
+                ARGS  = lcar(ARGS);
                 if (!pair_p(ARGS) || !null_p(lcdr(ARGS)))
                         evaluate_incompatible(__LINE__, failure);
-                LOG(ARGS  = lcar(ARGS)); /* Value (after evaluation). */
+                ARGS  = lcar(ARGS); /* Value (after evaluation). */
         } else
                 evaluate_incompatible(__LINE__, failure);
-        LOG(EXPR  = cons(predicate(flag), EXPR, failure)); /* Label */
-        LOG(EXPR  = cons(ACC, EXPR, failure)); /* Environment to mutate */
+        EXPR  = cons(predicate(flag), EXPR, failure); /* Label */
+        EXPR  = cons(ACC, EXPR, failure); /* Environment to mutate */
         EXPR = pend(PENDING_MUTATE, EXPR, failure);
         CLINK = cons(EXPR, CLINK, failure);
-        LOG(EXPR  = ARGS); /* Value to evaluate. */
-        LOG(goto Begin);
+        EXPR  = ARGS; /* Value to evaluate. */
+        goto Begin;
 
 @ To mutate the environment needs support from the evaluator (or
 another primitive to |Return| to).
@@ -6849,13 +6841,13 @@ another primitive to |Return| to).
 Mutate_Environment:
         next_argument(EXPR, CLINK);
         EXPR = pending_datum(EXPR); /* \.(Environment new? \.. Label\.) */
-        LOG(next_argument(ENV, EXPR)); /* Already validated */
-        LOG(next_argument(ARGS, EXPR)); /* \ditto\ */
+        next_argument(ENV, EXPR); /* Already validated */
+        next_argument(ARGS, EXPR); /* \ditto\ */
         if (true_p(ARGS))
-                LOG(env_define_m(ENV, EXPR, ACC, failure));
+                env_define_m(ENV, EXPR, ACC, failure);
         else
-                LOG(env_set_m(ENV, EXPR, ACC, failure));
-        LOG(goto Return);
+                env_set_m(ENV, EXPR, ACC, failure);
+        goto Return;
 
 @* Pairs \AM\ other simple objects.
 
@@ -6923,20 +6915,20 @@ certain it is a proper list (or |NIL|).
 
 @<Primitive imp...@>=
 case PRIMITIVE_CONS:
-        LOG(next_argument(ACC, ARGS));
-        LOG(next_argument(EXPR, ARGS));
+        next_argument(ACC, ARGS);
+        next_argument(EXPR, ARGS);
         assert(null_p(ARGS));
-        LOG(ACC = cons(ACC, EXPR, failure));
+        ACC = cons(ACC, EXPR, failure);
         break;
 
 case PRIMITIVE_CAR:
-        LOG(validated_argument(ACC, ARGS, true, false, pair_p, failure));
-        LOG(ACC = lcar(desyntax(ACC)));
+        validated_argument(ACC, ARGS, true, false, pair_p, failure);
+        ACC = lcar(desyntax(ACC));
         break;
 
 case PRIMITIVE_CDR:
-        LOG(validated_argument(ACC, ARGS, true, false, pair_p, failure));
-        LOG(ACC = lcdr(desyntax(ACC)));
+        validated_argument(ACC, ARGS, true, false, pair_p, failure);
+        ACC = lcdr(desyntax(ACC));
         break;
 
 @* Object primitives.

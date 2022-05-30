@@ -27,17 +27,17 @@ test:
 	@false
 
 # Dependencies:
-lossless.c lossless.h ffi.c: lossless.w
-repl.c: repl.w
-lossless.o: lossless.c lossless.h
 ffi.o: ffi.c lossless.h
+repl.c: repl.w
 repl.o: repl.c lossless.h
-lossless.pdf: lossless.idx llfig-1.pdf
-lossless.idx-in: lossless.tex
-lossless.tex: lossless.w
-repl.pdf: repl.idx
-repl.idx-in: repl.tex
 repl.tex: repl.w
+repl.idx-in: repl.tex
+repl.pdf: repl.idx
+lossless.c lossless.h ffi.c: lossless.w
+lossless.o: lossless.c lossless.h
+lossless.tex: lossless.w
+lossless.idx-in: lossless.tex
+lossless.pdf: lossless.idx llfig-1.pdf
 
 llfig-1.pdf: llfig.mp
 	mpost llfig.mp
