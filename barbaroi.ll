@@ -2,7 +2,9 @@
 
 
 
-(define! (root-environment) REMark (vov ((E vov/env)) (do)))
+(define! (root-environment) *VOID* (do))
+
+(define! (root-environment) REMark (vov ((E vov/env)) *VOID*))
 
 (define! (root-environment) -: REMark) (-: Now we have comments. :-)
 
@@ -99,7 +101,7 @@
 
 (define! (root-environment) (not OBJECT) (if OBJECT #f #t))
 (define! (root-environment) (so OBJECT) (if OBJECT #t #f))
-(define! (root-environment) (defined? OBJECT) (not (void? OBJECT)))
+(define! (root-environment) (object? OBJECT) (not (void? OBJECT)))
 
 (-: Compound predicates :-)
 
@@ -154,7 +156,7 @@
 
         (define-here! (-let/named LAMBDA NAME BINDINGS BODY CALLER-ENV)
                 (define-here! FORMALS (car BINDINGS))
-                (define-here! RUNNER-ENV (environment/extend CALLER-ENV))
+                (define-here! RUNNER-ENV (extend CALLER-ENV))
                 (define-here! SELF
                         (eval (cons LAMBDA (cons FORMALS BODY)) RUNNER-ENV))
                 (eval (list define! RUNNER-ENV NAME SELF))
@@ -292,12 +294,12 @@
 
         (-: Used to scan the formals for any which are a list (of
                 two); those which are not are combined with the
-                defined? predicate :-)
+                object? predicate which permits anything except *VOID* :-)
 
         (define-here! (-lambda/validating/expand-formal FORMAL)
                 (if (pair? FORMAL)
                         (apply cons FORMAL)
-                        (cons FORMAL defined?)))
+                        (cons FORMAL object?)))
 
         (-: Build an expression which will validate bound values :-)
 

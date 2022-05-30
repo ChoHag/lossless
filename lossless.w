@@ -5940,7 +5940,7 @@ also include the debugging aids \.{break} and \.{dump}. Curiously
 the primitives \.{if} and \.{eval} do not occupy this hallowed
 ground --- they are run-of-the mill operators no more special than
 \.{cons} or \.{define!}.
- 
+
 @<Primitive \C...@>=
 PRIMITIVE_BREAK,@/
 PRIMITIVE_DO,@/
@@ -5955,7 +5955,7 @@ PRIMITIVE_VOV@&,
 [PRIMITIVE_DUMP]   = { "11__dump",   NIL, },@/
 [PRIMITIVE_LAMBDA] = { "!:__lambda", NIL, },@/
 [PRIMITIVE_QUOTE]  = { ":___quote",  NIL, },@/
-[PRIMITIVE_VOV]    = { "!:__vov",    NIL, }@&,@/
+[PRIMITIVE_VOV]    = { "!:__vov",    NIL, }@&,
 
 @ @<Primitive imp...@>=
 case PRIMITIVE_QUOTE:
@@ -6063,7 +6063,7 @@ pattern although a few liberties have been taken with some functional
 accessors and \CEE/ contstructs.
 
 @.TODO@>
-@d desyntax(O) (provenance_p(O) ? prove_datum(O) : (O))
+@d venire(O) (provenance_p(O) ? prove_datum(O) : (O))
 @d evaluate_incompatible(L,F) do { /* Inadquate arity-mismatch handling. */
         lprint("incompatibility at line %d\n", (L));
         siglongjmp(*(F), LERR_INCOMPATIBLE);
@@ -6072,7 +6072,7 @@ accessors and \CEE/ contstructs.
 void
 evaluate (sigjmp_buf *failure)
 {
-        cell formals, value;
+        cell tmp;
         int count, flag, min, max;
         char *schema;
         Vbreak halted;
@@ -6104,7 +6104,7 @@ Begin:@;
                 Halt_At = LDB_HALT_BEGIN;
                 return;
         }
-        EXPR = desyntax(EXPR);
+        EXPR = venire(EXPR);
         if (pair_p(EXPR))         goto Combine_Start;
         else if (!symbol_p(EXPR)) goto Finish;
         ACC = env_search(ENV, EXPR, failure);
@@ -6326,28 +6326,28 @@ Combine_Applicative: /* Store the closure and evaluate its arguments. */
         CLINK = cons(ACC, CLINK, failure);
         ACC = pending_datum(ACC);
         EXPR = NIL;
-        formals = closure_formals(ACC);
+        tmp = closure_formals(ACC);
 #if 0
         lprint("formals ");
-        serial(formals, SERIAL_DETAIL, 12, NIL, NULL, failure);
+        serial(tmp, SERIAL_DETAIL, 12, NIL, NULL, failure);
         lprint(" ARGS ");
         serial(ARGS, SERIAL_DETAIL, 12, NIL, NULL, failure);
         lprint("\n");
 #endif
         count = 0;
-        while (pair_p(desyntax(ARGS))) {
-                if (null_p(formals))
+        while (pair_p(venire(ARGS))) {
+                if (null_p(tmp))
                         count = 1;
-                else if (pair_p(formals))
-                        formals = lcdr(formals); /* lost by cons */
+                else if (pair_p(tmp))
+                        tmp = lcdr(tmp); /* lost by cons */
                 ACC = lcar(ARGS);
                 ACC = cons(LTRUE, ACC, failure);
                 EXPR = cons(ACC, EXPR, failure);
-                ARGS = lcdr(desyntax(ARGS));
+                ARGS = lcdr(venire(ARGS));
         }
         if (!null_p(ARGS))
                 siglongjmp(*failure, LERR_IMPROPER);
-        if (count || pair_p(desyntax(formals)))
+        if (count || pair_p(venire(tmp)))
                 evaluate_incompatible(__LINE__, failure);
         goto Combine_Continue;
 
@@ -6363,8 +6363,8 @@ if it must not.
 } while (0)
 @d validated_argument(V,A,S,N,P,F) do {
         next_argument((V), (A));
-        if ((!(N) && (null_p((S) ? desyntax(V) : (V)))) ||
-                    !P((S) ? desyntax(V) : (V)))
+        if ((!(N) && (null_p((S) ? venire(V) : (V)))) ||
+                    !P((S) ? venire(V) : (V)))
                 evaluate_incompatible(__LINE__, (F));
 } while (0)
 @<Eval...@>=
@@ -6482,16 +6482,16 @@ case PRIMITIVE_DO: /* (Operative) */
         ARGS = pend(PENDING_EVALUATE, VOID, failure);
         ARGS = cons(ARGS, NIL, failure);
         ACC = ARGS;
-        EXPR = desyntax(EXPR);
+        EXPR = venire(EXPR);
         while (!null_p(EXPR)) {
                 if (!pair_p(EXPR))
                         evaluate_incompatible(__LINE__, failure);
-                value = pend(PENDING_EVALUATE, desyntax(lcar(EXPR)), failure);
-                value = cons(value, NIL, failure);
-                lcdr_set_m(ACC, value);
-                ACC = value;
+                tmp = pend(PENDING_EVALUATE, venire(lcar(EXPR)), failure);
+                tmp = cons(tmp, NIL, failure);
+                lcdr_set_m(ACC, tmp);
+                ACC = tmp;
                 EXPR = lcdr(EXPR);
-                EXPR = desyntax(EXPR);
+                EXPR = venire(EXPR);
         }
         lcdr_set_m(ACC, CLINK);
         CLINK = ARGS;
@@ -6552,18 +6552,18 @@ Each symbol should be unique but this is not validated (TODO).
 
 @.TODO@>
 @<Validate applicative (\.{lambda}) formals@>=
-while (pair_p(desyntax(ARGS))) {
-        arg = lcar(desyntax(ARGS));
-        ARGS = lcdr(desyntax(ARGS));
+while (pair_p(venire(ARGS))) {
+        arg = lcar(venire(ARGS));
+        ARGS = lcdr(venire(ARGS));
         assert(provenance_p(arg));
         arg = prove_datum(arg);
         if (!symbol_p(arg))
                 evaluate_incompatible(__LINE__, failure);
         ACC = cons(arg, ACC, failure);
 }
-if (symbol_p(desyntax(ARGS)))
-        ARGS = desyntax(ARGS);
-else if (!null_p(desyntax(ARGS)))
+if (symbol_p(venire(ARGS)))
+        ARGS = venire(ARGS);
+else if (!null_p(venire(ARGS)))
         evaluate_incompatible(__LINE__, failure);
 while (!null_p(ACC)) {
         ARGS = cons(lcar(ACC), ARGS, failure);
@@ -6598,19 +6598,19 @@ of state must be, and this is validated although each binding
 stack_reserve(3, failure);
 if (failure_p(reason = sigsetjmp(cleanup, 1)))
         unwind(failure, reason, false, 3);
-ARGS = desyntax(ARGS);
+ARGS = venire(ARGS);
 while (pair_p(ARGS)) {
         arg = lcar(ARGS);
-        arg = desyntax(arg);
+        arg = venire(arg);
         if (!pair_p(arg))
                 evaluate_incompatible(__LINE__, failure);
         state = lcdr(arg);
         arg = lcar(arg);
-        arg = desyntax(arg);
+        arg = venire(arg);
         if (!symbol_p(arg) || !pair_p(state) || !null_p(lcdr(state)))
                 evaluate_incompatible(__LINE__, failure);
         state = lcar(state);
-        state = desyntax(state);
+        state = venire(state);
         if (state == Sym_VOV_ARGS || state == Sym_VOV_ARGUMENTS)@/
                 save_vov_informal(arg, Svargs);
         else if (state == Sym_VOV_ENV || state == Sym_VOV_ENVIRONMENT)
@@ -6651,7 +6651,7 @@ validate_arguments (sigjmp_buf *failure)
         stack_reserve(2, failure);
         if (failure_p(reason = sigsetjmp(cleanup, 1)))
                 unwind(failure, reason, false, 2);
-        SS(Sname, desyntax(ACC));
+        SS(Sname, venire(ACC));
         SS(Sarg, ARGS);
         while (pair_p(SO(Sname))) {
                 name = lcar(SO(Sname));
@@ -6740,12 +6740,12 @@ PRIMITIVE_EVAL@&,
 case PRIMITIVE_EVAL:
         next_argument(EXPR, ARGS); /* Expression */
         if (null_p(ARGS))
-                ACC   = ENV;
+                ACC = ENV;
         else
                 next_argument(ACC, ARGS); /* Environment */
         if (!environment_p(ACC))
                 evaluate_incompatible(__LINE__, failure);
-        ENV   = ACC;
+        ENV = ACC;
         goto Begin;
 
 @* \.{if} (Conditional) Primitive. \.{cond} is defined later as an
@@ -6761,29 +6761,35 @@ PRIMITIVE_IF@&,
 case PRIMITIVE_IF: /* (Operative) */
         next_argument(ACC, ARGS); /* Condition */
         next_argument(EXPR, ARGS); /* Consequent */
-        EXPR  = cons(EXPR, VOID, failure);
+        EXPR = cons(EXPR, VOID, failure);
         if (!null_p(ARGS))
                 lcdr_set_m(EXPR, lcar(ARGS)); /* Alternate */
-        EXPR  = false_p(desyntax(ACC)) ? lcdr(EXPR) : lcar(EXPR);
+        EXPR = false_p(venire(ACC)) ? lcdr(EXPR) : lcar(EXPR);
         goto Begin;
 
 @* Mutation Primitives \.{define!} \AM\ \.{set!}.
 
 @<Primitive \C...@>=
+PRIMITIVE_CLEAR_M,@/
 PRIMITIVE_CURRENT_ENVIRONMENT,@/
+PRIMITIVE_DEFINED_P,@/
 PRIMITIVE_DEFINE_M,@/
-PRIMITIVE_ENVIRONMENT_EXTEND,@/
 PRIMITIVE_ENVIRONMENT_P,@/
+PRIMITIVE_EXTEND,@/
 PRIMITIVE_ROOT_ENVIRONMENT,@/
-PRIMITIVE_SET_M@&,@/
+PRIMITIVE_SET_M,@/
+PRIMITIVE_UNSET_M@&,
 
 @ @<Primitive schema...@>=
+[PRIMITIVE_CLEAR_M]             = { "E!__clear!",              NIL, },@/
 [PRIMITIVE_CURRENT_ENVIRONMENT] = { "00__current-environment", NIL, },@/
+[PRIMITIVE_DEFINED_P]           = { "E!__defined?",            NIL, },@/
 [PRIMITIVE_DEFINE_M]            = { "E!:_define!",             NIL, },@/
-[PRIMITIVE_ENVIRONMENT_EXTEND]  = { "11__environment/extend",  NIL, },@/
 [PRIMITIVE_ENVIRONMENT_P]       = { "11__environment?",        NIL, },@/
+[PRIMITIVE_EXTEND]              = { "11__extend",              NIL, },@/
 [PRIMITIVE_ROOT_ENVIRONMENT]    = { "00__root-environment",    NIL, },@/
-[PRIMITIVE_SET_M]               = { "E!:_set!",                NIL, }@&,@/
+[PRIMITIVE_SET_M]               = { "E!:_set!",                NIL, },@/
+[PRIMITIVE_UNSET_M]             = { "E!__unset!",              NIL, }@&,
 
 @ (define! <env> <sym> <expr>)
 
@@ -6796,10 +6802,6 @@ or (define! <env> (<sym> . <formals>) . <body>)
 @<Primitive imp...@>=
 case PRIMITIVE_ENVIRONMENT_P:
         primitive_predicate(environment_p);
-case PRIMITIVE_ENVIRONMENT_EXTEND:
-        validated_argument(ACC, ARGS, false, false, environment_p, failure);
-        ACC = env_extend(ACC, failure);
-        break;
 case PRIMITIVE_CURRENT_ENVIRONMENT:
         assert(null_p(ARGS));
         ACC = ENV;
@@ -6808,45 +6810,79 @@ case PRIMITIVE_ROOT_ENVIRONMENT:
         assert(null_p(ARGS));
         ACC = Root;
         break;
+case PRIMITIVE_DEFINED_P:@;
+        validated_argument(ACC, ARGS, false, false, environment_p, failure);
+        validated_argument(tmp, ARGS, true, false, symbol_p, failure);
+        ACC = env_search(ACC, tmp, failure);
+        ACC = defined_p(ACC);
+        break;
+case PRIMITIVE_EXTEND:
+        validated_argument(ACC, ARGS, false, false, environment_p, failure);
+        ACC = env_extend(ACC, failure);
+        break;
+
+@ @<Primitive imp...@>=
 case PRIMITIVE_DEFINE_M:
 case PRIMITIVE_SET_M:
         flag = (primitive(ACC) == PRIMITIVE_DEFINE_M);
         validated_argument(ACC, ARGS, false, false, environment_p, failure);
-        next_argument(EXPR, ARGS); /* Label or named Formals */
-        EXPR  = desyntax(EXPR);
+        next_argument(EXPR, ARGS);                    /* Label or named Formals */
+        EXPR  = venire(EXPR);
         if (pair_p(EXPR)) { /* Named applicative closure: \.(Label \.. Formals\.) */
-                ARGS  = cons(lcdr(EXPR), lcar(ARGS), failure); /* Body */
-                ARGS  = cons(Iprimitive[PRIMITIVE_LAMBDA].box, ARGS,
+                ARGS = cons(lcdr(EXPR), lcar(ARGS), failure); /* Body */
+                ARGS = cons(Iprimitive[PRIMITIVE_LAMBDA].box, ARGS,
                         failure);
-                EXPR  = lcar(EXPR); /* Real binding label. */
-                EXPR  = desyntax(EXPR);
+                EXPR = lcar(EXPR);                    /* Real binding label. */
+                EXPR = venire(EXPR);
         } else if (symbol_p(EXPR)) {
                 ARGS  = lcar(ARGS);
                 if (!pair_p(ARGS) || !null_p(lcdr(ARGS)))
                         evaluate_incompatible(__LINE__, failure);
-                ARGS  = lcar(ARGS); /* Value (after evaluation). */
+                ARGS = lcar(ARGS);                   /* Value (after evaluation). */
         } else
                 evaluate_incompatible(__LINE__, failure);
-        EXPR  = cons(predicate(flag), EXPR, failure); /* Label */
-        EXPR  = cons(ACC, EXPR, failure); /* Environment to mutate */
+        EXPR = cons(predicate(flag), EXPR, failure); /* Label */
+        EXPR = cons(ACC, EXPR, failure);             /* Environment to mutate */
         EXPR = pend(PENDING_MUTATE, EXPR, failure);
         CLINK = cons(EXPR, CLINK, failure);
-        EXPR  = ARGS; /* Value to evaluate. */
+        EXPR = ARGS;                                 /* Value to evaluate. */
         goto Begin;
+
+@ @<Primitive imp...@>=
+case PRIMITIVE_CLEAR_M:
+case PRIMITIVE_UNSET_M:
+        flag = (primitive(ACC) == PRIMITIVE_CLEAR_M);
+        validated_argument(ACC, ARGS, false, false, environment_p, failure);
+        validated_argument(EXPR, ARGS, true, false, symbol_p, failure);
+        EXPR = cons(UNDEFINED, EXPR, failure);
+        EXPR = cons(ACC, EXPR, failure);
+        EXPR = pend(PENDING_MUTATE, EXPR, failure);
+        CLINK = cons(EXPR, CLINK, failure);
+        ACC = predicate(flag);
+        goto Mutate_Environment;
 
 @ To mutate the environment needs support from the evaluator (or
 another primitive to |Return| to).
 
 @<Eval...@>=
 Mutate_Environment:
-        next_argument(EXPR, CLINK);
-        EXPR = pending_datum(EXPR); /* \.(Environment new? \.. Label\.) */
-        next_argument(ENV, EXPR); /* Already validated */
-        next_argument(ARGS, EXPR); /* \ditto\ */
-        if (true_p(ARGS))
-                env_define_m(ENV, EXPR, ACC, failure);
-        else
-                env_set_m(ENV, EXPR, ACC, failure);
+        next_argument(EXPR, CLINK); /* \.(Environment new?-or-|UNDEFINED|
+                                        \.. Label\.) */
+        EXPR = pending_datum(EXPR);
+        next_argument(tmp, EXPR);
+        next_argument(ARGS, EXPR);
+        if (boolean_p(ARGS)) { /* Value is in |Accumulator| */
+                if (true_p(ARGS))
+                        env_define_m(tmp, EXPR, ACC, failure);
+                else
+                        env_set_m(tmp, EXPR, ACC, failure);
+        } else { /* Clear/unset is in |Accumulator| */
+                assert(undefined_p(ARGS));
+                if (true_p(ACC))
+                        env_clear_m(tmp, EXPR, failure);
+                else
+                        env_unset_m(tmp, EXPR, failure);
+        }
         goto Return;
 
 @* Pairs \AM\ other simple objects.
@@ -6864,7 +6900,7 @@ PRIMITIVE_OPERATIVE_P,@/
 PRIMITIVE_PAIR_P,@/
 PRIMITIVE_SYMBOL_P,@/
 PRIMITIVE_TRUE_P,@/
-PRIMITIVE_VOID_P@&,@/
+PRIMITIVE_VOID_P@&,
 
 @ @<Primitive schema...@>=
 [PRIMITIVE_APPLICATIVE_P] = { "11__applicative?", NIL, },@/
@@ -6879,15 +6915,15 @@ PRIMITIVE_VOID_P@&,@/
 [PRIMITIVE_PAIR_P]        = { "11__pair?",        NIL, },@/
 [PRIMITIVE_SYMBOL_P]      = { "11__symbol?",      NIL, },@/
 [PRIMITIVE_TRUE_P]        = { "11__true?",        NIL, },@/
-[PRIMITIVE_VOID_P]        = { "11__void?",        NIL, }@&,@/
+[PRIMITIVE_VOID_P]        = { "11__void?",        NIL, }@&,
 
 @ Note that the |break| is {\it outside\/} the while-wart.
 
 @d primitive_predicate(O) do {
         next_argument(ACC, ARGS);
         assert(null_p(ARGS));
-        ACC  = desyntax(ACC);
-        ACC  = predicate(O(ACC));
+        ACC = venire(ACC);
+        ACC = predicate(O(ACC));
 } while (0); break
 @<Primitive imp...@>=
 case PRIMITIVE_APPLICATIVE_P:
@@ -6923,12 +6959,12 @@ case PRIMITIVE_CONS:
 
 case PRIMITIVE_CAR:
         validated_argument(ACC, ARGS, true, false, pair_p, failure);
-        ACC = lcar(desyntax(ACC));
+        ACC = lcar(venire(ACC));
         break;
 
 case PRIMITIVE_CDR:
         validated_argument(ACC, ARGS, true, false, pair_p, failure);
-        ACC = lcdr(desyntax(ACC));
+        ACC = lcdr(venire(ACC));
         break;
 
 @* Object primitives.
@@ -6945,7 +6981,7 @@ PRIMITIVE_HASHTABLE_KEYS,@/
 PRIMITIVE_HASHTABLE_P,
 PRIMITIVE_HASHTABLE_REPLACE_M,@/
 PRIMITIVE_HASHTABLE_STORE_M,
-PRIMITIVE_HASHTABLE_VALUES@&,@/
+PRIMITIVE_HASHTABLE_VALUES@&,
 
 @ @<Primitive schema...@>=
 [PRIMITIVE_NEW_HASHTABLE]       = { "00__new-hashtable", NIL, },@/
@@ -6959,7 +6995,7 @@ PRIMITIVE_HASHTABLE_VALUES@&,@/
 [PRIMITIVE_HASHTABLE_P]         = { "11__hashtable?",    NIL, },@/
 [PRIMITIVE_HASHTABLE_REPLACE_M] = { "33__replace!",      NIL, },@/
 [PRIMITIVE_HASHTABLE_STORE_M]   = { "33__store!",        NIL, },@/
-[PRIMITIVE_HASHTABLE_VALUES]    = { "11__values",        NIL, }@&,@/
+[PRIMITIVE_HASHTABLE_VALUES]    = { "11__values",        NIL, }@&,
 
 @ @<Primitive imp...@>=
 case PRIMITIVE_HASHTABLE_P:
@@ -6991,7 +7027,7 @@ case PRIMITIVE_HASHTABLE_FETCH:
         flag = (primitive(ACC) == PRIMITIVE_HASHTABLE_EXISTS_P);
         validated_argument(ACC, ARGS, false, false, hashtable_p, failure);
         validated_argument(EXPR, ARGS, true, false, symbol_p, failure);
-        ACC = hashtable_fetch(ACC, desyntax(EXPR), failure);
+        ACC = hashtable_fetch(ACC, venire(EXPR), failure);
         if (flag)
                 ACC = predicate(defined_p(ACC));
         else if (undefined_p(ACC))
@@ -7012,7 +7048,7 @@ case PRIMITIVE_HASHTABLE_STORE_M:
 Hash_Table_Mutate:
         validated_argument(ACC, ARGS, false, false, hashtable_p, failure);
         validated_argument(EXPR, ARGS, true, false, symbol_p, failure);
-        hashtable_set_imp(ACC, desyntax(EXPR), lcar(ARGS), flag, failure);
+        hashtable_set_imp(ACC, venire(EXPR), lcar(ARGS), flag, failure);
         ACC = lcar(ARGS);
         break;
 
@@ -7022,11 +7058,9 @@ case PRIMITIVE_HASHTABLE_FORGET_M:
         flag = (primitive(ACC) == PRIMITIVE_HASHTABLE_DELETE_M) ? MUST : CAN;
         validated_argument(ACC, ARGS, false, false, hashtable_p, failure);
         validated_argument(EXPR, ARGS, true, false, symbol_p, failure);
-        hashtable_delete_m(ACC, desyntax(EXPR), false, flag, failure);
+        hashtable_delete_m(ACC, venire(EXPR), false, flag, failure);
         ACC = VOID;
         break;
-
-
 
 @** Serialisation.
 
