@@ -2,7 +2,7 @@
 
 
 
-(define! (root-environment) REMark (vov ((E vov/env)) ((lambda ()))))
+(define! (root-environment) REMark (vov ((E vov/env)) (do)))
 
 (define! (root-environment) -: REMark) (-: Now we have comments. :-)
 
@@ -265,7 +265,7 @@
 
                 (define! (root-environment) (for-each PROGRAM LIST)
                         (signature/assert! LIST list?)
-                        (walk (lambda (NEXT REST) (PROGRAM NEXT)) LIST))
+                        (klaw (lambda (FIX NEXT) (PROGRAM NEXT)) () LIST))
 
                 (define! (root-environment) (reverse LIST)
                         (signature/assert! LIST list?)
@@ -335,7 +335,7 @@
 
         (-: Construct lambda and matching let forms for programs
                 which validate their arguments (validating), return
-                (validated) value and both (signed) :-)
+                value (validated) or both (signed) :-)
 
         (define! (root-environment) lambda/validating
                 (vau (FORMALS . BODY) CREATOR

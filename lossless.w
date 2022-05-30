@@ -51,6 +51,7 @@
 @s uint64_t int
 @s uintptr_t int
 %
+@s Vbreak int
 @s Verror int
 @s Vhash int
 @s Vlexicat int
@@ -281,6 +282,8 @@ each thread.
 
 @d shared
 @d unique __thread
+@<Fun...@>=
+void thread_mem_init (void);
 
 @ Code comes with errors and programming is a way of finding them
 (and turning them into bugs).
@@ -446,8 +449,30 @@ garbage collection to reclaim any discarded atoms first (this is
 also when unused segments are returned to the master allocator).
 
 @<Fun...@>=
+void mem_init (void);
 void *mem_alloc (void *, size_t, size_t, sigjmp_buf *);
-void *mem_free (void *);
+void mem_free (void *);
+
+@ @c
+void
+thread_mem_init (void)
+{
+        @<Save register locations@>@;
+}
+
+@ @c
+void
+mem_init (void)
+{
+        sigjmp_buf failed, *failure = &failed;
+        Verror reason = LERR_NONE;
+
+        if (failure_p(reason = sigsetjmp(failed, 1)))
+                abort();
+        thread_mem_init();
+        @<Initialise memory@>@;
+        ENV = Root = NIL;
+}
 
 @ @c
 void *
@@ -474,7 +499,7 @@ mem_alloc (void       *old,
 }
 
 @ @c
-void *
+void
 mem_free (void *o)
 {
         free(o);
@@ -647,14 +672,14 @@ atoms' tags will be one of the other values here.
 @d FORM_SYMBOL            (LTAG_NONE | 0x0a)
 @d FORM_SYMBOL_INTERN     (LTAG_NONE | 0x0b)
 @#
-@d FORM_PRIMITIVE         (LTAG_DDEX | 0x00)
-@d FORM_SEGMENT           (LTAG_DDEX | 0x01)
+@d FORM_PENDING           (LTAG_DDEX | 0x00)
+@d FORM_PRIMITIVE         (LTAG_DDEX | 0x01)
+@d FORM_SEGMENT           (LTAG_DDEX | 0x02)
 @#
 @d FORM_PAIR              (LTAG_BOTH | 0x00)
 @d FORM_APPLICATIVE       (LTAG_BOTH | 0x01)
 @d FORM_ENVIRONMENT       (LTAG_BOTH | 0x02)
-@d FORM_NOTE              (LTAG_BOTH | 0x03)
-@d FORM_OPERATIVE         (LTAG_BOTH | 0x04)
+@d FORM_OPERATIVE         (LTAG_BOTH | 0x03)
 @#
 @d FORM_ROPE              (LTAG_BOTH | 0x08)
 @d FORM_TROPE_SIN         (LTAG_BOTH | 0x09)
@@ -689,7 +714,7 @@ somewhat compensate for this the format of any |cell| arguments to
 @d collected_p(O)         (form_p((O), COLLECTED))
 @d environment_p(O)       (form_p((O), ENVIRONMENT))
 @d hashtable_p(O)         (form_p((O), HASHTABLE) || null_array_p(O))
-@d note_p(O)              (form_p((O), NOTE))
+@d pending_p(O)           (form_p((O), PENDING))
 @d record_p(O)            (form_p((O), RECORD))
 @d record_index_p(O)      (form_p((O), RECORD_INDEX))
 @d rune_p(O)              (form_p((O), RUNE))
@@ -726,7 +751,7 @@ TODO: Move |fix| into the macro.
 @d RECORD_ENVIRONMENT_ITERATOR -2
 @d RECORD_LEXEME               -3
 @d RECORD_LEXAR                -4
-@d RECORD_SYNTAX               -5
+@d RECORD_PROVENANCE           -5
 @#
 @d rope_iter_p(O)         (form_p((O), RECORD) && record_id(O)
         == fix(RECORD_ROPE_ITERATOR))
@@ -734,8 +759,8 @@ TODO: Move |fix| into the macro.
         == fix(RECORD_LEXEME))
 @d lexar_p(O)             (form_p((O), RECORD) && record_id(O)
         == fix(RECORD_LEXAR))
-@d syntax_p(O)            (form_p((O), RECORD) && record_id(O)
-        == fix(RECORD_SYNTAX))
+@d provenance_p(O)        (form_p((O), RECORD) && record_id(O)
+        == fix(RECORD_PROVENANCE))
 
 @* Fixed-size Integers. No operators are yet made available to work
 with any sort of numbers, however the fixed-size small integers are
@@ -1498,7 +1523,7 @@ enum {
         LGCR_EXPRESSION, LGCR_ENVIRONMENT, LGCR_ACCUMULATOR, LGCR_ARGUMENTS,
         LGCR_CLINK,@/
         LGCR_OPERATORS,@/
-        LGCR_USER,
+        LGCR_USER, LGCR_DEBUG,
         LGCR_COUNT
 };
 
@@ -1507,31 +1532,37 @@ not used by \Ls/ for any purpose but is made available by the \Ls/
 library.
 
 @<Global...@>=
-unique cell *Registers[LGCR_COUNT];
+unique cell *Iregister[LGCR_COUNT];
 shared cell  User_Register = NIL; /* Unused by \Ls/ --- for library users. */
+shared cell  Debug_Register = NIL; /* Similar --- for the \Ls/ debugger. */
+
+@ @<Extern...@>=
+extern unique cell *Iregister[];
+extern shared cell User_Register, Debug_Register;
 
 @ This list of pointers to the registers is re-initialised once per
 thread. Probably. The garbage collector updates the pointer if the
 atom moves.
 
 @<Save reg...@>=
-Registers[LGCR_TMPSIN]      = &Tmp_SIN;
-Registers[LGCR_TMPDEX]      = &Tmp_DEX;
-Registers[LGCR_TMPIER]      = &Tmp_ier;
-Registers[LGCR_NULL]        = &Null_Array;
-Registers[LGCR_SYMTABLE]    = &Symbol_Table;
-Registers[LGCR_STACK]       = &Stack;
-Registers[LGCR_PROTECT_0]   = Protect + 0;
-Registers[LGCR_PROTECT_1]   = Protect + 1;
-Registers[LGCR_PROTECT_2]   = Protect + 2;
-Registers[LGCR_PROTECT_3]   = Protect + 3;
-Registers[LGCR_EXPRESSION]  = &Expression;
-Registers[LGCR_ENVIRONMENT] = &Environment;
-Registers[LGCR_ACCUMULATOR] = &Accumulator;
-Registers[LGCR_ARGUMENTS]   = &Arguments;
-Registers[LGCR_CLINK]       = &Control_Link;
-Registers[LGCR_OPERATORS]   = &Root;
-Registers[LGCR_USER]        = &User_Register;
+Iregister[LGCR_TMPSIN]      = &Tmp_SIN;
+Iregister[LGCR_TMPDEX]      = &Tmp_DEX;
+Iregister[LGCR_TMPIER]      = &Tmp_ier;
+Iregister[LGCR_NULL]        = &Null_Array;
+Iregister[LGCR_SYMTABLE]    = &Symbol_Table;
+Iregister[LGCR_STACK]       = &Stack;
+Iregister[LGCR_PROTECT_0]   = Protect + 0;
+Iregister[LGCR_PROTECT_1]   = Protect + 1;
+Iregister[LGCR_PROTECT_2]   = Protect + 2;
+Iregister[LGCR_PROTECT_3]   = Protect + 3;
+Iregister[LGCR_EXPRESSION]  = &Expression;
+Iregister[LGCR_ENVIRONMENT] = &Environment;
+Iregister[LGCR_ACCUMULATOR] = &Accumulator;
+Iregister[LGCR_ARGUMENTS]   = &Arguments;
+Iregister[LGCR_CLINK]       = &Control_Link;
+Iregister[LGCR_OPERATORS]   = &Root;
+Iregister[LGCR_USER]        = &User_Register;
+Iregister[LGCR_DEBUG]       = &Debug_Register;
 
 @* Garbage Collection. \Ls/ includes two garbage collectors. A
 small, simple but moderately slow mark-and-sweep collector and a
@@ -1573,9 +1604,12 @@ gc_sweeping (Oheap *heap,
         }
         if (segments)
                 gc_disown_segments(heap);
+        for (i = 0; i < PRIMITIVE_LENGTH; i++)
+                Iprimitive[i].box = gc_mark(heap, Iprimitive[i].box,
+                        false, NULL, &count);
         for (i = 0; i < LGCR_COUNT; i++)
-                if (!special_p(*Registers[i]))
-                        *Registers[i] = gc_mark(heap, *Registers[i],
+                if (!special_p(*Iregister[i]))
+                        *Iregister[i] = gc_mark(heap, *Iregister[i],
                                 false, NULL, &count);
         p = heap;
         while (p != NULL) {
@@ -1623,9 +1657,12 @@ gc_compacting (Oheap *heap,
         }
         if (segments)
                 gc_disown_segments(heap);
+        for (i = 0; i < PRIMITIVE_LENGTH; i++)
+                Iprimitive[i].box = gc_mark(heap, Iprimitive[i].box,
+                        false, NULL, &count);
         for (i = 0; i < LGCR_COUNT; i++)
-                if (!special_p(Registers[i]))
-                        *Registers[i] = gc_mark(last, *Registers[i],
+                if (!special_p(Iregister[i]))
+                        *Iregister[i] = gc_mark(last, *Iregister[i],
                                 true, NULL, &count);
         count += gc_reclaim_heap (heap);
         if (segments)
@@ -3559,7 +3596,7 @@ rope_iterate_next_utfo (cell        o,
 {
         int c;
         cell r, start, twine;
-        Vutfio_parse res, (*readchar) (Outfio *, char);
+        Vutfio_parse res, (*readchar) (Outfio *, uint8_t);
 
         assert(rope_iter_p(o));
         twine = rope_iter_twine(o);
@@ -3651,7 +3688,7 @@ stack_ref (long        offset,
 
         assert(offset >= 0);
         assert(failure != NULL || StackP >= offset);
-        if (StackP < offset)
+        if (failure != NULL && StackP < offset)
                 siglongjmp(*failure, LERR_UNDERFLOW);
         else
                 r = array_ref(Stack, StackP - offset);
@@ -3667,7 +3704,7 @@ stack_set_m (long        offset,
 {
         assert(offset >= 0);
         assert(failure != NULL || StackP >= offset);
-        if (StackP < offset)
+        if (failure != NULL && StackP < offset)
                 siglongjmp(*failure, LERR_UNDERFLOW);
         else
                 array_set_m(Stack, StackP - offset, datum);
@@ -3993,91 +4030,85 @@ lexeme_new (Vlexicat    cat,
         return r;
 }
 
-@* Syntax Parser. The completed result of the lexical analyser is
-given to the syntax parser to transform it from a list of tokens
-into a tree of operations. Each node in this tree which with some
-irony doesn't use any of the built-in trees is a syntax object ---
-a record (of only cells) holding the datum which was parsed from
-the source and a record of where in the stream of lexemes it was
-found.
+@* Expression Provenance. The completed result of the lexical
+analyser is given to the syntax parser to transform it from a list
+of tokens into a tree of operations. Each node in this tree which
+with some irony doesn't use any of the built-in trees is a syntax
+object --- a record (of only cells) holding the expression which
+was parsed from the source and a record of where in the stream of
+lexemes it was found.
 
-@d SYNTAX_DATUM  0 /* The parsed datum. */
-@d SYNTAX_NOTE   1 /* (Unused) a note for the future use of the evaluator. */
-@d SYNTAX_START  2 /* The lexeme which began this datum. */
-@d SYNTAX_END    3 /* The lexeme which ended this datum (inclusive). */
-@d SYNTAX_VALID  4 /* Whether the source is valid and can be evaluated. */
-@d SYNTAX_LENGTH 5
+@d PROVENANCE_DATUM  0 /* The parsed datum. */
+@d PROVENANCE_START  1 /* The lexeme which began this datum. */
+@d PROVENANCE_END    2 /* The lexeme which ended this datum (inclusive). */
+@d PROVENANCE_VALID  3 /* Whether the source is valid and can be evaluated. */
+@d PROVENANCE_LENGTH 4
 @#
-@d syntax_datum(O) (record_cell((O), SYNTAX_DATUM))
-@d syntax_end(O)   (record_cell((O), SYNTAX_END))
-@d syntax_note(O)  (record_cell((O), SYNTAX_NOTE))
-@d syntax_start(O) (record_cell((O), SYNTAX_START))
-@d syntax_valid(O) (record_cell((O), SYNTAX_VALID))
+@d prove_datum(O) (record_cell((O), PROVENANCE_DATUM))
+@d prove_end(O)   (record_cell((O), PROVENANCE_END))
+@d prove_start(O) (record_cell((O), PROVENANCE_START))
+@d prove_valid(O) (record_cell((O), PROVENANCE_VALID))
 @#
-@d syntax_new(D,S,E,F)     syntax_new_imp((D), NIL, (S), (E), true, (F))
-@d syntax_invalid(D,S,E,F) syntax_new_imp((D), NIL, (S), (E), false, (F))
+@d prove_new(D,S,E,F)     prove_new_imp((D), (S), (E), true, (F))
+@d prove_invalid(D,S,E,F) prove_new_imp((D), (S), (E), false, (F))
 @c
 cell
-syntax_new_imp (cell        datum,
-                cell        note,
-                cell        start,
-                cell        end,
-                bool        valid,
-                sigjmp_buf *failure)
+prove_new_imp (cell        datum,
+               cell        start,
+               cell        end,
+               bool        valid,
+               sigjmp_buf *failure)
 {
-        static int Sdatum = 3, Snote = 2, Sstart = 1, Send = 0;
+        static int Sdatum = 2, Sstart = 1, Send = 0;
         cell r = NIL;
         sigjmp_buf cleanup;
         Verror reason = LERR_NONE;
 
         assert(defined_p(datum));
-        assert(null_p(note) || symbol_p(note));
         assert(dlist_p(start) && lexeme_p(dlist_datum(start)));
         assert(dlist_p(end) && lexeme_p(dlist_datum(end)));
                 /* |&& start->@[@]|...|@[@]->next == end| */
-        stack_protect(4, datum, note, start, end, failure);
+        stack_protect(3, datum, start, end, failure);
         if (failure_p(reason = sigsetjmp(cleanup, 1)))
-                unwind(failure, reason, false, 4);
-        r = record_new(fix(RECORD_SYNTAX), SYNTAX_LENGTH, 0, &cleanup);
-        record_set_cell_m(r, SYNTAX_VALID, predicate(valid));
-        record_set_cell_m(r, SYNTAX_NOTE, SO(Snote));
-        record_set_cell_m(r, SYNTAX_DATUM, SO(Sdatum));
-        record_set_cell_m(r, SYNTAX_START, SO(Sstart));
-        record_set_cell_m(r, SYNTAX_END, SO(Send));
-        stack_clear(4);
+                unwind(failure, reason, false, 3);
+        r = record_new(fix(RECORD_PROVENANCE), PROVENANCE_LENGTH, 0, &cleanup);
+        record_set_cell_m(r, PROVENANCE_VALID, predicate(valid));
+        record_set_cell_m(r, PROVENANCE_DATUM, SO(Sdatum));
+        record_set_cell_m(r, PROVENANCE_START, SO(Sstart));
+        record_set_cell_m(r, PROVENANCE_END, SO(Send));
+        stack_clear(3);
         return r;
 }
 
-@* Annotated pairs. These are used by the evaluator (below) to keep
-track of its partial work. The evaluator should probably be refactored
-to use syntax nodes instead.
+@* Pending Computation. These are used by the evaluator (below) to
+keep track of its partial work. The evaluator could be refactored
+to move memory allocation to within this object.
 
-@ @d note(O)           (lcar(O))
-@d note_pair(O)        (lcdr(O))
-@d note_car(O)         (lcar(note_pair(O)))
-@d note_cdr(O)         (lcdr(note_pair(O)))
-@d note_set_car_m(O,V) (lcar_set_m(note_pair(O), (V)))
-@d note_set_cdr_m(O,V) (lcdr_set_m(note_pair(O), (V)))
+@<Type def...@>=
+typedef enum {
+        PENDING_COMBINE_BUILD,@/
+        PENDING_COMBINE_DISPATCH,@/
+        PENDING_COMBINE_READY,@/
+        PENDING_COMBINE_FINISH,@/
+        PENDING_EVALUATE,@/
+        PENDING_MUTATE,@/
+} Vpending;
+
+@ @<Fun...@>=
+cell pend (Vpending, cell, sigjmp_buf *);
+
+@
+@d pending_datum(O) (lcdr(O))
+@d pending_stage(O) ((Vpending) lcar(O))
 @c
 cell
-note_new (cell        label,
-          cell        ncar,
-          cell        ncdr,
-          sigjmp_buf *failure)
+pend (Vpending    stage,
+      cell        datum,
+      sigjmp_buf *failure)
 {
-        static int Slabel = 3, Sncar = 2, Sncdr = 1, Stmp = 0;
         cell r;
-        sigjmp_buf cleanup;
-        Verror reason = LERR_NONE;
 
-        assert(symbol_p(label));
-        assert(defined_p(ncar) && defined_p(ncdr));
-        stack_protect(4, label, ncar, ncdr, NIL, failure);
-        if (failure_p(reason = sigsetjmp(cleanup, 1)))
-                unwind(failure, reason, false, 4);
-        SS(Stmp, cons(SO(Sncar), SO(Sncdr), &cleanup));
-        r = atom(Theap, SO(Slabel), SO(Stmp), FORM_NOTE, &cleanup);
-        stack_clear(4);
+        r = atom(Theap, stage, datum, FORM_PENDING, failure);
         return r;
 }
 
@@ -4190,7 +4221,11 @@ Oprimitive Iprimitive[] = {
         @<Primitive schemata@>
 };
 
-shared cell Root = NIL;
+unique cell Root = NIL;
+
+@ @<Extern...@>=
+extern Oprimitive Iprimitive[];
+extern unique cell Root;
 
 @ @<Register primitive operators@>=
 Root = env_empty(failure);
@@ -4524,8 +4559,6 @@ lexar_token (int         Silex,
         int flags = 0;               /* See \.{LLF\_*}. */
         int want_digit = MUST;       /* Whether a numeric digit is permitted. */
         Vlexicat cat = LEXICAT_NONE; /* The category that is discovered. */
-        Orope_iter *irope, *idelim;  /* The rope and ending-delimiter
-                                                iterators. */
         sigjmp_buf cleanup;
         Verror reason = LERR_NONE;
         cell r, tmp;
@@ -4876,8 +4909,6 @@ are they a holdover from earlier buggier days?
 
 @.TODO@>
 @<Finish and return a raw string/symbol combination@>=
-irope = rope_iter(lexar_iterator(SO(Silex)));
-idelim = rope_iter(lexar_iterator(SO(Sedelim)));
 lexar(SO(Silex))->cplength++;
 lexar(SO(Silex))->blength = lexar(SO(Silex))->cplength;
 lexar(SO(Silex))->tbstart += lexar(SO(Sedelim))->blength;
@@ -5369,7 +5400,7 @@ if (!null_p(SO(Swork))) {
                 SS(Sbuild, cons(lcar(SO(Swork)), SO(Sbuild), &cleanup));
                 SS(Swork, lcdr(SO(Swork)));
         }
-        x = syntax_invalid(SO(Sbuild), SO(Sstart), SO(Sllex), &cleanup);
+        x = prove_invalid(SO(Sbuild), SO(Sstart), SO(Sllex), &cleanup);
         parse_fail(Sfail, LERR_SYNTAX, x, &cleanup);
         SS(Sbuild, cons(x, SO(Stmp), &cleanup));
 }
@@ -5386,7 +5417,7 @@ case LEXICAT_SPACE:
                         literally everything\/} in space.}. */
 default:
 case LEXICAT_INVALID:
-        x = syntax_invalid(lex, llex, llex, &cleanup);
+        x = prove_invalid(lex, llex, llex, &cleanup);
         if (cat == LEXICAT_INVALID)
                 parse_fail(Sfail, LERR_UNSCANNABLE, x, &cleanup);
         else
@@ -5404,10 +5435,10 @@ case LEXICAT_CONSTANT:
         x = predicate(a == 't' || a == 'T');
         y = dlist_datum(dlist_next(llex));
         if (!lexeme_terminator_p(y)) {
-                z = syntax_invalid(x, llex, llex, &cleanup);
+                z = prove_invalid(x, llex, llex, &cleanup);
                 parse_fail(Sfail, LERR_AMBIGUOUS, z, &cleanup);
         } else
-                z = syntax_new(x, llex, llex, &cleanup);
+                z = prove_new(x, llex, llex, &cleanup);
         SS(Swork, cons(z, SO(Swork), &cleanup));
         break;
 
@@ -5442,11 +5473,11 @@ case LEXICAT_CLOSE:
         y = SO(Stmp);    /* Starting lexeme. */
         z = SO(Sllex);   /* Terminating lexeme. */
         if (pfail != LERR_NONE) {
-                SS(Sbuild, syntax_invalid(x, y, z, &cleanup));
+                SS(Sbuild, prove_invalid(x, y, z, &cleanup));
                 x = SO(Sbuild);
                 parse_fail(Sfail, LERR_SYNTAX, x, &cleanup);
         } else
-                SS(Sbuild, syntax_new(x, y, z, &cleanup));
+                SS(Sbuild, prove_new(x, y, z, &cleanup));
         if (cat != LEXICAT_END) /* Put it back on the head of |Swork| to
                                 carry on parsing. */
                 SS(Swork, cons(SO(Sbuild), SO(Swork), &cleanup));
@@ -5470,7 +5501,7 @@ if (null_p(SO(Swork))) {
         break;
 }
 x = lcar(SO(Swork)); /* The next working item to copy or process. */
-if (!syntax_p(x)) {
+if (!provenance_p(x)) {
         @<Finish building the list or fix its tail@>
 }
 SS(Sbuild, cons(lcar(SO(Swork)), SO(Sbuild), &cleanup));
@@ -5562,12 +5593,12 @@ wrapped in a \.{quote} operator.
 
 @<Parse quoted expression(s)@>=
 if (!null_p(SO(Swork)))
-        while (syntax_p(lcar(SO(Swork)))) {
+        while (provenance_p(lcar(SO(Swork)))) {
                 x = lcar(SO(Swork)); /* To be quoted? */
                 if (null_p(lcdr(SO(Swork))))
                         break; /* Nope --- nothing prior. */
                 y = lcadr(SO(Swork)); /* Previously parsed... */
-                if (syntax_p(y))
+                if (provenance_p(y))
                         break; /* Nope --- not quoted. */
                 assert(dlist_p(y) && lexeme_p(dlist_datum(y)));
                 z = dlist_datum(y);
@@ -5575,9 +5606,9 @@ if (!null_p(SO(Swork)))
                         break; /* Nope --- something else. */
                 z = cons(Iprimitive[PRIMITIVE_QUOTE].box, x, &cleanup);
                 x = lcar(SO(Swork));@+ y = lcadr(SO(Swork)); /* Maybe lost. */
-                assert(syntax_p(x));
+                assert(provenance_p(x));
                 assert(dlist_p(y) && lexeme_p(dlist_datum(y)));
-                z = syntax_new(z, y, syntax_end(x), &cleanup);
+                z = prove_new(z, y, prove_end(x), &cleanup);
                 SS(Swork, lcddr(SO(Swork))); /* Pop expression \AM\ quote. */
                 SS(Swork, cons(z, SO(Swork), &cleanup));
         }
@@ -5589,7 +5620,7 @@ converted into a symbol.
 case LEXICAT_SYMBOL:
         y = dlist_datum(dlist_next(SO(Sllex)));
         if (!lexeme_terminator_p(y)) {
-                z = syntax_invalid(lex, llex, llex, &cleanup);
+                z = prove_invalid(lex, llex, llex, &cleanup);
                 parse_fail(Sfail, LERR_AMBIGUOUS, z, &cleanup);
         } else {
                 a = lexeme(lex)->blength;
@@ -5601,7 +5632,7 @@ case LEXICAT_SYMBOL:
                 for (i = 0; i < a; i++)
                         buf[i] = rope_iterate_next_byte(x, &cleanup);
                 y = symbol_new_buffer(buf, a, &cleanup);
-                z = syntax_new(y, SO(Sllex), SO(Sllex), &cleanup);
+                z = prove_new(y, SO(Sllex), SO(Sllex), &cleanup);
                 buf = NULL;
         }
         SS(Swork, cons(z, SO(Swork), &cleanup));
@@ -5635,7 +5666,7 @@ case LEXICAT_DELIMITER:
                         (offset != 0), Sfail, &m, &cleanup);
                 SS(Sbuild, x);
                 if (!m)
-                        SS(Sbuild, syntax_invalid(SO(Sbuild), SO(Sllex),
+                        SS(Sbuild, prove_invalid(SO(Sbuild), SO(Sllex),
                                 SO(Stmp), &cleanup));
                 else {
                         if (cat == LEXICAT_RAW_STRING ||
@@ -5645,7 +5676,7 @@ case LEXICAT_DELIMITER:
                                         &cleanup);
                         else
                                 y = symbol_new_segment(x, &cleanup);
-                        SS(Sbuild, syntax_new(y, SO(Sllex),
+                        SS(Sbuild, prove_new(y, SO(Sllex),
                                 SO(Stmp), &cleanup));
                 }
         }
@@ -5672,7 +5703,7 @@ SS(Stmp, y = dlist_next(x)); /* Closing delimiter. */
 lex = dlist_datum(x);
 cat = lexeme(lex)->cat;
 if (cat == LEXICAT_INVALID) { /* Source ended without the closing delimiter. */
-        z = syntax_invalid(lex, SO(Sllex), SO(Sbuild), &cleanup);
+        z = prove_invalid(lex, SO(Sllex), SO(Sbuild), &cleanup);
         parse_fail(Sfail, LERR_UNSCANNABLE, z, &cleanup);
         SS(Stmp, SO(Sbuild));
         lex = NIL;
@@ -5681,7 +5712,7 @@ if (cat == LEXICAT_INVALID) { /* Source ended without the closing delimiter. */
         z = dlist_next(y);
         assert(lexeme(dlist_datum(y))->cat == LEXICAT_DELIMITER);
         if (!lexeme_terminator_p(dlist_datum(z))) {
-                z = syntax_invalid(lex, lcar(SO(Swork)), SO(Stmp), &cleanup);
+                z = prove_invalid(lex, lcar(SO(Swork)), SO(Stmp), &cleanup);
                 parse_fail(Sfail, LERR_AMBIGUOUS, z, &cleanup);
                 lex = NIL;
         }
@@ -5855,7 +5886,7 @@ case LEXICAT_NUMBER:@;
 @#
 case LEXICAT_RECURSE_HERE:
 case LEXICAT_RECURSE_IS:
-        z = syntax_invalid(lex, llex, llex, &cleanup);
+        z = prove_invalid(lex, llex, llex, &cleanup);
         parse_fail(Sfail, LERR_UNIMPLEMENTED, z, &cleanup);
         SS(Swork, cons(z, SO(Swork), &cleanup));
         break;
@@ -5893,10 +5924,11 @@ value from |evaluate| (TODO)?
 
 @.TODO@>
 @<Extern...@>=
-extern unique cell Accumulator;
+extern unique cell Accumulator, Arguments, Control_Link, Environment,
+        Expression;
 
 @ @<Fun...@>=
-void evaluate (cell, sigjmp_buf *);
+void evaluate (sigjmp_buf *);
 void evaluate_program (cell, sigjmp_buf *);
 void validate_formals (bool, sigjmp_buf *);
 void validate_arguments (sigjmp_buf *);
@@ -5915,7 +5947,7 @@ PRIMITIVE_DO,@/
 PRIMITIVE_DUMP,@/
 PRIMITIVE_LAMBDA,@/
 PRIMITIVE_QUOTE,@/
-PRIMITIVE_VOV@&,@/
+PRIMITIVE_VOV@&,
 
 @ @<Primitive schema...@>=
 [PRIMITIVE_BREAK]  = { "00__break",  NIL, },@/
@@ -5930,6 +5962,22 @@ case PRIMITIVE_QUOTE:
         LOG(ACC = lcar(ARGS));
         break;
 
+@ @<Type def...@>=
+typedef enum {
+        LDB_HALT_NONE,
+        LDB_HALT_BEGIN,
+        LDB_HALT_DISPATCH,
+        LDB_HALT_COMBINE,
+        LDB_HALT_RETURN
+} Vbreak;
+
+@ @<Global...@>=
+unique Vbreak Halt_Next = LDB_HALT_NONE;
+unique Vbreak Halt_At = LDB_HALT_NONE;
+
+@ @<Extern...@>=
+extern unique Vbreak Halt_Next, Halt_At;
+
 @ While building and debugging the evaluator it has proven invaluable
 to get a trace of the activity but it is exceptionally noisy. However
 \Ls/ is still in development so the macro is still here, disabled.
@@ -5943,6 +5991,7 @@ case PRIMITIVE_DUMP:
         serial(ACC, SERIAL_DETAIL, 42, NIL, NULL, failure);
         lprint("\n");
 case PRIMITIVE_BREAK:
+        ACC = VOID;
         breakpoint();
         break;
 
@@ -5954,6 +6003,8 @@ void
 breakpoint (void)
 {
         printf("Why did we ever allow GNU?\n");
+        Halt_At = Halt_Next;
+        Halt_Next = LDB_HALT_RETURN;
 }
 
 @ The entry point to the evaluator is |evaluate| and |evaluate_program|
@@ -5968,7 +6019,6 @@ evaluate_program (cell        o,
                   sigjmp_buf *failure)
 {
         static int Sprogram = 0;
-        cell program;
         bool syntactic;
         sigjmp_buf cleanup;
         Verror reason = LERR_NONE;
@@ -5976,16 +6026,16 @@ evaluate_program (cell        o,
         stack_protect(1, o, failure);
         if (failure_p(reason = sigsetjmp(cleanup, 1)))
                 unwind(failure, reason, false, 1);
-        program = Iprimitive[PRIMITIVE_DO].box;
-        syntactic = syntax_p(SO(Sprogram));
+        Expression = Iprimitive[PRIMITIVE_DO].box;
+        syntactic = provenance_p(SO(Sprogram));
         if (syntactic) {
-                LOG(program = cons(program, syntax_datum(SO(Sprogram)), &cleanup));
-                program = syntax_new(program, syntax_start(SO(Sprogram)),
-                        syntax_end(SO(Sprogram)), &cleanup);
+                LOG(Expression = cons(Expression, prove_datum(SO(Sprogram)), &cleanup));
+                LOG(Expression = prove_new(Expression, prove_start(SO(Sprogram)),
+                        prove_end(SO(Sprogram)), &cleanup));
         } else
-                LOG(program = cons(program, SO(Sprogram), &cleanup));
+                LOG(Expression = cons(Expression, SO(Sprogram), &cleanup));
         stack_clear(1);
-        evaluate(program, failure);
+        evaluate(failure);
 }
 
 @ Overall the evaluator determines for any given expression whether
@@ -6019,23 +6069,32 @@ pattern although a few liberties have been taken with some functional
 accessors and \CEE/ contstructs.
 
 @.TODO@>
-@d desyntax(O) (syntax_p(O) ? syntax_datum(O) : (O))
+@d desyntax(O) (provenance_p(O) ? prove_datum(O) : (O))
 @d evaluate_incompatible(L,F) do { /* Inadquate arity-mismatch handling. */
         lprint("incompatibility at line %d\n", (L));
         siglongjmp(*(F), LERR_INCOMPATIBLE);
 } while (0)
 @c
 void
-evaluate (cell        o,
-          sigjmp_buf *failure)
+evaluate (sigjmp_buf *failure)
 {
         cell formals, value;
         int count, flag, min, max;
         char *schema;
+        Vbreak halted;
 
+        halted = Halt_At;
+        Halt_At = LDB_HALT_NONE;
+        switch (halted) {
+                case LDB_HALT_NONE: break;
+                case LDB_HALT_BEGIN: goto Begin;
+                case LDB_HALT_DISPATCH: goto Combine_Dispatch;
+                case LDB_HALT_COMBINE: goto Combine_Operate;
+                case LDB_HALT_RETURN: goto Return;
+        }
         assert(null_p(CLINK) && null_p(ARGS));
         assert(environment_p(ENV));
-        EXPR = o;
+        assert(!void_p(EXPR));
         LOG(ACC = VOID);
         LOG(goto Begin);
         @<Evaluate a complex expression@>@;
@@ -6046,6 +6105,11 @@ is (re-)started here.
 
 @<Evaluate a complex expression@>=
 Begin:@;
+        if (Halt_Next == LDB_HALT_BEGIN) {
+                Halt_Next = Halt_At;
+                Halt_At = LDB_HALT_BEGIN;
+                return;
+        }
         EXPR = desyntax(EXPR);
         if (pair_p(EXPR))         LOG(goto Combine_Start);
         else if (!symbol_p(EXPR)) LOG(goto Finish);
@@ -6072,36 +6136,30 @@ is resumed at the appropriate co-process. TODO: This special object
 type can/should probably be merged with syntax objects (which would
 have been renamed).
 
-TODO: This is an extremely naive and expensive, but simple, method
-of comparing symbols with \CEE/ constants and should be replaced
-ASAP.
-
-Note that |Sym_COMBINE_READY| is not detected here but the co-routine
+Note that |PENDING_COMBINE_READY| is not detected here but the co-routine
 which places it ends up jumping directly into |Combine_Ready|.
 
-@.TODO@>
-@d Sym_COMBINE_READY    (symbol_new_const("COMBINE-READY"))
-@d Sym_COMBINE_BUILD    (symbol_new_const("COMBINE-BUILD"))
-@d Sym_COMBINE_DISPATCH (symbol_new_const("COMBINE-DISPATCH"))
-@d Sym_COMBINE_FINISH   (symbol_new_const("COMBINE-FINISH"))
-@d Sym_CONDITIONAL      (symbol_new_const("CONDITIONAL"))
-@d Sym_DEFINITION       (symbol_new_const("DEFINITION"))
-@d Sym_EVALUATE         (symbol_new_const("EVALUATE"))
 @<Evaluate a complex expression@>=
 Finish:
         LOG(ACC = EXPR);
 Return: /* Check |CLINK| to see if there is more work after complete
                 evaluation. */
+        if (Halt_Next == LDB_HALT_RETURN) {
+                Halt_Next = Halt_At;
+                Halt_At = LDB_HALT_RETURN;
+                return;
+        }
         if (null_p(CLINK))
                 return; /* |Accumulator| (|ACC|) has the result. */
-        else if (!note_p(CLINK))                      siglongjmp(*failure, LERR_INTERNAL);
-        else if (note(CLINK) == Sym_COMBINE_BUILD)    LOG(goto Combine_Build);
-        else if (note(CLINK) == Sym_COMBINE_DISPATCH) LOG(goto Combine_Dispatch);
-        else if (note(CLINK) == Sym_COMBINE_FINISH)   LOG(goto Combine_Finish);
-        else if (note(CLINK) == Sym_DEFINITION)       LOG(goto Mutate_Environment);
-        else if (note(CLINK) == Sym_EVALUATE)         LOG(goto Sequence);
-        else
-                siglongjmp(*failure, LERR_INTERNAL); /* Unknown note. */
+        switch(pending_stage(lcar(CLINK))) {
+        case PENDING_COMBINE_BUILD:    goto Combine_Build;
+        case PENDING_COMBINE_DISPATCH: goto Combine_Dispatch;
+        case PENDING_COMBINE_FINISH:   goto Combine_Finish;
+        case PENDING_MUTATE:           goto Mutate_Environment;
+        case PENDING_EVALUATE:         goto Sequence;
+        default:
+                siglongjmp(*failure, LERR_INTERNAL); /* Unknown stage. */
+        }
 
 @ An expression which looks like list (other than the empty list)
 represents a {\it combination\/} --- a function/procedure call or
@@ -6121,7 +6179,8 @@ Combine_Start: /* Save any |ARGS| in progress and |ENV| on |CLINK| to
         LOG(CLINK = cons(ARGS, CLINK, failure));
         LOG(CLINK = cons(ENV, CLINK, failure));
         LOG(ARGS  = lcdr(EXPR)); /* Unevaluated arguments */
-        LOG(CLINK = note_new(Sym_COMBINE_DISPATCH, ARGS, CLINK, failure));
+        LOG(ARGS  = pend(PENDING_COMBINE_DISPATCH, ARGS, failure));
+        LOG(CLINK = cons(ARGS, CLINK, failure));
         LOG(EXPR  = lcar(EXPR)); /* Unevaluated combiner */
         if (Trace) {
                 lprint("(");
@@ -6141,8 +6200,13 @@ order of the tests is significant.
 @<Eval...@>=
 Combine_Dispatch: /* Restore the combination arguments and decide
                         how to process them. */
-        LOG(ARGS  = note_car(CLINK)); /* Unevaluated arguments */
-        LOG(CLINK = note_cdr(CLINK));
+        if (Halt_Next == LDB_HALT_DISPATCH) {
+                Halt_Next = Halt_At;
+                Halt_At = LDB_HALT_DISPATCH;
+                return;
+        }
+        next_argument(ARGS, CLINK);
+        ARGS = pending_datum(ARGS); /* Unevaluated arguments */
         if (primitive_p(ACC))
                 LOG(goto Combine_Primitive);
         else if (applicative_p(ACC))
@@ -6168,7 +6232,9 @@ ready to combine.
 @<Eval...@>=
 Combine_Primitive: /* Validate the arity of primitive arguments and prepare any
                         necessary for evaluation (née |Applicative_Start|). */
-        LOG(CLINK = note_new(Sym_COMBINE_READY, ACC, CLINK, failure));
+        ACC = pend(PENDING_COMBINE_READY, ACC, failure);
+        CLINK = cons(ACC, CLINK, failure);
+        ACC = pending_datum(ACC);
         LOG(EXPR  = NIL);
         schema = Iprimitive[primitive(ACC)].schema;
         assert(*schema != '_');
@@ -6263,7 +6329,9 @@ list is used to verify that the number of arguments is correct.
 
 @<Eval...@>=
 Combine_Applicative: /* Store the closure and evaluate its arguments. */
-        LOG(CLINK = note_new(Sym_COMBINE_READY, ACC, CLINK, failure));
+        ACC = pend(PENDING_COMBINE_READY, ACC, failure);
+        CLINK = cons(ACC, CLINK, failure);
+        ACC = pending_datum(ACC);
         LOG(EXPR  = NIL);
         LOG(formals = closure_formals(ACC));
 #if 0
@@ -6278,7 +6346,7 @@ Combine_Applicative: /* Store the closure and evaluate its arguments. */
                 if (null_p(formals))
                         count = 1;
                 else if (pair_p(formals))
-                        LOG(formals = lcdr(formals));
+                        LOG(formals = lcdr(formals)); /* lost by cons */
                 LOG(ACC   = lcar(ARGS));
                 LOG(ACC   = cons(LTRUE, ACC, failure));
                 LOG(EXPR  = cons(ACC, EXPR, failure));
@@ -6309,9 +6377,10 @@ if it must not.
 @<Eval...@>=
 Combine_Pair: /* Prepare to append an argument, possibly after evaluation. */
         LOG(next_argument(ACC, EXPR));
-        LOG(CLINK = note_new(Sym_COMBINE_BUILD, EXPR, CLINK, failure));
+        EXPR = pend(PENDING_COMBINE_BUILD, EXPR, failure);
+        CLINK = cons(EXPR, CLINK, failure);
         LOG(EXPR  = lcdr(ACC)); /* (remaining) arguments to combination */
-        if (true_p(lcar(ACC)))
+        if (true_p(lcar(ACC))) /* Needs evaluation? */
                 LOG(goto Begin);
         else
                 LOG(goto Finish);
@@ -6325,8 +6394,8 @@ whether there are yet more arguments.
 Combine_Build: /* Continue building a combination after evaluating
                         one expression. */
         LOG(ARGS  = cons(ACC, ARGS, failure));
-        LOG(EXPR  = note_car(CLINK));
-        LOG(CLINK = note_cdr(CLINK));
+        next_argument(EXPR, CLINK);
+        EXPR = pending_datum(EXPR);
         LOG(goto Combine_Continue);
 
 @ When the combination's arguments are ready they have been built
@@ -6340,12 +6409,18 @@ it by recursing back into the evaluator.
 
 @<Eval...@>=
 Combine_Ready: /* Restore the saved closure or primitive. */
-        assert(note(CLINK) == Sym_COMBINE_READY);
-        LOG(ACC   = note_car(CLINK));
-        LOG(CLINK = note_cdr(CLINK));
+        next_argument(ACC, CLINK);
+        assert(pending_stage(ACC) == PENDING_COMBINE_READY);
+        ACC = pending_datum(ACC);
 LOG(goto Combine_Operate);
 Combine_Operate:@;
-        LOG(CLINK = note_new(Sym_COMBINE_FINISH, EXPR, CLINK, failure));
+        EXPR = pend(PENDING_COMBINE_FINISH, EXPR, failure);
+        CLINK = cons(EXPR, CLINK, failure);
+        if (Halt_Next == LDB_HALT_COMBINE) {
+                Halt_Next = Halt_At;
+                Halt_At = LDB_HALT_COMBINE;
+                return;
+        }
         if (primitive_p(ACC))
                 switch (primitive(ACC)) {
                 default:
@@ -6375,7 +6450,8 @@ Combine_Operate:@;
                 LOG(EXPR  = lcar(EXPR));               /* Body */
                 LOG(validate_operative(failure));      /* Sets in |ENV| as required. */
                 LOG(goto Begin);
-        }
+        } else
+                siglongjmp(*failure, LERR_INTERNAL);   /* Unreachable. */
         LOG(goto Return);
 
 @ A combiner places its result in the |Accumulator| if there is
@@ -6386,8 +6462,8 @@ layer of recursion into it, can return the evaluated result.
 @<Eval...@>=
 Combine_Finish: /* Restore the |ENV| and |ARGS| in place before
                         evaluating the combinator. */
-        LOG(EXPR  = note_car(CLINK));
-        LOG(CLINK = note_cdr(CLINK));
+        next_argument(EXPR, CLINK);
+        EXPR = pending_datum(EXPR);
         LOG(ENV   = lcar(CLINK));
         LOG(CLINK = lcdr(CLINK));
         LOG(ARGS  = lcar(CLINK));
@@ -6411,20 +6487,21 @@ extra temporary storage.
 case PRIMITIVE_DO: /* (Operative) */
         next_argument(EXPR, ARGS);
         assert(null_p(ARGS));
-        LOG(ARGS  = note_new(Sym_EVALUATE, VOID, NIL, failure));
+        ARGS = pend(PENDING_EVALUATE, VOID, failure);
+        ARGS = cons(ARGS, NIL, failure);
         LOG(ACC   = ARGS);
         LOG(EXPR  = desyntax(EXPR));
         while (!null_p(EXPR)) {
                 if (!pair_p(EXPR))
                         evaluate_incompatible(__LINE__, failure);
-                LOG(value = note_new(Sym_EVALUATE,
-                        desyntax(lcar(EXPR)), NIL, failure));
-                LOG(note_set_cdr_m(ACC, value));
+                value = pend(PENDING_EVALUATE, desyntax(lcar(EXPR)), failure);
+                value = cons(value, NIL, failure);
+                lcdr_set_m(ACC, value);
                 LOG(ACC   = value);
                 LOG(EXPR  = lcdr(EXPR));
                 LOG(EXPR  = desyntax(EXPR));
         }
-        LOG(note_set_cdr_m(ACC, CLINK));
+        lcdr_set_m(ACC, CLINK);
         LOG(CLINK = ARGS);
         break;
 
@@ -6432,8 +6509,8 @@ case PRIMITIVE_DO: /* (Operative) */
 
 @<Evaluate a complex expression@>=
 Sequence:
-        LOG(EXPR = note_car(CLINK));
-        LOG(CLINK = note_cdr(CLINK));
+        next_argument(EXPR, CLINK);
+        EXPR = pending_datum(EXPR);
         LOG(goto Begin);
 
 @ Closures are created in the same way whether they are applicative
@@ -6486,8 +6563,8 @@ Each symbol should be unique but this is not validated (TODO).
 while (pair_p(desyntax(ARGS))) {
         arg = lcar(desyntax(ARGS));
         LOG(ARGS = lcdr(desyntax(ARGS)));
-        assert(syntax_p(arg));
-        arg = syntax_datum(arg);
+        assert(provenance_p(arg));
+        arg = prove_datum(arg);
         if (!symbol_p(arg))
                 evaluate_incompatible(__LINE__, failure);
         LOG(ACC = cons(arg, ACC, failure));
@@ -6653,7 +6730,7 @@ extern shared bool Trace;
 @ @<Primitive imp...@>=
 case PRIMITIVE_ERROR:
         LOG(next_argument(ACC, ARGS));
-        siglongjmp(failure, LERR_USER);
+        siglongjmp(*failure, LERR_USER);
 case PRIMITIVE_TRACE:
         LOG(validated_argument(ACC, ARGS, true, false, boolean_p, failure));
         Trace = true_p(ACC);
@@ -6760,7 +6837,8 @@ case PRIMITIVE_SET_M:
                 evaluate_incompatible(__LINE__, failure);
         LOG(EXPR  = cons(predicate(flag), EXPR, failure)); /* Label */
         LOG(EXPR  = cons(ACC, EXPR, failure)); /* Environment to mutate */
-        LOG(CLINK = note_new(Sym_DEFINITION, EXPR, CLINK, failure));
+        EXPR = pend(PENDING_MUTATE, EXPR, failure);
+        CLINK = cons(EXPR, CLINK, failure);
         LOG(EXPR  = ARGS); /* Value to evaluate. */
         LOG(goto Begin);
 
@@ -6769,8 +6847,8 @@ another primitive to |Return| to).
 
 @<Eval...@>=
 Mutate_Environment:
-        LOG(EXPR  = note_car(CLINK)); /* \.(Environment new? \.. Label\.) */
-        LOG(CLINK = note_cdr(CLINK));
+        next_argument(EXPR, CLINK);
+        EXPR = pending_datum(EXPR); /* \.(Environment new? \.. Label\.) */
         LOG(next_argument(ENV, EXPR)); /* Already validated */
         LOG(next_argument(ARGS, EXPR)); /* \ditto\ */
         if (true_p(ARGS))
@@ -7140,12 +7218,11 @@ void
 serial_imp (cell        o,
             int         detail,
             int         maxdepth,
-            bool        prefix,
+            bool        prefix @[Lunused@],
             cell        buffer,
             cell        cycles,
             sigjmp_buf *failure)
 {
-        cell p;
         int i, length = 0;
         char *append = NULL, buf[FIX_BASE10 + 2];
 
@@ -7542,19 +7619,15 @@ else if (dlist_p(o) && detail != SERIAL_ROUND) {
 }
 
 @ @<Serialise an object@>=
-else if (note_p(o) && detail != SERIAL_ROUND) {
+else if (pending_p(o) && detail != SERIAL_ROUND) {
         if (!maxdepth)
-                append = "\006<NOTE>";
+                append = "\006<PENDING>";
         else {
-                serial_imp(note(o), detail, maxdepth - 1, true, buffer, cycles,
+                serial_imp(fix(pending_stage(o)), detail, maxdepth - 1, true, buffer, cycles,
                         failure);
                 if (detail)
                         serial_append(buffer, "ª", (int) sizeof ("ª"), failure);
-                serial_imp(note_car(o), detail, maxdepth - 1, true, buffer,
-                        cycles, failure);
-                if (detail)
-                        serial_append(buffer, " ¦ ", (int) sizeof (" ¦ "), failure);
-                serial_imp(note_cdr(o), detail, maxdepth - 1, true, buffer,
+                serial_imp(pending_datum(o), detail, maxdepth - 1, true, buffer,
                         cycles, failure);
                 if (detail)
                         serial_append(buffer, "º", (int) sizeof ("º"), failure);
@@ -7563,28 +7636,31 @@ else if (note_p(o) && detail != SERIAL_ROUND) {
 }
 
 @ @<Serialise an object@>=
-else if (syntax_p(o) && detail != SERIAL_ROUND) {
+else if (provenance_p(o) && detail != SERIAL_ROUND) {
+int x = detail;
+detail = 0;
         if (!maxdepth)
-                append = "\010<SYNTAX>";
+                append = "\010<PROVE>";
         else {
                 if (detail)
-                        serial_append(buffer, "#{syntax ", 9, failure);
-                serial_imp(syntax_datum(o), detail, maxdepth - 1, true, buffer,
+                        serial_append(buffer, "#{sx-", 5, failure);
+                serial_imp(prove_datum(o), x, maxdepth - 1, true, buffer,
                         cycles, failure);
 #if 0
                 if (detail)
                         serial_append(buffer, " ", 1, failure);
-                serial_imp(syntax_start(o), detail, maxdepth - 1, true, buffer,
+                serial_imp(prove_start(o), detail, maxdepth - 1, true, buffer,
                         cycles, failure);
                 if (detail)
                         serial_append(buffer, " ", 1, failure);
-                serial_imp(syntax_end(o), detail, maxdepth - 1, true, buffer,
+                serial_imp(prove_end(o), detail, maxdepth - 1, true, buffer,
                         cycles, failure);
 #endif
                 if (detail)
                         serial_append(buffer, "}", 1, failure);
                 append = "\0";
         }
+detail = x;
 }
 
 @ @<Serialise an object@>=
@@ -7841,6 +7917,7 @@ lapi_env_unset (cell        env,
 @ @<Fun...@>=
 cell lapi_Accumulator (cell);
 cell lapi_User_Register (cell);
+cell lapi_Debug_Register (cell);
 
 @ @c
 cell
@@ -7857,28 +7934,15 @@ lapi_User_Register (cell new)
                 User_Register = new;
         return User_Register;
 }
+cell
+lapi_Debug_Register (cell new)
+{
+        if (defined_p(new))
+                Debug_Register = new;
+        return Debug_Register;
+}
 
 @* TODO.
-
-@c
-void
-mem_init (void)
-{
-        sigjmp_buf failed, *failure = &failed;
-        Verror reason = LERR_NONE;
-        cell x;
-        int i;
-
-        if (failure_p(reason = sigsetjmp(failed, 1))) {
-                fprintf(stderr, "FATAL Initialisation error %u: %s.\n",
-                        reason, Ierror[reason].message);
-                abort();
-        }
-        @<Save register locations@>@;
-        @<Initialise storage@>@;
-        @<Register primitive operators@>@;
-        ENV = env_extend(Root, failure);
-}
 
 @ @c
 int
@@ -7895,6 +7959,7 @@ lprint (char *format,
         return r;
 }
 
+@ @c
 int
 lput (int c)
 {
@@ -7903,7 +7968,6 @@ lput (int c)
 }
 
 @ @<Fun...@>=
-void mem_init (void);
 int lprint (char *, ...);
 int lput (int);
 

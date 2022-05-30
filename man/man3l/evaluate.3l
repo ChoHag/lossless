@@ -1,0 +1,93 @@
+.Dd $Mdocdate$
+.Dt EVALUATE 3l
+.Os
+.Sh NAME
+.Nm evaluate ,
+.Nm evaluate_program
+.Nd recursively evaluate expressions
+.Sh SYNOPSIS
+.In lossless.h
+.Ft void
+.Fn evaluate "sigjmp_buf *failure"
+.Ft void
+.Fn evaluate_program "cell program" "sigjmp_buf *failure"
+.Sh DESCRIPTION
+The function
+.Fn evaluate
+computes the value of the expression saved in the
+.Va Expression
+register and stores the result in the
+.Va Accumulator .
+.Fn evaluate_program
+is a wrapper around it which prepends the primitive
+.Ot do
+to the list in
+.Vn program
+and places it in
+.Va Expression
+prior to calling
+.Fn evaluate .
+.Pp
+.Fn evaluate
+may be instructed to halt and return prior to completion by setting
+the thread-local variable
+.Va Halt_Next
+to a value describing where within the evaluation process to stop:
+.Bl -column "LDB_HALT_DISPATCH" "predicate_p" "(predicate?)" -compact -offset indent
+.It Dv LDB_HALT_NONE Ta Don't halt.
+.It Dv LDB_HALT_BEGIN Ta Halt before evaluation begins.
+.It Dv LDB_HALT_DISPATCH Ta Halt before evaluating a combiner.
+.It Dv LDB_HALT_COMBINE Ta Halt before performing a combination.
+.It Dv LDB_HALT_RETURN Ta Halt before finishing with an expression.
+.El
+.Pp
+If
+.Fn evaluate
+is instructed to halt then prior to performing the named sub-process
+.Va Halt_At
+is set to indicate where
+.Fn evaluate
+halted
+and
+.Va Halt_Next
+is reset to the value that was in
+.Va Halt_At .
+Ordinarily this will be
+.Dv LDB_HALT_NONE
+but can be set to any other value so that the next call to
+.Fn evaluate
+will also halt.
+.Pp
+A jump point must be established in
+.Va failure
+before calling
+.Fn evaluate
+or
+.Fn evaluate_program
+which will be long-jumped to in case of an error. Apart from out-of-memory
+conditions the errors which may be caused by
+.Fn evaluate
+are:
+.Bl -tag -width Ds
+.It Dv LERR_IMPROPER
+An improper list was encountered where a proper list is expected.
+.It Dv LERR_INCOMPATIBLE
+An extra argument or an argument of the wrong type was encountered.
+.It Dv LERR_INTERNAL
+Lossless suffered an error caused by its own bug. This should never
+happen of course.
+.It Dv LERR_MISSING
+Lookup failed because the variable was not bound in any environment.
+.It Dv LERR_UNCOMBINABLE
+An attempt was made to combine something other than an applicative
+or operative combiner.
+.It Dv LERR_UNIMPLEMENTED
+Some functionality is not implemented.
+.El
+.Sh RETURN VALUES
+The computed result is stored in the
+.Va Accumulator
+register unless there was an error or the evaluator was instructed
+to halt early.
+.Sh SEE ALSO
+.Xr intro 2l .

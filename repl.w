@@ -8,15 +8,40 @@
 \fullpageheight=246.2mm
 \setpage % A4
 
+\def\<{$\langle$}
+\def\>{$\rangle$}
 \def\J{}
-\def\Ls/{\.{LossLess}}
-\def\iI{\hskip1em}
-\def\iII{\hskip2em}
+\let\K=\leftarrow
+\def\Ls/{\.{Lossless}}
+\def\Lt{{\char124}}
+\def\L{{$\char124$}}
+\def\ditto{--- \lower1ex\hbox{''} ---}
+\def\ft{{\tt\char13}}
+\def\hex{\hbox{${\scriptstyle 0x}$\tt\aftergroup}}
 \def\iIII{\hskip3em}
+\def\iII{\hskip2em}
 \def\iIV{\hskip4em}
+\def\iI{\hskip1em}
+\def\epdf#1{\pdfximage{#1}\pdfrefximage\pdflastximage}% Why isn't this provided?
+\def\qc{$\rangle\!\rangle$}
+\def\qo{$\langle\!\langle$}
+\def\to{{$\rightarrow$}}
 
+@s assert return
+@s new normal
+@s sigjmp_buf void
+@s siglongjmp return
+%
+@s int32_t int
+@s int64_t int
+@s intmax_t int
+@s intptr_t int
+@s uint32_t int
+@s uint64_t int
+@s uintptr_t int
+%
 @s line none
-
+%
 @s EditLine int
 @s HistEvent int
 @s History int
@@ -24,19 +49,36 @@
 @** REPL. Uses editline to read lines and concatente them into a
 rope which \Ls/ parses and evaluates.
 
-@c
-#include <histedit.h>
+@<REPL preamble@>=
+#include <assert.h>
+#include <limits.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <stdarg.h>
+#include <stdlib.h>
+#include <setjmp.h>
+@#
 #include <stdio.h>
-
+@#
 #include "lossless.h"
-
+@#
+#include <histedit.h>
+@#
 #include "barbaroi.h"
+#include "repl.h"
 
+@ @(repl.h@>=
+@h
 @<Function declarations@>@;
+@<External symbols@>@;
 
+@ @c
+@<REPL preamble@>@;
 @<Global variables@>@;
 
 @ @<Fun...@>=
+int main (int, char **);
 char * prompt (EditLine *);
 
 @ Arbitrary history size limit can be made dynamic later.
@@ -45,6 +87,12 @@ char * prompt (EditLine *);
 @<Global...@>=
 EditLine *E;
 History *H;
+
+@ Extern for want of anything to put there yet.
+
+@<Extern...@>=
+extern EditLine *E;
+extern History *H;
 
 @ The main application --- initialise editline \AM\ \Ls/ and process
 a line at a time.
@@ -55,8 +103,8 @@ main (int    argc,
       char **argv)
 {
         HistEvent event;
-        int length;
-        const char *line = NULL;
+        int i, length;
+        char *line = NULL;
         const wchar_t *wline;
         bool pending = false, valid;
         cell x;
@@ -67,6 +115,14 @@ main (int    argc,
         mem_init(); /* Initialise \Ls/. */
 
         if (failure_p(reason = sigsetjmp(cleanup, 1))) goto die;
+
+        Root = env_empty(&cleanup);
+        for (i = 0; i < PRIMITIVE_LENGTH; i++) {
+                x = symbol_new_const(Iprimitive[i].schema + PRIMITIVE_PREFIX);
+                x = Iprimitive[i].box = atom(Theap, fix(i), x, FORM_PRIMITIVE, &cleanup);
+                env_define_m(Root, primitive_label(x), x, &cleanup);
+        }
+        Environment = env_extend(Root, &cleanup);
 
         lprint("Initialising...\n%s\n", INITIALISE);
         stack_push(NIL, &cleanup);
@@ -134,18 +190,18 @@ if (length > 0) {
                 history(H, &event, H_ENTER, line);
         SS(0, x = rope_new_buffer(false, false, line, length, &cleanup));
         if (pending) {
-        serial(lapi_User_Register(UNDEFINED), SERIAL_DETAIL, 4, NIL, NULL, &cleanup);
+        serial(User_Register, SERIAL_DETAIL, 4, NIL, NULL, &cleanup);
                 SS(0, x = cons(SO(0), NIL, &cleanup));
-                SS(0, x = cons(lapi_User_Register(UNDEFINED), x, &cleanup));
+                SS(0, x = cons(User_Register, x, &cleanup));
                 SS(0, x = cons(symbol_new_const("rope/append"), x, &cleanup));
                 evaluate_program(SO(0), &cleanup);
                 SS(0, x = ACC);
 #if 0
                 cons("rope/append", USERREG, x ...
-                SS(0, x = rope_append(lapi_User_Register(UNDEFINED), x,  &cleanup));
+                SS(0, x = rope_append(User_Register, x,  &cleanup));
 #endif
         }
-        lapi_User_Register(x);
+        User_Register = x;
         x = lex_rope(x, &cleanup);
         SS(0, x);
         valid = true;
@@ -153,7 +209,7 @@ if (length > 0) {
         if (valid) {
                 ACC = VOID;
                 evaluate_program(x, &cleanup);
-                lapi_User_Register(NIL);
+                User_Register = NIL;
                 pending = false;
         } else if (pair_p(lcdr(x)) && fix_value(lcar(lcar(lcdr(x)))) == LERR_SYNTAX &&@|
                     pair_p(lcdr(lcdr(x))) &&
@@ -170,7 +226,7 @@ if (length > 0) {
                         SS(0, x = lcdr(x));
                 }
                 printf("\n");
-                lapi_User_Register(NIL);
+                User_Register = NIL;
                 pending = false;
         }
         printf("DONE ");

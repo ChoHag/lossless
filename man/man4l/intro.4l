@@ -3,7 +3,7 @@
 .Os
 .Sh NAME
 .Nm intro
-.Nd introduction to lossless library functions
+.Nd introduction to lossless objects and data formats
 .Sh DESCRIPTION
 The manual pages in section 4l provide an overview of Lossless objects.
 .Pp

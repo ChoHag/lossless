@@ -1,0 +1,25 @@
+.Dd $Mdocdate$
+.Dt TEMPLATE 9l
+.Os
+.Sh NAME
+.Nm TEMPLATE
+.Nd a short manpage template
+.Sh SYNOPSYS
+.Dl sed s/9l/1l/ < man/man9l/TEMPLATE.9l > man/man1l/page.1l
+.Dl sed s/9l/2l/ < man/man9l/TEMPLATE.9l > man/man2l/page.2l
+.Dl sed s/9l/3l/ < man/man9l/TEMPLATE.9l > man/man3l/page.3l
+.Dl sed s/9l/4l/ < man/man9l/TEMPLATE.9l > man/man4l/page.4l
+.Dl sed s/9l/5l/ < man/man9l/TEMPLATE.9l > man/man5l/page.5l
+.Dl sed s/9l/6l/ < man/man9l/TEMPLATE.9l > man/man6l/page.6l
+.Dl sed s/9l/7l/ < man/man9l/TEMPLATE.9l > man/man7l/page.7l
+.Dl sed s/9l/8l/ < man/man9l/TEMPLATE.9l > man/man8l/page.8l
+.Dl sed s/9l/9l/ < man/man9l/TEMPLATE.9l > man/man9l/page.9l
+or
+.Dl cp man/man9l/TEMPLATE.9l > man/man9l/page.9l
+.Sh DESCRIPTION
+The manual page exists to be copied to make new pages from.
+.Sh BUGS
+It is lacking in sections/examples.
+.Sh SEE ALSO
+.Xr intro 9l ,
+.Xr mdoc 7

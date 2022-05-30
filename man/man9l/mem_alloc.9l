@@ -1,8 +1,8 @@
 .Dd $Mdocdate$
-.Dt MEM_MALLOC 9l
+.Dt MEM_ALLOC 9l
 .Os
 .Sh NAME
-.Nm mem_malloc ,
+.Nm mem_alloc ,
 .Nm mem_free
 .Nd memory allocation and deallocation
 .Sh SYNOPSIS

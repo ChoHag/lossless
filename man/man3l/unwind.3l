@@ -1,0 +1,41 @@
+.Dd $Mdocdate$
+.Dt unwind 3l
+.Os
+.Sh NAME
+.Nm unwind
+.Nd progressively clean up the data stack
+.Sh SYNOPSYS
+.Fn unwind "sigjmp_buf *jump" "Verror error" "bool tmpier" "int stacked"
+.Sh DESCRIPTION
+The macro
+.Fn unwind
+is used in the most common case of an error when only
+the data stack and/or the thread-local register
+.Va Tmp_ier
+has been used.
+.Pp
+.Va jump
+is a pointer to a long jump buffer previously established by
+.Fn sigsetjmp
+which
+.Fn unwind
+will jump to with the long return value
+.Va error .
+If
+.Va tmpier
+is true then the register
+.Va Tmp_ier
+is set to
+.Dv NIL .
+.Va stacked
+items are discarded from the data stack
+.Va Stack .
+.Pp
+.Fn unwind
+never returns.
+.Sh BUGS
+Copy the example from lossless.w.
+.Sh SEE ALSO
+.Xr sigsetjmp 3 ,
+.Xr siglongjmp 3 ,
+.Xr Stack 9l

@@ -1,0 +1,18 @@
+.Dd $Mdocdate$
+.Dt high_bit 9l
+.Os
+.Sh NAME
+.Nm high_bit
+.Nd return the 2-bit magnitude of a number
+.Sh SYNOPSYS
+.Fn high_bit "digit number"
+.Sh DESCRIPTION
+Calculates the next power of 2 equal or above
+.Va number .
+This function is used primarily by the
+.Xr hashtable 4l .
+.Sh SEE ALSO
+.Xr Vhash 9l ,
+.Xr digit 4l ,
+.Xr hashtable 4l ,
+.Xr Osymbol 4l

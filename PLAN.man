@@ -1,0 +1,61 @@
+STATE   SECTION PAGE
+DONE    3l      unwind
+DONE    9l      high_bit
+        9l      Vmaybe
+...     9l      mem_alloc, mem_free
+...     4l      cell, wide, half, Ointern
+        ""              (move from 9l)
+        4l      digit
+        4l      fixed, fix, fix_value
+        4l      NIL et al. w/_p
+...     9l      Oheap, Oatom, Otag, heap_enlarge, heap_alloc
+        9l      heap_init_compacting, heap_init_sweeping
+...     3l      atom, lcar, lcdr, ltag, lcar_set_m, lcdr_set_m
+        9l      Tmp_SIN, Tmp_DEX, Tmp_ier
+...     4l      pair, pair_p, cons(), (cXr), (cXr/set!)
+        9l      pointer_p, pointer, pointer_datum, pointer_erase_m,
+        ""              pointer_set_m, pointer_set_datum_m
+...     4l      Osegment, ... (too many to note), Allocations
+...     9l      gc, gc_protect, gc_disown_segments, gc_mark,
+        ""              gc_reclaim_heap, gc_release_segments
+        9l      gc_compacting
+        9l      gc_sweeping
+        9l      Stack, StackP, stack_(pop|push|ref|reserve|set_m)
+        4l      array, array_length, array_new, array_grow, array_grow_m,
+        ""              array_ref, array_set_m
+        9l      array_new_imp, array_address, arraylike_p
+        9l      array_progress, array_set_progress
+        9l      Vhash, hash_cstr, hash_buffer
+        4l      hashtable, hashtable_p, hashtable_new, hashtable_length,
+        ""              hashtable_free, hashtable_free_p
+        4l      hashtable_delete_m, hashtable_insert_m, hashtable_remove_m,
+        ""              hashtable_replace_m, hashtable_save_m,
+        ""              hashtable_set_imp, hashtable_search, hashtable_pairs
+        9l      hashtable, hashtable_enlarge_m, hashtable_holes,
+        ""              hashtable_holes_p, hashtable_match, hashtable_rehash,
+        ""              hashtable_ref, hashtable_scan, hashtable_set_free_m,
+        ""              hashtable_set_holes_m
+        9l      Symbol_Table, Symbol_Table_ref
+        9l      Osymbol_compare, symbol_table_match, symbol_table_search,
+        ""              symbol_table_rehash
+        4l      Osymbol, symbol_new_buffer, symbol_new_const, symbol_new_segment,
+        ""              symbol_new_unique, symbol_new_imp, symbol_length
+        9l      Osymbol, symbol_buffer, symbol_hash, symbuf*, symint*
+        4l      record, record_p, record_new, record_form, record_cell,
+        ""              record_set_cell_m, record_object, record_set_object_m
+        9l      record, record_next, record_next_p, record_base, record_offset
+        4l      provenance, provenance_p, provenance_new, provenance_invalid,
+        ""              provenance_valid_p, pro_new_imp, pro_datum, pro_start,
+        ""              pro_end, pro_valid
+        9l      pending, Vpending, pend, pending_stage, pending_datum
+        4l      environment, environment_p, env_root_p, env_empty, env_extend,
+        ""              env_new_imp, env_search, env_define_m, env_set_m,
+        ""              env_unset_m, env_clear_m, env_set_imp
+        9l      env_layer, env_previous, env_replace_layer_m
+        4l      program, program_p, applicative_p, operative_p
+        4l      closure, closure_(p|new|formals|environment|body)
+        4l      Oprimitive, primitive_p, primitive, primitive_applicative_p,
+        ""              primitive_operative_p, Iprimitive, Root
+...     3l      evaluate, evaluate_program, Vbreak, Halt_At, Halt_Next
+        9l      evaluate_halt, evaluate_incompatible, venire, next_argument,
+        ""              validated_argument, coros?

@@ -64,7 +64,7 @@ ffi.perl: liblossless.so
 	date > ffi.perl
 
 man/mandoc.db:
-	makewhatis man
+	makewhatis -pD man
 
 # Distribution & cleanup:
 dist: lossless-$(VERSION).tgz

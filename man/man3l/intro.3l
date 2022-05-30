@@ -6,4 +6,4 @@
 .Nd introduction to lossless library functions
 .Sh DESCRIPTION
 The manual pages in section 3l provide an overview of the Lossless
-library API.
+library and run-time API.

@@ -3,7 +3,7 @@
 .Os
 .Sh NAME
 .Nm intro
-.Nd introduction to lossless library functions
+.Nd introduction to lossless networking
 .Sh DESCRIPTION
 The manual pages in section 5l provide an overview of Lossless
 interfaces and protocols.

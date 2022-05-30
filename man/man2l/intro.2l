@@ -3,7 +3,7 @@
 .Os
 .Sh NAME
 .Nm intro
-.Nd introduction to lossless library functions
+.Nd introduction to lossless operating system interaction
 .Sh DESCRIPTION
 The manual pages in section 2l provide an overview of Lossless'
 operating system interaction and error handling.
