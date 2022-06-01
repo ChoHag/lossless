@@ -1,0 +1,16 @@
+git
+
+rm -r tmp/dist/tmp/lossless-0
+
+make dist VERSION=0
+
+scp lossless-0.tgz chohag@zeus.jtan.com:public_html/lossless/
+cat <<EOF | ssh chohag@zeus.jtan.com
+set -e
+mkdir ~/tmp/ll
+tar -C ~/tmp/ll -xzf ~/public_html/lossless/lossless-0.tgz
+mv ~/public_html/lossless/lossless-0 ~/public_html/lossless/lossless-rm
+mv ~/tmp/ll/lossless-0 ~/public_html/lossless/lossless-0
+rmdir ~/tmp/ll
+rm -r ~/public_html/lossless/lossless-rm &
+EOF
