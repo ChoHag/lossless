@@ -1,54 +1,80 @@
+NOTE:   The Lossless interpreter has not yet integrated I/O.
+
+        In order to see anything you will need to compile with
+        -DLDEBUG to enable stdio-based printing.
+
+------------------------------------------------------------------------
+
+Building Lossless is a two stage process: the first stage, which
+can be bypassed, processes the CWEB sources (*.w) to produce the
+printer (*.tex) and C (*.c & *.h) sources. The second stage compiles
+the C sources or prints the literature.
+
+The Makefile has been adapted to work on BSD and GNU make but this
+is probably an impossible pipe dream in the long term. Apart from
+the author's OpenBSD, Lossless has so far been known to build on
+Debian (et al) and FreeBSD.
+
+TeX/CWEB:
+
+        The first build stage requires CWEB by Donald Knuth et al.
+        This is distributed as part of the astronomically huge TeX
+        Live system from https://tug.org/texlive/ which is available
+        in most unix systems (OpenBSD calls its "texlive_texmf-minimal";
+        Debian and derivatives use "texlive-extra-utils"; to find
+        the package yours provides it in look for one which contains
+        the file "cwebmac.tex").
+
+        The whole of TeX Live isn't necessary (TeX isn't needed to
+        run Lossless at all, only for the printable literature); instead
+        the original (tiny) CWEB can be downloaded from DEK's
+        website. It has no dependencies other than a C compiler[*].
+        Get it from https://www-cs-faculty.stanford.edu/~knuth/cweb.html
+
+        Alternatively, even that isn't necessary --- the intermediate
+        sources have been prepared in a downloadable archive available
+        from http://zeus.jtan.com/~chohag/lossless/.
+
+Quirks:
+
+        The hack which stands in for a real REPL requires perl to
+        build (see bin/lloader) and links against libedit at run-time
+        to read user input.
+
 To build on OpenBSD:
 
-        make DEBUG=-DLDEBUG     # To enable stdio-based printing
+        $ make DEBUG=-DLDEBUG
 
-        Alternatively set it in the environment:
-        export DEBUG=-DLDEBUG
+        Set DEBUG in the environment for convenience:
+        $ export DEBUG='-DLDEBUG'
+        $ make
 
-        No optimisation and better debugging symbols are also helpful:
-        export DEBUG='-DLDEBUG -O0 -g'
+        DEBUG comes via CFLAGS so be sure to include $(DEBUG) if
+        CFLAGS is customised.
 
 Useful targets:
 
-        make # or make all      Everything
+        $ make # or make all      Everything
 
-        make clean all          Everything from scratch
+        $ make clean all          Everything from scratch
 
-        make lossless           Lossless executable
+        $ make lossless           Lossless executable
 
-        make liblossless.so     As a linkable object
+        $ make liblossless.so     As a linkable object
 
-        make ffi.perl           Perl wrapper
+        $ make ffi.perl           Perl wrapper
 
-        make test               Run losslees through a comprehensive test suite
+        $ make test               Run losslees through a comprehensive test suite
 
 The available documentation can be read from within the development
 directory by updating MANPATH:
 
-        MANPATH=:$PWD/man
+        $ MANPATH=:$PWD/man
+        $ make man/mandoc.db      Rebuild the manual pages' index
 
-        make man/mandoc.db      Rebuild the manual pages' index
+        nb. makewhatis includes backup files (*~) in its index.
 
-Dependencies:
-
-        C compiler
-        TeX *
-        CWEB *
-
-        The makefile has been tuned to work equally with BSD and GNU make.
-
-The REPL, which is very much a work in progress, depends on the
-editline library built into BSD.
-
-CWEB and TeX are both part of the astronomically huge TeX Live
-distribution. The necessary parts can be installed on OpenBSD with
-"pkg_add texlive_texmf-minimal". Debian-based Linux distributions
-require "texlive-extra-utils". Reports for other systems and
-distributions are welcome --- the file you need which will ultimately
-pull in all the necessary TeX parts is "cwebmac.tex".
-
-[*] Optional; TeX is required to produce the PDF files which
-    aren't needed to build and run lossless and CWEB generates the
-    C source and header files which are already included in the
-    tarball distribution, which lags behind this repository at
-    http://zeus.jtan.com/~chohag/lossless/ or http://chohag.github.io/.
+[*] It's amazing to think that 40 year old code hasn't picked up
+    any crutches to keep it going and that it still builds as-is
+    on the systems today but that's what you come to expect with
+    Donald Knuth.
