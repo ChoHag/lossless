@@ -6014,6 +6014,7 @@ case PRIMITIVE_DUMP:
         next_argument(ACC, ARGS);
         serial(ACC, SERIAL_DETAIL, 42, NIL, NULL, failure);
         lprint("\n");
+        break;
 case PRIMITIVE_BREAK:
         ACC = VOID;
         breakpoint();
@@ -6294,7 +6295,7 @@ Combine_Primitive: /* Validate the arity of primitive arguments and prepare any
         ACC = pending_datum(ACC);
         EXPR = NIL;
         if (continuation_resumption_p(ACC))
-                schema = "11__resume!";
+                schema = "00__resume!";
         else
                 schema = Iprimitive[primitive(ACC)].schema;
         assert(*schema != '_');
@@ -7060,18 +7061,7 @@ case PRIMITIVE_ESCAPE:
         ACC = NIL;
         while (!null_p(ARGS)) { /* Copy |CLINK| from |cont_head(ACC)| to
                                         current head \AM\ return */
-                serial(lcar(ARGS), SERIAL_DETAIL, 42, NIL, NULL, failure);
-                lprint("\n");
-                ARGS = lcdr(ARGS);
-        }
-        lprint("\n");
-        ARGS = CLINK;
-        while (!null_p(ARGS)) { /* Copy |CLINK| from |cont_head(ACC)| to
-                                        current head \AM\ return */
-                serial(lcar(ARGS), SERIAL_DETAIL, 42, NIL, NULL, failure);
-                lprint("\n");
                 assert(pending_p(lcar(ARGS)));
-                printf("pop %d\n", pending_stage(lcar(ARGS)));
                 if (ARGS == cont_pointer(EXPR))
                         goto Found_Delimiter;
                 switch (pending_stage(lcar(ARGS))) {
@@ -7088,7 +7078,6 @@ case PRIMITIVE_ESCAPE:
                         siglongjmp(*failure, LERR_INTERNAL);
                 }
                 for (; count; count--) {
-                lprint("%d.\n",count);
                         ACC = cons(lcar(ARGS), ACC, failure);
                         ARGS = lcdr(ARGS);
                 }
