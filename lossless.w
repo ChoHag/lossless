@@ -12,7 +12,7 @@
 \def\>{$\rangle$}
 \def\J{}
 \let\K=\leftarrow
-\def\Ls/{\.{LossLess}}
+\def\Ls/{\.{Lossless}}
 \def\Lt{{\char124}}
 \def\L{{$\char124$}}
 \def\ditto{--- \lower1ex\hbox{''} ---}
@@ -42,7 +42,6 @@
 @s digit int
 @s fixed int
 @s half int
-@s wide int
 @s int32_t int
 @s int64_t int
 @s intmax_t int
@@ -73,12 +72,36 @@
 @s Osymbol_compare int
 @s Outfio int
 
-@** Introduction. \Ls/ is a lisp-like programming language. It is
-destined to not rely on the \CEE/ library but for the time being
-uses |malloc| for some of the heavy lifting of memory management.
-Some other \CEE/ features are taken advantage of or worked around
-while \CEE/ the language of this implementation but these are not
-integral to the character of \Ls/.
+@** Preface. There are many programming languages and this one is
+mine. \Ls/ is a general purpose programming language with a lisp/scheme
+look and feel. It is a work in progress and many parts are missing.
+This document is intended to be the final section of the documentation
+provided with \Ls/ --- a working implementation. The language and
+this implentation of it are both referred to as \Ls/ interchangably
+where the sense is unambiguous (or irrelevant).
+
+The \Ls/ source code is online at
+\pdfURL{http://zeus.jtan.com/~chohag/lossless/}%
+{http://zeus.jtan.com/~chohag/lossless/} which includes the CWEB
+sources preprocessed into \CEE/ or in a git repository at
+\pdfURL{http://zeus.jtan.com/~chohag/lossless.git}%
+{http://zeus.jtan.com/~chohag/lossless.git}.
+
+@** Implementation. This document is broken down into small numbered
+sections which consist of text, \CEE/ code or usually both. These
+are grouped into ``chapters'' for each piece of functionality, which
+are introduced in an order which builds on the functionality
+previously defined.
+
+Three files are generated from the literate source in \.{lossless.w}:
+\.{lossless.c} and \.{ffi.c} contain the executable code and
+\.{lossless.h} has definitions that can be used to link \Ls/ into
+an executable. \.{ffi.c} contains the parts necessary to control
+\Ls/ from another language run-time.
+
+The \CEE/ system headers are included by both \.{lossless.c} and
+\.{ffi.c}. Named sections of code such as this one are included
+verbatim in the generated \CEE/ sources where they are referenced.
 
 TODO: Remove headers which are no longer necessary.
 @.TODO@>
@@ -96,49 +119,75 @@ TODO: Remove headers which are no longer necessary.
 #include <sys/types.h>
 #include <unistd.h>
 
-@ The main product of this part of \Ls/ is a library for dynamic
-or static linking. Untitled sections are concatenated and included
-in this library, starting with this one.
+@ Sections such as this who's \CEE/ code block is unnamed are
+concatenated into \.{lossless.c}, which has a straightforward layout
+setting up the \CEE/ environment and defining global variables.
 
 @c
 @<System headers@>@;
 @<Repair the system headers@>@;
-@h
-@<Type definitions@>@;
-@<Function declarations@>@;
+#include "lossless.h"
 @<Global variables@>@;
 
-@ Consumers of the library include this header file of the same
-type and function declarations, and global variables with an |extern|
-qualifier.
+@ The \Ls/ header file is actually quite messy by conventional
+standards, exporting many symbols which are only needed internally.
+There is no easy way to fix this without making this document a
+mess instead, so the mess can remain hidden away where a compiler
+can clean it up.
 
 @(lossless.h@>=
-@<System headers@>@;
-@<Repair the system headers@>@;
 @h
 @<Type definitions@>@;
 @<Function declarations@>@;
 @<External symbols@>@;
 
-@ Access to \Ls/' parts from other languages requires some \CEE/
-macros to be made available through symbols, additional validation
-on functions, etc. These optional are placed in the file \.{ffi.c}
-and linked into \.{liblossless.so}/\.{lossless.dll}.
+@ \Ls/ can be controlled from languages through the use of extra
+symbols in \.{ffi.c}, which primarily provide functional endpoints
+for what can be done by assignment or reference in \CEE/.
 
-@ Library users may need symbols for \CEE/ macros.
 @(ffi.c@>=
+@<System headers@>@;
+@<Repair the system headers@>@;
 #include "lossless.h"
 
-@ \Ls/ (and lisp) data all descend from the |cell|; two cells make
-an {\it atom\/}, called |wide|. A pointer to an atom is equivalent
-to a machine-specific memory address, ie.~a normal \CEE/ pointer
-or ``|char *|''.
+@* Naming Conventions. In general symbols are given intuitive names,
+however there are some overriding conventions.
 
-These (untested) macros are intended to allow \Ls/ to compile on a
-wider variety of hardware than the latest $2^{n+1}$-bit wintel
-fruit. Also defined here is |fixed| representing numbers small
-enough to fit in the value of a pointer with trickery and the |digit|
-which is used to represent unbounded integers.
+Global \CEE/ definitions are prefixed Hungarian-style with V for
+values, O for objects or I for instances.
+
+\CEE/ constants and placeholders in macros are in |CAPITALS| while
+normal variables and type definitions are |lower_case|. Global
+variables are in |Title_Case|.
+
+Predicates are named ending {\it \_p\/} or {\it \_P\/}.
+
+Routines which mutate state or are otherwise dangerous are named
+{\it \_m\/} or {\it \_M\/}.
+
+Functions which take ``something'' but don't necessarily know what
+that thing is name it |o| or |O|.
+
+If the variable |r| is defined it's used to build the return value.
+
+Other cases of single-letter variables are macro placeholders and
+temporary variables with small scope, such as |i|, |j| \AM\ |k| or
+|t|, |m| \AM\ |p|. This rule is not kept well.
+
+Routines which are split into several front-ends (usually macros)
+and a backend which performs the work name the backend {\it \_imp\/}.
+
+@** Portability. \Ls/ can be compiled on any 16, 32 or 64-bit computer.
+The \CEE/ compiler defines symbols declared here depending on the
+size of the machine \Ls/ is being built for.
+
+All data formats known to \Ls/ are based on the {\it cell\/}, which
+is wide enough to hold a \CEE/ pointer or the largest integer
+representable by the CPU, depending on how it's used. An {\it atom}
+or {\it pair\/} is two adjacent cells.
+
+Other machine-specific definitions are included to assist with
+access to the data in different atoms.
 
 @<Type def...@>=
 typedef intptr_t cell;
@@ -155,12 +204,12 @@ typedef uintptr_t digit;
 #endif
 @#
 
-@ Values common to all architectures. If a datum is smaller than
-|INTERN_BYTES| it may be directly ``interned'' rather than pointed
-at.
+@ Some values are common on all architectures including |Ointern|
+which treats both pairs of an atom as an opaque buffer of up to an
+atom's worth of bytes.
 
 @<Type def...@>=
-#define CELL_MASK (~(WIDE_BYTES - 1))
+#define CELL_MASK (~(ATOM_BYTES - 1))
 @#
 #define BYTE_BITS    8
 #define BYTE_BYTES   1
@@ -170,27 +219,37 @@ at.
 #define DIGIT_MAX    UINTPTR_MAX
 #define HALF_MIN     (INTPTR_MIN / 2)
 #define HALF_MAX     (INTPTR_MAX / 2)
-#define INTERN_BYTES (WIDE_BYTES - 1)
+#define INTERN_BYTES (ATOM_BYTES - 1)
 @#
 
-typedef intptr_t cell;
-typedef uintptr_t digit;
+typedef intptr_t cell; /* Half an atom, can point to an atom. */
+typedef uintptr_t digit; /* A cell interpreted as an integer. */
 typedef struct {
         char buffer[INTERN_BYTES];
         unsigned char length;
 } Ointern;
 
-@ Fixed-integer values are up to 32 bits (signed) on a 64-bit
-architecture. This choice was arbitrary --- the data encoding scheme
-at present in fact makes 60 bits available --- but it's easier to
-envision dealing with half a word than 15 16$^{th}$s of a word.
+@ Small or fixed integers, used by some objects, are those which
+can fit entirely within an atom. Fixed integers share the address
+space taken up by global constants such as |NIL| (described later)
+so the whole atom is not available and rather than using as much
+space as {\it is\/} left over from the constants instead a factor
+(half or quarter) of the CPU's word length is used.
 
+While it may not make much difference to the computer it will
+hopefully aid the reader to think in halves and quarters of words,
+rather than 15 16$^{th}$s of a word.
+
+There are probably more FIX macros than necessary. TODO: describe
+them.
+
+@.TODO@>
 @<Define a 64-bit addressing environment@>=
-#define CELL_BITS  64
+#define CELL_BITS  64 /* Total size of a cell. */
 #define CELL_BYTES 8
-#define CELL_SHIFT 4
-#define WIDE_BITS  128
-#define WIDE_BYTES 16
+#define CELL_SHIFT 4 /* How many low bits of a pointer are zero. */
+#define ATOM_BITS  128 /* Total size of an atom. */
+#define ATOM_BYTES 16
 #define FIX_MIN    (-0x7fffffffll - 1) /* 32 bits */
 #define FIX_MAX    0x7fffffffll
 #define FIX_MASK   0xffffffffll
@@ -199,28 +258,19 @@ envision dealing with half a word than 15 16$^{th}$s of a word.
 #define FIX_BASE8  11
 #define FIX_BASE10 10
 #define FIX_BASE16 8
-typedef union {
-        struct {
-                cell low;
-                cell high;
-        };
-        struct {
-                char b[16];
-        } value;
-} wide;
-typedef int32_t fixed;
-typedef int32_t half;
+typedef int32_t fixed; /* Integers which fit within an atom. */
+typedef int32_t half; /* Records the size of memory objects. */
 
 @ 16 bit numbers would probably be too small to be of practical use
-to fixed integers in a 32-bit envionment use 24 (of the presently-available
-28) bits to occupy 3 quarters of a word.
+so fixed integers in a 32-bit envionment use 24 (of the presently-available
+28) bits to occupy three quarters of a word.
 
 @<Define a 32-bit addressing environment@>=
 #define CELL_BITS  32
 #define CELL_BYTES 4
 #define CELL_SHIFT 3
-#define WIDE_BITS  64
-#define WIDE_BYTES 8
+#define ATOM_BITS  64
+#define ATOM_BYTES 8
 #define FIX_MIN    (-0x7fffffl - 1) /* 24 bits */
 #define FIX_MAX    0x7fffffl
 #define FIX_MASK   0xffffffl
@@ -229,13 +279,6 @@ to fixed integers in a 32-bit envionment use 24 (of the presently-available
 #define FIX_BASE8  8
 #define FIX_BASE10 8
 #define FIX_BASE16 6
-typedef union {
-        struct {
-                cell low;
-                cell high;
-        };
-        int64_t value;
-} wide;
 typedef int32_t fixed; /* $32-24=8$ unused bits */
 typedef int16_t half;
 
@@ -246,8 +289,8 @@ be seen how practical it is.
 #define CELL_BITS  16
 #define CELL_BYTES 2
 #define CELL_SHIFT 2
-#define WIDE_BITS  32
-#define WIDE_BYTES 4
+#define ATOM_BITS  32
+#define ATOM_BYTES 4
 #define FIX_MIN    (-0x7f - 1) /* 8 bits */
 #define FIX_MAX    0x7f
 #define FIX_MASK   0xff
@@ -256,18 +299,15 @@ be seen how practical it is.
 #define FIX_BASE8  3
 #define FIX_BASE10 3
 #define FIX_BASE16 2
-typedef union {
-        struct {
-                cell low;
-                cell high;
-        };
-        int64_t value;
-} wide;
 typedef int8_t fixed;
 typedef int8_t half;
 
-@ Something like these (unused) macros could merge the heap's tag
-with the cell data if the machine's pointers are large enough.
+@ Associated with each atom is a {\it tag\/}. The algorithm \Ls/
+uses to do so is simple but quite inefficient. In the future macros
+such as these, designed for a 64-bit architecture, might be used
+to combine the atom and tag in the same memory location.
+
+These macros are not used in \Ls/.
 
 @d PTR_TAG_SHIFT    56
 @d PTR_ADDRESS(p)   ((intptr_t (p)) & ((1ull << PTR_TAG_SHIFT) - 1))
@@ -275,38 +315,35 @@ with the cell data if the machine's pointers are large enough.
 @d PTR_TAG(p)       (PTR_TAG_MASK(p) >> PTR_TAG_SHIFT)
 @d PTR_SET_TAG(p,s) ((p) = (((p) & PTR_ADDRESS(p)) | ((s) << PTR_TAG_SHIFT)))
 
-@ \Ls/ is entirely a single threaded program but includes the
-foundations necessary to support multiple threads. Each global or
-static variable can be |shared| between all threads or |unique| to
-each thread.
+@ Support for threads is planned early in \Ls/ growth, although it
+is not available yet. Every global \CEE/ variable is declared as
+either {\it shared\/}, where each thread accesses the same variable,
+or {\it unique\/} where each thread accesses its own copy.
+
+|thread_mem_init| is called immediately after creating a new thread
+to initialise its unique global variables.
 
 @d shared
 @d unique __thread
 @<Fun...@>=
 void thread_mem_init (void);
 
-@ Code comes with errors and programming is a way of finding them
-(and turning them into bugs).
-
-Blocks of code which may fail while holding resources set up a
-``long-jump site'' using \.{sigsetjmp(3)}, a pointer to which is
-passed to every fallible function that gets called. In general the
-pointer to a long-jump site is called |failure| and a locally
-established long-jump site is called |cleanup|. The error code is
-returned in |reason|.
+@** Error handling. Code comes with errors and programming is a way
+of finding them (and turning them into bugs). Errors reported will
+be one of these constants (except the bookends).
 
 @d failure_p(O) ((O) != LERR_NONE)
 @<Type def...@>=
 typedef enum {
         LERR_NONE,@/
-        LERR_AMBIGUOUS,      /* Constant etc. incorrectly terminated. */
-        LERR_DOUBLE_TAIL,    /* Two \.. operators. */
+        LERR_AMBIGUOUS,      /* An expression's ending is unclear. */
+        LERR_DOUBLE_TAIL,    /* Two \.. elements in a list. */
         LERR_EMPTY_TAIL,     /* A \.. without a tail expression. */
         LERR_EOF,            /* End of file or stream. */
         LERR_EXISTS,         /* New binding conflicts. */
         LERR_HEAVY_TAIL,     /* A \.. with more than one tail expression. */
-        LERR_IMPROPER,       /* A list operation encountered an improper list. */
-        LERR_INCOMPATIBLE,   /* Operation on incompatible operand. */
+        LERR_IMPROPER,       /* An improper list was encountered. */
+        LERR_INCOMPATIBLE,   /* Operation on an incompatible operand. */
         LERR_INTERNAL,       /* Bug in \Ls/. */
         LERR_INTERRUPT,      /* An operation was interrupted. */
         LERR_LIMIT,          /* A software-defined limit has been reached. */
@@ -328,9 +365,8 @@ typedef enum {
         LERR_LENGTH
 } Verror;
 
-@ The numeric codes are suitable for internal use but lisp is a
-language of processing symbols so at run-time the errors are given
-names (and, potentially, other metadata).
+@ The numeric codes are fine for internal use but lisp is a language
+of processing symbols so at run-time the errors will be given names.
 
 @<Type def...@>=
 typedef struct {
@@ -366,19 +402,28 @@ Oerror Ierror[LERR_LENGTH] = {@|
         [LERR_UNOPENED_CLOSE] = { "unopened-brackets" },@|
         [LERR_UNPRINTABLE]    = { "unprintable" },@|
         [LERR_UNSCANNABLE]    = { "unscannable-lexeme" },@|
-        [LERR_EMPTY_TAIL]     = { "unterminated-tail" },@/
-        [LERR_USER]           = { "user-error" },@|
+        [LERR_EMPTY_TAIL]     = { "unterminated-tail" },@|
+        [LERR_USER]           = { "user-error" },@/
 };
 
 @ @<Extern...@>=
 extern Oerror Ierror[];
 
-@ When \Ls/ cannot proceed it aborts its current action and jumps
-back to the most recently established long-jump site with one of
-the error codes. If, as is usually the case, the error condition
-cannot be dealt with by that caller it will clean up its own resources
-and jump back to the long-jump site given it (passing on the same
-error code), which it had saved before creating its own.
+@ When an error occurs normal control immediately stops and \Ls/
+proceeds at the most recently established {\it long-jump site\/}.
+Functions which can fail (or which might call functions which can
+fail) accept in the final position a pointer to a long-jump site.
+
+Functions which do not hold any resources of their own pass the
+pointer received on to those which might. If they hold resources
+which need to be cleaned up then they establish a new long-jump
+site with \pdfURL{\.{sigsetjmp(3)}}{man:sigsetjmp(3)}.
+
+When the site is established {\it sigsetjmp} returns $0$. When {\it
+siglongjmp} is called to jump back to the most recent long-jump
+site, control returns to {\it sigsetjmp} again as though it were
+returning the value that was passed to {\it siglongjmp}, something
+other than $0$.
 
 The outline of a function which protects its resources in this way
 is shown here. A lot of pieces of code in this implementation have
@@ -386,16 +431,12 @@ this basic outline so it will be helpful to understand it well
 enough to be able to ignore it because \CEE/ is verbose enough.
 
 Nearly all the time the resource in question is |S| items on top
-of the run-time stack. In some cases this is also or instead the
-register |Tmp_ier| (|T|). The |unwind| macro cleans up both, relying
-on the \CEE/ compiler to remove the branches of unreachable code,
-and performs the long jump |J| with error code |E|.
+of the data stack. In some cases the function uses the |Tmp_ier|
+register (boolean |T|). Some use both.
 
-In particular, allocated memory generally does {\it not\/} need to
-be freed explicitly if an error occurs while it's in use --- as
-will be seen shortly, allocated memory is immediately tied into a
-list which is then scanned during garbage collection for unused
-allocations that can be released.
+The |unwind| macro tries to clean both and relies on the \CEE/
+compiler to remove the excess code, then performs the long-jump to
+site |J| with error code |E|.
 
 @d unwind(J,E,T,S) do {
         assert((E) != LERR_NONE);
@@ -412,24 +453,23 @@ example (sigjmp_buf *failure)
                                         need to clean this up. */
         Verror reason = LERR_NONE;
 
-        obtain_resources(failure); /* Usually |stack_protect| or
+        obtain_resources(n, failure); /* Usually |stack_protect| or
                                         |stack_reserve|. */
         if (failure_p(reason = sigsetjmp(cleanup, 1))) /* Establish a new
                                         long-jump site. */
                 unwind(failure, reason, false, n); /* Clean up and abort. */
-        use_resources(&cleanup); /* ... */
-        free_resources(); /* Usually |stack_clear| --- only reached if
+        use_resources(n, &cleanup); /* ... */
+        free_resources(n); /* Usually |stack_clear| --- only reached if
                                         there was no error. */
 }
 #endif
 
-@ An error which is handled throughout this code-base but cannot
-actually occur is external interruption. When signal handling is
-written and an interrupt occurs this |Interrupt| flag will be set
-to |true| and any potentially-unbounded or otherwise long-running
-operation will halt.
+@ One error is handled by all potentially long or unbounded
+computations but cannot actually occur while \Ls/ lacks support for
+handling signals. When |Interrupt| is raised the current computation
+will halt with the error |LERR_INTERRUPT|.
 
-@ @<Global...@>=
+@<Global...@>=
 unique bool Interrupt = false;
 
 @ @<Extern...@>=
@@ -438,15 +478,13 @@ extern unique bool Interrupt;
 @** Memory. It is possible to compute without recourse to core
 memory but it isn't very interesting. Memory resources are divided
 by \Ls/ into two categories, fixed-size {\it atoms\/} and dynamic
-{\it segments\/}. Segments are allocated in co-ordination with the
-kernel (if there is one) at arbitrary locations by a memory manager
-which at this time is \CEE/'s |malloc|.
+{\it segments\/}. Segments are allocated by \CEE/ |malloc| rather
+than including a whole memory manager in \Ls/ at this time.
 
-The very first segment allocated during initialisation is the
-``heap'' from which atoms are allocated. When all the atoms in a
-heap have been taken an attempt to allocate another will cause
-garbage collection to reclaim any discarded atoms first (this is
-also when unused segments are returned to the master allocator).
+The heap is in fact one or more linked segments from which the atoms
+are allocated. The first heap in a new thread is initialised by
+|mem_init| which, needlessly by the looks of it (TODO), calls
+|thread_mem_init|.
 
 @<Fun...@>=
 void mem_init (void);
@@ -464,6 +502,7 @@ thread_mem_init (void)
 void
 mem_init (void)
 {
+        cell tmp;
         sigjmp_buf failed, *failure = &failed;
         Verror reason = LERR_NONE;
 
@@ -474,7 +513,13 @@ mem_init (void)
         ENV = Root = NIL;
 }
 
-@ @c
+@ Memory allocated by |mem_alloc| is uninitialised. This is the
+wrapper around |malloc| which can be replaced if \Ls/ grows its own
+memory manager. Memory allocations can be enlarged (and moved if
+there isn't room) or shrunk, and they can be allocated with a
+specified alignment.
+
+@c
 void *
 mem_alloc (void       *old,
            size_t      length,
@@ -498,56 +543,58 @@ mem_alloc (void       *old,
         return r;
 }
 
-@ @c
+@ Memory allocated by |mem_alloc| is manually deallocated by
+|mem_free| when no longer in use. This is the other half of the
+|malloc| wrapper.
+
+@c
 void
 mem_free (void *o)
 {
         free(o);
 }
 
-@ There is a lot of blank space here for future versions of \Ls/
-to fill in.
+@ There was a lot of blank space here for future versions of \Ls/
+to fill in but now this section is at the bottom of its page.
 
-@* Atoms. Although allocated within a heap which is itself a segment,
-atoms are (nearly) the most fundamental datum out of which nearly
-everything else in \Ls/ is constructed, and so they are described
-here first. An atom consists of two cells (so it's name has already
-a mistake) the size of a data pointer\footnote{$^1$}{An instruction
-pointer does not necessarily need to be related in any way to a
-data pointer although on the most common architectures they are the
-same in practice.} and ``is tagged''.
-
-An atom's tag is located in such a way that it has no bearing on
-the location or size of the atom itself. On machines with a large
-address space the tag can be squeezed into the actual address of
-the atom's or as is currently the case in \Ls/ at an offset within
-the heap relative to the atom.
+@* Atoms. Although they are in fact allocated within a heap which
+is itself a linked list of segments, atoms are still effectively
+the most fundamental datum out of which nearly everything else in
+\Ls/ is constructed, and so they are described here first. An atom
+consists of two cells (so it's name is already a mistake) the size
+of a \CEE/ data pointer\footnote{$^1$}{An instruction pointer does
+not necessarily need to be related in any way to a data pointer
+although on the most common architectures they are the same in
+practice.} and is ``tagged''.
 
 The tag is used to identify what the data is in each half of the
 atom. In particular the garbage collector must be able to identify
-cells which hold a pointer to another atom or set of atoms, so that
-they will be marked or copied during collection and not reclaimed.
+cells which hold a pointer to another atom, so that they can be
+saved during garbage collection.
 
-Because atoms are identified by a real memory address and the size
-of each atom is itself two full memory addresses, each atom is
-always allocated on a 4, 8 or 16-byte boundary (for 16, 32 and
-64-bit addressing), thus the lower 2, 3 or 4 bits of the address
-are known to always be zero. \Ls/ takes advantage of this by using
-these bits to identify values which do not in fact require heap
-storage.
+An atom is identified by its heap address. The atom's tag is located
+in the same heap segment at a location relative to its address.
+Because atoms are identified by their real memory address and the
+size of each atom is the width of two full memory addresses, each
+atom is always allocated on a 4, 8 or 16-byte boundary (for 16, 32
+and 64-bit addressing), thus the lower 2, 3 or 4 bits of the address
+are known to always be zero.
 
-If the lowest bit of a pointer (|cell|) is set it identifies one
-of these {\it special\/} variables. Five global constants with the
-odd values 1, 3, 5, 7 \AM\ 13 (9 \AM\ 11 are unused). The value 15
+\Ls/ takes advantage of this by setting these bits on atomic values
+which are not located within heap storage: the global constants and
+small (fixed) integers.
+
+There are five global constants which are represented by the odd
+values 1, 3, 5, 7 \AM\ 13 (9 \AM\ 11 are unused). The value 15
 (|0xf| or |0b1111|) is even more special: If the lowest 4 bits are
-exactly this then the rest of the pointer is not all zeros but a
+exactly this then the rest of the cell is not all zeros but a
 fixed-width (signed) integer value.
 
-Finally |NIL| comes about and makes nothing even more special still.
-|NIL| is a |cell| with the literal value zero and so it looks like,
-and in fact is, a real address. It even looks like and {\it usually\/}
-is, \CEE/'s |NULL| (\.{NULL}) pointer. However |NULL| is a \CEE/
-pointer and need not be zero even though zero {\it from a literal
+Finally |NIL| makes nothing even more special still. |NIL| is a
+cell with the literal value zero and so it looks like, and in fact
+is, a real address. It even looks like and {\it usually\/} is,
+\CEE/'s |NULL| (\.{NULL}; note the difference in spelling) pointer.
+In fact |NULL| need not be zero even though zero {\it from a literal
 value in the \CEE/ source code\/} is |NULL|, the ``null pointer''.
 Clear?
 
@@ -560,9 +607,13 @@ explicit integer-to-pointer conversion is intended to have that
 effect.''
 
 To keep these almost-but-not-quite-exactly-unlike-zero values
-straight transforming between a |cell| and a \CEE/ {\bf pointer\/}
-is always explicitly cast even though they occupy the ``same''
-storage.
+straight transforming between a cell and a \CEE/ {\bf pointer\/}
+is always explicitly cast even though they're the ``same''. There
+are likely to still be some situations in which they could be
+confused. In general |NULL| is unused by \Ls/.
+
+Also note the spelling of |LFALSE|, |LTRUE| and |LEOF| to avoid
+clashing with the traditional names given to these constants.
 
 @d NIL            ((cell) 0)  /* Nothing, the empty list, \.{()}. */
 @d LFALSE         ((cell) 1)  /* Boolean false, \.{\#f} or \.{\#F}. */
@@ -582,48 +633,38 @@ storage.
 @d void_p(O)      ((O) == VOID)
 @d eof_p(O)       ((O) == LEOF)
 @d undefined_p(O) ((O) == UNDEFINED)
-@d fix_p(O)       (((O) & FIXED) == FIXED)
+@d fix_p(O)       (((O) & FIXED) == FIXED) /* Mask out the value bits. */
 @d defined_p(O)   (!undefined_p(O))
 @#
 @d predicate(O)   ((O) ? LTRUE : LFALSE)
 
-@ The tag of an atom is used by garbage collection to keep track
-of atoms which are in use and/or have been partially scanned. The
-remainder of the tag identifies the contents of each of the atom's
-cells. This is known as the atom's {\it format\/}. In total the tag
-is 8 bits wide --- 2 for garbage collector state (|LTAG_LIVE| \AM\
-|LTAG_DONE|) and 6 for the format.
+@ Each atom's tag is an 8 bit byte. Two of these bits are used while
+the garbage collector is running to maintain its own state, |LTAG_LIVE|
+\AM\ |LTAG_TODO|, the rest identify the atom's format.
 
-In practice of course everything in a modern computer has an inherent
-order but neither half of an atom is considered greater or lesser
-than the other and so they are referred to with the unfamiliar Latin
-words for left and right, {\it sinister\/} and {\it
-dexter\/}\footnote{$^1$}{It also helps that it's a pair whose
-acronyms are both three runes long, which was not really the primary
-concern.} to confound the reader's (and writer's) inherent mental
-bias while still establishing an order with which each concern can
-be handled in this source code, the intuitive ``sindex''.
+In order to emphasise the fact that an atom consists of two independent
+halves the unfamiliar Latin terms sinister and dexter are used to
+refer to each half, abbreviated to {\it sin\/} and {\it dex\/}.
 
 The one format in which the order of each half does ``matter'' is
-the {\it pair\/} which for histerical raisins labels the sinister
-half the {\it car\/} and and the dexter half the {\it cdr\/}. The
-otherwise fruitless distinction is made between sin/dex and car/cdr
-to make it clear when an atom is a real pair and when an atom is
-to be treated as opaque.
+the {\it pair\/} which for hysterical raisins labels the sinister
+half the {\it car\/} and and the dexter half the {\it cdr\/}. While
+some effort is made to use sin/dex or car/cdr where it matters, for
+the most part the terms are used interchangably.
 
-The atomic formats are broadly categorised into four groups based
-on whether each half is or isn't a pointer to an atom and the first
-2 of the 6 bits (|LTAG_DSIN| \AM\ |LTAG_DDEX|) hold this information.
+The atomic formats are broadly categorised into groups based on
+whether each half is or isn't a pointer to another atom. The first
+2 format bits (|LTAG_PSIN| \AM\ |LTAG_PDEX|) hold this information.
 The remaining 4 bits are (mostly) arbitrary.
 
-|ATOM_TO_TAG| finds an atom's tag and is defined below after the
-heap storage (in which it's located) is introduced.
+|ATOM_TO_TAG|, defined below, returns the atom's offset in its
+associated array of tags.
 
 @d LTAG_LIVE 0x80 /* Atom is referenced from a register. */
-@d LTAG_DONE 0x40 /* Atom has been partially scanned. */
-@d LTAG_DSIN 0x20 /* Atom's sin half points to an atom. */
-@d LTAG_DDEX 0x10 /* Atom's dex half points to an atom. */
-@d LTAG_BOTH (LTAG_DSIN | LTAG_DDEX)
+@d LTAG_TODO 0x40 /* Atom has been partially scanned. */
+@d LTAG_PSIN 0x20 /* Atom's sin half points to an atom. */
+@d LTAG_PDEX 0x10 /* Atom's dex half points to an atom. */
+@d LTAG_BOTH (LTAG_PSIN | LTAG_PDEX)
 @d LTAG_FORM (LTAG_BOTH | 0x0f)
 @d LTAG_TDEX 0x02 /* A tree is threadable in its dex halves. */
 @d LTAG_TSIN 0x01 /* A tree is threadable in its sin halves. */
@@ -635,12 +676,12 @@ heap storage (in which it's located) is introduced.
 @d ATOM_LIVE_P(O)           (TAG(O) & LTAG_LIVE)
 @d ATOM_CLEAR_LIVE_M(O)     (TAG_SET_M((O), TAG(O) & ~LTAG_LIVE))
 @d ATOM_SET_LIVE_M(O)       (TAG_SET_M((O), TAG(O) | LTAG_LIVE))
-@d ATOM_MORE_P(O)           (TAG(O) & LTAG_DONE)
-@d ATOM_CLEAR_MORE_M(O)     (TAG_SET_M((O), TAG(O) & ~LTAG_DONE))
-@d ATOM_SET_MORE_M(O)       (TAG_SET_M((O), TAG(O) | LTAG_DONE))
+@d ATOM_MORE_P(O)           (TAG(O) & LTAG_TODO)
+@d ATOM_CLEAR_MORE_M(O)     (TAG_SET_M((O), TAG(O) & ~LTAG_TODO))
+@d ATOM_SET_MORE_M(O)       (TAG_SET_M((O), TAG(O) | LTAG_TODO))
 @d ATOM_FORM(O)             (TAG(O) & LTAG_FORM)
-@d ATOM_SIN_DATUM_P(O)      (TAG(O) & LTAG_DSIN)
-@d ATOM_DEX_DATUM_P(O)      (TAG(O) & LTAG_DDEX)
+@d ATOM_SIN_DATUM_P(O)      (TAG(O) & LTAG_PSIN)
+@d ATOM_DEX_DATUM_P(O)      (TAG(O) & LTAG_PDEX)
 @d ATOM_SIN_THREADABLE_P(O) (TAG(O) & LTAG_TSIN)
 @d ATOM_DEX_THREADABLE_P(O) (TAG(O) & LTAG_TDEX)
 @<Type def...@>=
@@ -650,48 +691,50 @@ typedef struct {
 } Oatom;
 
 @ These are the formats known to \Ls/. The numeric value of each
-format is relevent except (sort of) |FORM_NONE| which is zero and
-the rope and tree formats, which are carefully chosen so that atoms
-with these formats are {\it polymorphic\/}, which means they are
-distinct but implemented with (mostly) the same API and (mostly)
-the same implementation to do (mostly) the same thing.
+format is irrelevent except (sort of) |FORM_NONE|, which is zero,
+and the rope and tree formats, which are carefully chosen so that
+atoms with these formats can be {\it polymorphic\/}, which means
+they are distinct but implemented with (mostly) the same API and
+(mostly) the same implementation to do (mostly) the same thing.
 
 Unallocated atoms' tags are initialised to |FORM_NONE|. Allocated
-atoms' tags will be one of the other values here.
+atoms' tags are one of the other values here.
 
+TODO: Links to sections.
+@.TODO@>
 @d FORM_NONE              (LTAG_NONE | 0x00)
-@d FORM_ARRAY             (LTAG_NONE | 0x01)
-@d FORM_COLLECTED         (LTAG_NONE | 0x02)
-@d FORM_FIX               (LTAG_NONE | 0x03)
-@d FORM_HASHTABLE         (LTAG_NONE | 0x04)
-@d FORM_HEAP              (LTAG_NONE | 0x05)
-@d FORM_RECORD            (LTAG_NONE | 0x06)
-@d FORM_RECORD_INDEX      (LTAG_NONE | 0x07)
-@d FORM_RUNE              (LTAG_NONE | 0x08)
-@d FORM_SEGMENT_INTERN    (LTAG_NONE | 0x09)
-@d FORM_SYMBOL            (LTAG_NONE | 0x0a)
-@d FORM_SYMBOL_INTERN     (LTAG_NONE | 0x0b)
+@d FORM_ARRAY             (LTAG_NONE | 0x01) /* Structured Data/Arrays. */
+@d FORM_COLLECTED         (LTAG_NONE | 0x02) /* Memory/Garbage Collection. */
+@d FORM_FIX               (LTAG_NONE | 0x03) /* Memory/Fixed-size integers. */
+@d FORM_HASHTABLE         (LTAG_NONE | 0x04) /* Structural Data/Symbols \AM\ Tables. */
+@d FORM_HEAP              (LTAG_NONE | 0x05) /* Memory/Heap. */
+@d FORM_RECORD            (LTAG_NONE | 0x06) /* Structural Data/Records. */
+@d FORM_RECORD_INDEX      (LTAG_NONE | 0x07) /* Structural Data/Records. */
+@d FORM_RUNE              (LTAG_NONE | 0x08) /* Valuable Data/Characters (Runes). */
+@d FORM_SEGMENT_INTERN    (LTAG_NONE | 0x09) /* Memory/Segments. */
+@d FORM_SYMBOL            (LTAG_NONE | 0x0a) /* Structural Data/Symbols \AM\ Tables. */
+@d FORM_SYMBOL_INTERN     (LTAG_NONE | 0x0b) /* Structural Data/Symbols \AM\ Tables. */
 @#
-@d FORM_CONTINUATION      (LTAG_DDEX | 0x00)
-@d FORM_PENDING           (LTAG_DDEX | 0x01)
-@d FORM_PRIMITIVE         (LTAG_DDEX | 0x02)
-@d FORM_SEGMENT           (LTAG_DDEX | 0x03)
+@d FORM_CONTINUATION      (LTAG_PDEX | 0x00) /* Compute. */
+@d FORM_PENDING           (LTAG_PDEX | 0x01) /* Operational Data/Pending Computation. */
+@d FORM_PRIMITIVE         (LTAG_PDEX | 0x02) /* Compute. */
+@d FORM_SEGMENT           (LTAG_PDEX | 0x03) /* Memory/Segments. */
 @#
-@d FORM_PAIR              (LTAG_BOTH | 0x00)
-@d FORM_APPLICATIVE       (LTAG_BOTH | 0x01)
-@d FORM_ENVIRONMENT       (LTAG_BOTH | 0x02)
-@d FORM_OPERATIVE         (LTAG_BOTH | 0x03)
+@d FORM_PAIR              (LTAG_BOTH | 0x00) /* Memory/Atoms. */
+@d FORM_APPLICATIVE       (LTAG_BOTH | 0x01) /* Operational Data/Programs (Closures). */
+@d FORM_ENVIRONMENT       (LTAG_BOTH | 0x02) /* Operational Data/Environments. */
+@d FORM_OPERATIVE         (LTAG_BOTH | 0x03) /* Operational Data/Programs (Closures). */
 @#
-@d FORM_ROPE              (LTAG_BOTH | 0x08)
+@d FORM_ROPE              (LTAG_BOTH | 0x08) /* Valuable Data/Ropes. */
 @d FORM_TROPE_SIN         (LTAG_BOTH | 0x09)
 @d FORM_TROPE_DEX         (LTAG_BOTH | 0x0a)
 @d FORM_TROPE_BOTH        (LTAG_BOTH | 0x0b)
-@d FORM_TREE              (LTAG_BOTH | 0x0c)
+@d FORM_TREE              (LTAG_BOTH | 0x0c) /* Structural Data/Trees \AM\ Double-Linked Lists. */
 @d FORM_TTREE_SIN         (LTAG_BOTH | 0x0d)
 @d FORM_TTREE_DEX         (LTAG_BOTH | 0x0e)
 @d FORM_TTREE_BOTH        (LTAG_BOTH | 0x0f)
 
-@ Predicates. Generally objects have a simple, even 1:1 mapping
+@*1 Predicates. Generally objects have a simple, even 1:1 mapping
 between them and a single format. Notable exceptions are symbols
 and segments which may be ``interned'', and trees which can masquerade
 as ropes or as doubly-linked lists.
@@ -702,16 +745,17 @@ one half of an atom and so the other half is available for use by
 some of the objects which are built on top of segments.
 
 \Ls/ data are always held in \CEE/ in storage or variables with
-type |cell| and so \CEE/'s limited type validation is bypassed. To
-somewhat compensate for this the format of any |cell| arguments to
-\CEE/ functions are indicated by initially calling |assert| with a
-(possibly qualified) predicate.
+type cell and so \CEE/'s limited type validation is bypassed. To
+somewhat compensate for this the format of any cell arguments to
+\CEE/ functions are indicated by initially calling |assert| with
+one of these (possibly qualified) predicates.
 
+@.TODO@>
 @d form(O)                (TAG(O) & LTAG_FORM)
 @d form_p(O,F)            (!special_p(O) && form(O) == FORM_##F)
 @d pair_p(O)              (form_p((O), PAIR))
 @d array_p(O)             (form_p((O), ARRAY))
-@d null_array_p(O)        ((O) == Null_Array)
+@d null_array_p(O)        ((O) == Null_Array) /* TODO: make this a global constant. */
 @d collected_p(O)         (form_p((O), COLLECTED))
 @d continuation_p(O)      (form_p((O), CONTINUATION))
 @d environment_p(O)       (form_p((O), ENVIRONMENT))
@@ -735,25 +779,27 @@ somewhat compensate for this the format of any |cell| arguments to
 @#
 @d primitive_p(O)         (form_p((O), PRIMITIVE))
 @d closure_p(O)           (form_p((O), APPLICATIVE) || form_p((O), OPERATIVE))
-@d program_p(O)           (closure_p(O) || primitive_p(O))
+@d program_p(O)           (closure_p(O) || primitive_p(O) || continuation_p(O))
 @d applicative_p(O)       ((closure_p(O) && form_p((O), APPLICATIVE)) ||
         primitive_applicative_p(O))
 @d operative_p(O)         ((closure_p(O) && form_p((O), OPERATIVE)) ||
         primitive_operative_p(O))
 
-@ A record is an array of named cells and optionally a segment.
-Records for internal use are identified by a (negative) integer,
-user records are not made available yet but will likely be identified
-by a symbol or closure.
+@ Atomic formats are extended in the form of {\it records\/}. A
+record is a fixed-size set of cells in a known order. The first of
+these cells may be a segment, which is treated specially.
 
-TODO: Move |fix| into the macro.
+Several types of record are defined for \Ls/' own use, these are
+identified with a negative integer.
+
+TODO: Move |fix| into the macro. Link to records implementation.
 
 @.TODO@>
-@d RECORD_ROPE_ITERATOR        -1
-@d RECORD_ENVIRONMENT_ITERATOR -2
-@d RECORD_LEXEME               -3
-@d RECORD_LEXAR                -4
-@d RECORD_PROVENANCE           -5
+@d RECORD_ROPE_ITERATOR        -1 /* Valuable Data/Ropes/Rope Iterator. */
+@d RECORD_ENVIRONMENT_ITERATOR -2 /* Unused. */
+@d RECORD_LEXEME               -3 /* Operational Data/Lexemes. */
+@d RECORD_LEXAR                -4 /* Compute/Lexical Analysis. */
+@d RECORD_PROVENANCE           -5 /* Compute. */
 @#
 @d rope_iter_p(O)         (form_p((O), RECORD) && record_id(O)
         == fix(RECORD_ROPE_ITERATOR))
@@ -776,7 +822,11 @@ TODO: Figure out negatives vs. logical/arithmetic shift vs. complements.
 @<Fun...@>=
 cell fix (intmax_t);
 
-@ @c
+@ Note that |fix| does not verify that the argument is within range,
+but it asserts it. Callers of |fix| should ``know'' that their
+argument fits or they should check.
+
+@c
 cell
 fix (intmax_t val)
 {
@@ -788,72 +838,56 @@ fix (intmax_t val)
         return r;
 }
 
-@* Heap. A heap is stored as a (singly-linked) list of pages. Each
-page has a |Oheap| header (as well as the transparent |Osegment|
-header because every heap page is allocated as a segment) followed
-immediately by the tags, possibly a gap and then the atoms of that
-heap extending all the way to the end of the page. An allocation
-request considers each page in turn until the first page is found
-with an atom available.
+@* Heap. A heap is a linked list of {\it pages\/}, or pairs of
+pages, allocated as a segment (described below). Rather than figuring
+out an optimal size for a page 4KB is chosen more or less arbitrarily
+(|HEAP_CHUNK|).
 
-Initially there is a single heap consisting of a single page. When
-there are no more unused atoms left to allocate in any page garbage
-collection is performed which reports how many unused atoms were
-reclaimed. If there are no spare atoms available then another page
-is allocated and attached to the heap at the back of the list.
+Each heap page contains a header |Oheap| with a pointer to the next
+free atom, a link to the next heap page and its pair if there is
+one, and the tags of the atoms within that page. This header is
+located at the high end of the page so that the first atom has page
+address zero.
 
-Pages within a heap are allocated automatically. At present they
-will never be detached from the list and reclaimed, and there is
-no way to initialise another heap. These abilities will be added
-when \Ls/ grows threads.
-
-If a compacting garbage collector is being used (again, there is
-no way to actually convert a heap to compacting or create one yet
-but the ability will be necessary to support threads) then heap
-pages are allocated two at a time in pairs\footnote{$^1$}{Not to
-be confused with pair {\it objects}.} which are pointed to each
-other in addition to their list link. Moreover each second page-half
-is linked in a list {\it backwards\/} for a trivial optimisation
-later.
-
-Allocation in a compacting garbage collector is extremely fast at
-the expense of having half of each heap pair empty: the pointer to
-the next free atom is simply returned and incremented (unless the
-page is full). When the heap is full any atoms which are in use are
-re-allocated in the same linear fashion from the dormant half and
-the heap is effectively turned up-side down making the dormant
-halves active and the active halves dormant (and empty).
-
-@d HEAP_CHUNK         0x1000
-@d HEAP_MASK          0x0fff
-@d HEAP_BOOKEND       (sizeof (Osegment) + sizeof (Oheap))
-@d HEAP_LEFTOVER      ((HEAP_CHUNK - HEAP_BOOKEND) / (TAG_BYTES + WIDE_BYTES))
-@d HEAP_LENGTH        ((int) HEAP_LEFTOVER)
-@d HEAP_HEADER        ((HEAP_CHUNK / WIDE_BYTES) - HEAP_LENGTH)
+@d HEAP_CHUNK         0x1000 /* Size of a heap page. */
+@d HEAP_MASK          0x0fff /* Bits which will always be 0. */
+@d HEAP_BOOKEND       /* Heap header size. */
+        (sizeof (Osegment) + sizeof (Oheap))
+@d HEAP_LEFTOVER      /* Heap data size. */
+        ((HEAP_CHUNK - HEAP_BOOKEND) / (TAG_BYTES + ATOM_BYTES))
+@d HEAP_LENGTH        ((int) HEAP_LEFTOVER) /* Heap data size in bytes. */
+@d HEAP_HEADER        /* Heap header size in bytes. */
+        ((HEAP_CHUNK / ATOM_BYTES) - HEAP_LENGTH)
 @#
 @d ATOM_TO_ATOM(O)    ((Oatom *) (O))
-@d ATOM_TO_HEAP(O)    (SEGMENT_TO_HEAP(ATOM_TO_SEGMENT(O)))
-@d ATOM_TO_INDEX(O)   (((((intptr_t) (O)) & HEAP_MASK) >> CELL_SHIFT) - HEAP_HEADER)
-@d ATOM_TO_SEGMENT(O) ((Osegment *) (((intptr_t) (O)) & ~HEAP_MASK))
-@d HEAP_TO_SEGMENT(O) (ATOM_TO_SEGMENT(O))
-@d SEGMENT_TO_HEAP(O) ((Oheap *) (O)->address)
-@d HEAP_TO_LAST(O)    ((Oatom *) (((intptr_t) HEAP_TO_SEGMENT(O)) + HEAP_CHUNK))
+@d ATOM_TO_HEAP(O)    /* The |Oheap| containing an atom. */
+        (SEGMENT_TO_HEAP(ATOM_TO_SEGMENT(O)))
+@d ATOM_TO_INDEX(O)   /* The offset of an atom within a heap. */
+        (((((intptr_t) (O)) & HEAP_MASK) >> CELL_SHIFT) - HEAP_HEADER)
+@d ATOM_TO_SEGMENT(O) /* The |Osegment| containing an atom. */
+        ((Osegment *) (((intptr_t) (O)) & ~HEAP_MASK))
+@d HEAP_TO_SEGMENT(O) (ATOM_TO_SEGMENT(O)) /* The segment containing a heap. */
+@d SEGMENT_TO_HEAP(O) ((Oheap *) (O)->address) /* The heap within a segment. */
+@d HEAP_TO_LAST(O)    /* The atom {\it after\/} the last valid |Oatom|
+                        within a heap. */
+        ((Oatom *) (((intptr_t) HEAP_TO_SEGMENT(O)) + HEAP_CHUNK))
 @#
 @d ATOM_TO_TAG(O)     (ATOM_TO_HEAP(O)->tag[ATOM_TO_INDEX(O)])
 @<Type def...@>=
 struct Oheap {
-        Oatom *free;
- struct Oheap *next, *pair;
-        Otag   tag[];
+        Oatom *free; /* Next unallocated atom. */
+ struct Oheap *next, *pair; /* More heap. */
+        Otag   tag[]; /* Atoms' tags. */
 };
 typedef struct Oheap Oheap;
 
-@ There are (conceptually) exactly two heaps, one for the current
-thread (|Theap|) and one shared between all threads (|Sheap|). New
-atoms are allocated in the current thread's heap. Upon encountering
-an atom in another thread's heap that atom will be copied (by the
-owning thread) into the shared heap so that the requesting thread
-can gain access to it.
+@ From the point of view of any thread there are three heaps: The
+thread's own, the heap shared with all threads, and some other
+thread's heap. Upon encountering an atom in another thread's heap
+that atom will be moved (by the thread that owns it) into the shared
+heap.
+
+This is not implemented.
 
 @<Global...@>=
 shared Oheap *Sheap = NULL; /* Process-wide shared heap. */
@@ -863,54 +897,105 @@ unique Oheap *Theap = NULL; /* Per-thread private heap. */
 extern shared Oheap *Sheap;
 extern unique Oheap *Theap;
 
-@ The accessors here should probably be renamed to |lsin| and |ldex|
-(TODO).
+@ \Ls/ includes two types of heap. One {\it sweeping\/} heap who's
+garbage collector leaves atoms where they are and gathers all unused
+atoms into a free list, and a {\it compacting\/} heap which can
+move an atom to the top of its heap and allocates a new atom by
+incrementing a pointer to the next free one.
 
-@.TODO@>
 @<Fun...@>=
-cell lcar (cell);
-cell lcdr (cell);
+cell lsin (cell);
+cell ldex (cell);
 Otag ltag (cell);
-void lcar_set_m (cell, cell);
-void lcdr_set_m (cell, cell);
+void lsin_set_m (cell, cell);
+void ldex_set_m (cell, cell);
 void heap_init_sweeping (Oheap *, Oheap *);
 void heap_init_compacting (Oheap *, Oheap *, Oheap *);
 Oheap *heap_enlarge (Oheap *, sigjmp_buf *);
 cell heap_alloc (Oheap *, sigjmp_buf *);
 cell atom (Oheap *, cell, cell, Otag, sigjmp_buf *);
 
-@ The thread heap is initialised when \Ls/ is starting but the
-shared heap remains unallocated until it's required. For book-keeping
-purposes a heap is allocated in the form of a segment and as a
-segment is pointed to by an object on a heap the first atom allocated
-within a new heap page will be that object.
+@ Each thread's heap is initialised when the thread starts but the
+shared heap remains unallocated until it's required. In order to
+deal with the chicken-and-egg problem introduced by segments being
+pointed to by atoms which are allocated from a heap which is contained
+within a segment, the first atom within each heap page is turned
+into a pointer to the heap's own segment.
 
-Note that there is currently no way to convert this sweeping heap
-into a compacting heap (and so it follows that the compacting code
-is largely untested).
+When a segment is allocated, the object-specific header size in the
+first argument to |segment_alloc| is added to the amount of memory
+being allocated. This argument is $-1$ to specify that the entire
+header is going to be kept within the space allocated. This ensures
+that exactly |HEAP_CHUNK| bytes are allocated for each page.
 
 @<Init...@>=
 Theap = SEGMENT_TO_HEAP(segment_alloc(-1, HEAP_CHUNK, 1, HEAP_CHUNK, failure));
 heap_init_sweeping(Theap, NULL);
-segment_init(HEAP_TO_SEGMENT(Theap), heap_alloc(Theap, failure));
+tmp = atom(Theap, NIL, NIL, FORM_HEAP, failure);
+segment_init(HEAP_TO_SEGMENT(Theap), tmp);
 Sheap = NULL;
 
-@ If a heap will use a compacting garbage collector then each of
-its pages is allocated alongside another page and atoms are copied
-between them.
+@ The memory which is allocated for a page within the heap is
+initialised differently depending on the type of garbage collection
+with which it will be used. A sweeping heap allocates a single page
+at a time so its |heap->pair| pointer is set to |NULL|.
 
-On of each pair is linked into a list in one direction and the other
-pair in the other direction (and each half-page pair links to the
-other half in its |pair| pointer). In this way after the garbage
-collector has walked over the entire heap the heap's head pointer
-can be changed to the head at the other end, effectively turning
-the heap upside down and beginning allocation from within the
-newly-emptied half.
+A sweeping heap is one which ``sweeps up'' the atoms which are no
+longer in use into a linked list of available atoms called the {\it
+free list\/}. To initialise the free list the pointer to its head,
+|heap->free|, is set to the last atom in by the page. This last
+atom's cells are set to |NIL| and then each atom in the page is
+linked to the succeeding one as the free list pointer is moved to
+the front of the page.
 
-Each half of a compacting heap is initialised identically: every
-atom's tag is initialised to |FORM_NONE| and its free pointer is
-set to the first available atom above the header.
+@d initialise_atom(H,F) do {
+        (H)->free--; /* Move to the previous atom. */
+        ATOM_TO_TAG((H)->free) = FORM_NONE; /* Free the atom. */
+        (H)->free->sin = NIL; /* Clean the atom of sin. */
+        if (F)
+                (H)->free->dex = (cell) ((H)->free + 1); /* Link the atom
+                                                        to the free list. */
+        else
+                (H)->free->dex = NIL; /* Clean the rest of the atom. */
+} while (0)
+@c
+void
+heap_init_sweeping (Oheap *heap,
+                    Oheap *prev)
+{
+        int i;
 
+        heap->free = HEAP_TO_LAST(heap); /* |HEAP_TO_LAST| returns a pointer
+                                                {\it after\/} the last atom. */
+        initialise_atom(heap, false); /* The last atom in the free list
+                                        points to |NIL|. */
+        for (i = 1; i < HEAP_LENGTH; i++) /* The remaining atoms are linked
+                                                together. */
+                initialise_atom(heap, true);
+@#
+        heap->pair = NULL;
+        if (prev == NULL)
+                heap->next = NULL;
+        else {
+                heap->next = prev->next;
+                prev->next = heap;
+        }
+}
+
+@ The compacting garbage collector in \Ls/ moves the atoms which
+are in use into a second, empty page allocated along with each heap
+page. Further atoms are allocated from the top of the in-use page
+until it's full and then the in-use and empty pages are switched
+with each other.
+
+Each page is linked with its twin and then the pair of pages is
+linked to the |prev| pair if there is one. If the new pair is being
+inserted into the middle of the list of heap pages then the twins
+are also linked.
+
+TODO: This remains untested.
+
+@.TODO@>
 @c
 void
 heap_init_compacting (Oheap *heap,
@@ -919,22 +1004,18 @@ heap_init_compacting (Oheap *heap,
 {
         int i;
 
-        heap->pair = pair;
-        heap->free = (Oatom *) (((intptr_t) HEAP_TO_SEGMENT(heap)) + HEAP_CHUNK);
-        pair->free = (Oatom *) (((intptr_t) HEAP_TO_SEGMENT(pair)) + HEAP_CHUNK);
+        heap->free = HEAP_TO_LAST(heap);
+        pair->free = HEAP_TO_LAST(pair);
         for (i = 0; i < HEAP_LENGTH; i++) {
-                heap->free--;
-                ATOM_TO_TAG(heap->free) = FORM_NONE;
-                pair->free--;
-                ATOM_TO_TAG(pair->free) = FORM_NONE;
-                heap->free->sin = heap->free->dex = NIL;
-                pair->free->sin = pair->free->dex = NIL;
+                initialise_atom(heap, false);
+                initialise_atom(pair, false);
         }
-        heap->pair = pair;
-        pair->pair = heap;
-        if (prev == NULL) {
+@#
+        heap->pair = pair;@+
+        pair->pair = heap; /* Link each page to its twin. */
+        if (prev == NULL)
                 heap->next = pair->next = NULL;
-        } else {
+        else {
                 if ((heap->next = prev->next) != NULL) {
                         assert(heap->next->pair->next == prev->pair);
                         heap->next->pair->next = heap->pair;
@@ -944,44 +1025,12 @@ heap_init_compacting (Oheap *heap,
         }
 }
 
-@ A heap which is to be garbage collected with a non-moving mark
-and sweep algorithm uses less space and has no complicated linkage
-however collection and allocation are slower than on a compacting
-heap. The heap is likewise initialised by setting each available
-atom's tag to |FORM_NONE| but instead of a pointer that gets
-incremented free atoms are linked through their dex cell in a list
-that ends in |NIL| at the top of the (now full) heap.
-
-@c
-void
-heap_init_sweeping (Oheap *heap,
-                    Oheap *prev)
-{
-        int i;
-
-        heap->pair = NULL;
-        heap->free = HEAP_TO_LAST(heap) - 1;
-        ATOM_TO_TAG(heap->free) = FORM_NONE;
-        heap->free->sin = heap->free->dex = NIL;
-        for (i = 1; i < HEAP_LENGTH; i++) {
-                heap->free--;
-                ATOM_TO_TAG(heap->free) = FORM_NONE;
-                heap->free->sin = NIL;
-                heap->free->dex = (cell) (heap->free + 1);
-        }
-        if (prev == NULL)
-                heap->next = NULL;
-        else {
-                heap->next = prev->next;
-                prev->next = heap;
-        }
-}
-
-@ Enlarging a heap is practically the same either way. When allocating
-two heaps there is no need to clean up the first in case the second
-allocation fails --- garbage collection will eventually release the
-unused segment (if the out of memory condition doesn't abort the
-whole process first).
+@ Enlarging a heap is practically the same either way but doubled
+in the compacting case. A new page, or pair of pages, is allocated
+and initialised, and an allocation is made for the segment containing
+each page. This code matches the thread memory initialisation process
+in |@<Init...@>| which initialises the first page in the heap of a
+new thread.
 
 @c
 Oheap *
@@ -990,45 +1039,34 @@ heap_enlarge (Oheap      *heap,
 {
         Oheap *new, *pair;
         Osegment *snew, *spair;
-        cell owner;
 
         if (heap->pair == NULL) {
                 snew = segment_alloc(-1, HEAP_CHUNK, 1, HEAP_CHUNK, failure);
                 new = SEGMENT_TO_HEAP(snew);
                 heap_init_sweeping(new, heap);
-                owner = heap_alloc(new, failure);
-                ATOM_TO_TAG(owner) = FORM_HEAP;
-                pointer_set_m(owner, snew);
-                segment_set_owner_m(owner, owner);
+                segment_init(snew, heap_alloc(new, failure));
         } else {
                 snew = segment_alloc(-1, HEAP_CHUNK, 1, HEAP_CHUNK, failure);
                 spair = segment_alloc(-1, HEAP_CHUNK, 1, HEAP_CHUNK, failure);
                 new = SEGMENT_TO_HEAP(snew);
                 pair = SEGMENT_TO_HEAP(spair);
                 heap_init_compacting(new, heap, pair);
-                owner = heap_alloc(new, failure);
-                ATOM_TO_TAG(owner) = FORM_HEAP;
-                pointer_set_m(owner, snew);
-                segment_set_owner_m(owner, owner);
-                owner = heap_alloc(new, failure);
-                ATOM_TO_TAG(owner) = FORM_HEAP;
-                pointer_set_m(owner, spair);
-                segment_set_owner_m(owner, owner);
+@#
+                segment_init(snew, heap_alloc(new, failure));
+                segment_init(spair, heap_alloc(new, failure));
         }
         return new;
 }
 
-@ Allocating from either type of heap is broadly similar too. In
-each case the list of heap pages is iterated over until the first
-one is found with a free atom, which is where they differ. In either
-case if no atom is found then the appropriate type of garbage
-collection is performed and, if necessary, the heap is enlarged by
-another page (or pair of pages).
+@ Regardless of the heap's type, after initialisation they are used
+in the same way, through |heap_alloc|. This function's job is to
+locate a free atom and, if none is available, perform garbage
+collection and/or enlarge the heap to make more space available.
 
-The garbage collector will actually call back into |heap_alloc| to
-move atoms and upon completion but not to allocate {\it new\/}
-atoms, only those which already were on the heap and are being moved
-into a recently-freed location.
+The garbage collector itself calls |heap_alloc| --- with |NULL| in
+|failure| --- so care must be taken there that the heap really does
+have free space and |heap_alloc| will not recursively call the
+garbage collector.
 
 @c
 cell
@@ -1038,65 +1076,102 @@ heap_alloc (Oheap      *heap,
         Oheap *h, *next;
         cell r;
 
-        next = heap;
-        if (heap->pair != NULL) {
-allocate_incrementing:
-                while (next != NULL) {
-                        h = next;
-                        if (ATOM_TO_HEAP(h->free) == heap)
-                                return (cell) h->free++;
-                        next = h->next;
-                }
-                assert(failure != NULL);
-                /* UNREACHABLE during collection. */
-                if (gc_compacting(heap, true) > 0)
-                        next = heap;
-                else
-                        next = heap_enlarge(h, failure); /* Will succeed
-                                                        or |goto failure|. */
-                goto allocate_incrementing;
+        if (heap->pair == NULL) {
+                @<Find an atom in a sweeping heap@>
         } else {
-allocate_listwise:
-                while (next != NULL) {
-                        h = next;
-                        if (!null_p(h->free)) {
-                                r = (cell) h->free;
-                                h->free = (Oatom *) h->free->dex;
-                                ((Oatom *) r)->dex = NIL;
-                                return r;
-                        }
-                        next = h->next;
-                }
-                assert(failure != NULL);
-                /* UNREACHABLE during collection. */
-                if (gc_sweeping(heap, true) > 0)
-                        next = heap;
-                else
-                        next = heap_enlarge(h, failure); /* Will succeed
-                                                        or |goto failure|. */
-                goto allocate_listwise;
+                @<Find an atom in a compacting heap@>
         }
 }
 
-@ A pointer to a new atom returned from |heap_alloc| must be formatted
-before it can be used by |atom| or |cons|. If the new sin or dex
-value is an atom (as indicated by the new tag) then it may not yet
-be referenced by a live object and would be discarded if allocation
-performs garbage collection.
+@ The |next| pointer is set to the oldest heap page in which an
+atom could be allocated, usually this will be |Theap| or |Sheap|.
+If there is an unused atom in this page it's removed from the free
+list and returned otherwise |next| proceeds to the next heap page.
 
-To avoid this there are two registers |Tmp_SIN| and |Tmp_DEX| which
-the value is saved into immediately prior to allocation. |Tmp_ier|
-which has already be mentioned is defined here and serves a similar
-purpose for arrays and segments.
+When there are no free atoms on any heap page |gc_sweeping| will
+perform garbage collection. If this locates a free atom then |next|
+is reset to the first page and the search begins again. If collection
+couldn't free any space then the heap is enlarged and the ``search''
+resumes at the new page.
+
+There is much room for improvement here.
+
+@<Find an atom in a sweeping heap@>=
+next = heap;
+allocate_listwise:
+while (next != NULL) {
+        h = next;
+        if (!null_p(h->free)) {
+                r = (cell) h->free;
+                h->free = (Oatom *) h->free->dex;
+                ((Oatom *) r)->dex = NIL;
+                return r;
+        }
+        next = h->next;
+}
+assert(failure != NULL);
+/* UNREACHABLE during collection. */
+if (gc_sweeping(heap, true) > 0)
+        next = heap;
+else
+        next = heap_enlarge(h, failure); /* Will succeed
+                                        or |goto failure|. */
+goto allocate_listwise;
+
+@ Locating an atom on a compacting heap follows the same process
+as a sweeping heap, except that the procedure to locate the next
+free atom involves incrementing the |heap->free| pointer if there
+is space rather than removing an object from the free list.
+
+@<Find an atom in a compacting heap@>=
+next = heap;
+allocate_incrementing:
+while (next != NULL) {
+        h = next;
+        if (ATOM_TO_HEAP(h->free) == heap)
+                return (cell) h->free++;
+        next = h->next;
+}
+assert(failure != NULL);
+/* UNREACHABLE during collection. */
+if (gc_compacting(heap, true) > 0)
+        next = heap;
+else
+        next = heap_enlarge(h, failure); /* Will succeed
+                                        or |goto failure|. */
+goto allocate_incrementing;
+
+@ The atom located by |heap_alloc| is returned uninitialised. |atom|
+takes the contents of the new atom's cells and its format and returns
+a new initialised atom.
+
+The contents of the two cells may themselves be objects that are
+still being created or might otherwise be deemed unused by the
+garbage collector. To avoid this |atom| defines two {\it
+registers\/}\footnote{$^1$}{See below --- Memory/Registers.} |Tmp_SIN|
+and |Tmp_DEX| into which the objects are saved before attempting
+to find a free atom. Registers are cells which scanned by the garbage
+collector for objects which it should consider to be in use.
+
+A third register |Tmp_ier| is also defined here which serves a
+similar purpose for the allocation of new arrays and segments.
 
 @<Global...@>=
-unique cell Tmp_SIN = NIL; /* Allocator's storage for SIN/CAR pointer. */
-unique cell Tmp_DEX = NIL; /* Allocator's storage for DEX/CDR pointer. */
-unique cell Tmp_ier = NIL; /* Other temporary safe storage. */
+unique cell Tmp_SIN = NIL; /* Allocator's register for a SIN/CAR pointer. */
+unique cell Tmp_DEX = NIL; /* Allocator's register for a DEX/CDR pointer. */
+unique cell Tmp_ier = NIL; /* Another register for allocator use. */
 
-@ This function is one of the few with an unusual error handling
-mechanism to clear its two registers.
+@ This function is one of the few who's error handling is not based
+on |unwind|. The new atom's contents are saved in the temporary
+registers if they are pointers to objects, then a new atom is
+allocated, initialised and returned.
 
+Note that the registers are nearly always expected to be |NIL| upon
+entry, except in one case where they are used as register storage
+for something which may be about to call |atom| with those same
+values. TODO: Find it and cross-reference.
+
+@.TODO@>
 @d cons(A,D,F) (atom(Theap, (A), (D), FORM_PAIR, (F)))
 @c
 cell
@@ -1111,16 +1186,16 @@ atom (Oheap      *heap,
         Verror reason = LERR_NONE;
 
         assert(ntag != FORM_NONE);
-        if (ntag & LTAG_DSIN)
+        if (ntag & LTAG_PSIN)
                 Tmp_SIN = nsin;
-        if (ntag & LTAG_DDEX)
+        if (ntag & LTAG_PDEX)
                 Tmp_DEX = ndex;
         if (failure_p(reason = sigsetjmp(cleanup, 1)))
                 goto fail;
         r = heap_alloc(heap, &cleanup);
         TAG_SET_M(r, ntag);
-        ((Oatom *) r)->sin = (ntag & LTAG_DSIN) ? Tmp_SIN : nsin;
-        ((Oatom *) r)->dex = (ntag & LTAG_DDEX) ? Tmp_DEX : ndex;
+        ((Oatom *) r)->sin = (ntag & LTAG_PSIN) ? Tmp_SIN : nsin;
+        ((Oatom *) r)->dex = (ntag & LTAG_PDEX) ? Tmp_DEX : ndex;
         Tmp_SIN = Tmp_DEX = NIL;
         return r;
 fail:
@@ -1128,11 +1203,11 @@ fail:
         siglongjmp(*failure, reason);
 }
 
-@ These accessors are not macros in part because the assertions
-have proven helpful while debugging \Ls/ and will likely continue
-to do so but also to be able patch in the ability to trap access
-from one thread to another's heap or to the shared heap (which will
-need a read lock).
+@ The contents and tag of an atom are always reached, except by the
+garbage collector which must perform magic, through these accessor
+functions. When threading support is added these accessors will
+trap attempts to read and write from another thread's heap and
+trigger moving the objects into the shared heap.
 
 @c
 Otag
@@ -1143,21 +1218,21 @@ ltag (cell o)
 }
 
 cell
-lcar (cell o)
+lsin (cell o)
 {
         assert(!special_p(o));
         return ((Oatom *) o)->sin;
 }
 
 cell
-lcdr (cell o)
+ldex (cell o)
 {
         assert(!special_p(o));
         return ((Oatom *) o)->dex;
 }
 
 void
-lcar_set_m (cell o,
+lsin_set_m (cell o,
             cell datum)
 {
         assert(!special_p(o));
@@ -1166,7 +1241,7 @@ lcar_set_m (cell o,
 }
 
 void
-lcdr_set_m (cell o,
+ldex_set_m (cell o,
             cell datum)
 {
         assert(!special_p(o));
@@ -1174,63 +1249,46 @@ lcdr_set_m (cell o,
         ((Oatom *) o)->dex = datum;
 }
 
-@ Few of these shorthand accessors are actually used and none of
-them is exposed at run-time but there is a whole page here before
-the next major section starts and their existence adds no run-time
-cost.
+@* Segments. An area of memory of any size and for any purpose is
+allocated as a {\it segment\/}. Segments are the first example of
+an object which can exist in one of two forms. Normally the memory
+is referenced by a normal |FORM_SEGMENT| atom which has an opaque
+sin half containing the \CEE/ pointer to the allocated area, which
+includes the segment and object's header.
 
-@d lcaar(O)   (        lcar(lcar(O))    )
-@d lcadr(O)   (        lcar(lcdr(O))    )
-@d lcdar(O)   (        lcdr(lcar(O))    )
-@d lcddr(O)   (        lcdr(lcdr(O))    )
-@d lcaaar(O)  (    lcar(lcar(lcar(O)))  )
-@d lcaadr(O)  (    lcar(lcar(lcdr(O)))  )
-@d lcadar(O)  (    lcar(lcdr(lcar(O)))  )
-@d lcaddr(O)  (    lcar(lcdr(lcdr(O)))  )
-@d lcdaar(O)  (    lcdr(lcar(lcar(O)))  )
-@d lcdadr(O)  (    lcdr(lcar(lcdr(O)))  )
-@d lcddar(O)  (    lcdr(lcdr(lcar(O)))  )
-@d lcdddr(O)  (    lcdr(lcdr(lcdr(O)))  )
-@d lcaaaar(O) (lcar(lcar(lcar(lcar(O)))))
-@d lcaaadr(O) (lcar(lcar(lcar(lcdr(O)))))
-@d lcaadar(O) (lcar(lcar(lcdr(lcar(O)))))
-@d lcaaddr(O) (lcar(lcar(lcdr(lcdr(O)))))
-@d lcadaar(O) (lcar(lcdr(lcar(lcar(O)))))
-@d lcadadr(O) (lcar(lcdr(lcar(lcdr(O)))))
-@d lcaddar(O) (lcar(lcdr(lcdr(lcar(O)))))
-@d lcadddr(O) (lcar(lcdr(lcdr(lcdr(O)))))
-@d lcdaaar(O) (lcdr(lcar(lcar(lcar(O)))))
-@d lcdaadr(O) (lcdr(lcar(lcar(lcdr(O)))))
-@d lcdadar(O) (lcdr(lcar(lcdr(lcar(O)))))
-@d lcdaddr(O) (lcdr(lcar(lcdr(lcdr(O)))))
-@d lcddaar(O) (lcdr(lcdr(lcar(lcar(O)))))
-@d lcddadr(O) (lcdr(lcdr(lcar(lcdr(O)))))
-@d lcdddar(O) (lcdr(lcdr(lcdr(lcar(O)))))
-@d lcddddr(O) (lcdr(lcdr(lcdr(lcdr(O)))))
+If the segment allocation indicates that it's possible and the size
+requested is small enough then the allocation may be {\it interned\/}
+--- stored within the atom itself. In this case the format is
+|FORM_SEGMENT_INTERN| and all the header information except the
+length can be inferred and is not stored.
 
-@* Segments. Memory can be allocated in any size (plus overhead)
-in a segment. A segment is allocated in two parts, the allocated
-memory itself and an atom on the heap to refer to it.
+A full-size segment is also the first example of the {\it pointer\/}
+pseudo-format just described, where the the sin half of an atom is
+a \CEE/ pointer to memory. Some other object formats which build
+on a segment make use of the dex half of this pointer object although
+segments themselves do not. This is not considered part of the \Ls/
+language but rather is a trivial but opaque optimisation.
 
-If the allocation is small enough and the object it's being allocated
-for permits it (eg.~it has no particular memory alignment requirements)
-then the storage for the segment will be within the atom itself.
-This is used especially for short symbols and text.
+The size of a segment is specified as a number of objects of a given
+{\it stride\/} in bytes. A stride of 0 is treated as 1 but indicates
+that the segment could be interned; the alignment and excess header
+length in this case must also be 0.
 
-The address of the allocation is referenced by a pointer object. This
-object is the atom on the heap that contains the allocation's
-address\footnote{$^1$}{If \Ls/ ever needs plain pointers the same
-atomic structure with a new format will be used.} and owing to the
-nature of the heap only half of the atom is needed --- the other
-half is a ``spare'' datum that segment-like objects can use if
-necessary or helpful.
-
-@d pointer(O)         ((void *) lcar(O))
-@d pointer_datum(O)   (lcdr(O))
-@d pointer_erase_m(O) (lcar_set_m((O), (cell) NULL))
+@d pointer(O)         ((void *) lsin(O))
+@d pointer_datum(O)   (ldex(O))
+@d pointer_erase_m(O) (lsin_set_m((O), (cell) NULL))
 @d pointer_set_datum_m(O,D)
-                      (lcdr_set_m((O), (cell) (D)))
-@d pointer_set_m(O,D) (lcar_set_m((O), (cell) (D)))
+                      (ldex_set_m((O), (cell) (D)))
+@d pointer_set_m(O,D) (lsin_set_m((O), (cell) (D)))
+@#
+@d segbuf_base(O)     ((Osegment *) pointer(O)) /* The true allocation. */
+@d segbuf_address(O)  (segbuf_base(O)->address) /* Usable space after the header. */
+@d segbuf_header(O)   (segbuf_base(O)->header)
+@d segbuf_length(O)   (segbuf_base(O)->length)
+@d segbuf_next(O)     (segbuf_base(O)->next)
+@d segbuf_owner(O)    (segbuf_base(O)->owner) /* The same as |O| but mutatable. */
+@d segbuf_prev(O)     (segbuf_base(O)->prev)
+@d segbuf_stride(O)   (segbuf_base(O)->stride ? segbuf_base(O)->stride : 1)
 @#
 @d segint_p(O)        (segment_intern_p(O) || symbol_intern_p(O))
 @d segint_address(O)  (segint_base(O)->buffer)
@@ -1242,15 +1300,6 @@ necessary or helpful.
 @d segint_owner(O)    (O)
 @d segint_stride(O)   ((long) 1)
 @#
-@d segbuf_base(O)     ((Osegment *) pointer(O))
-@d segbuf_address(O)  (segbuf_base(O)->address)
-@d segbuf_header(O)   (segbuf_base(O)->header)
-@d segbuf_length(O)   (segbuf_base(O)->length)
-@d segbuf_next(O)     (segbuf_base(O)->next)
-@d segbuf_owner(O)    (segbuf_base(O)->owner) /* |== O| */
-@d segbuf_prev(O)     (segbuf_base(O)->prev)
-@d segbuf_stride(O)   (segbuf_base(O)->stride ? segbuf_base(O)->stride : 1)
-@#
 @d segment_address(O) (segint_p(O) ? segint_address(O) : segbuf_address(O))
 @d segment_base(O)    (segint_p(O) ? segint_base(O)    : segbuf_base(O))
 @d segment_header(O)  (segint_p(O) ? segint_header(O)  : segbuf_header(O))
@@ -1259,26 +1308,26 @@ necessary or helpful.
 @d segment_stride(O)  (segint_p(O) ? segint_stride(O)  : segbuf_stride(O))
 @#
 @d segment_set_owner_m(O,N) do {
-        assert(pointer_p(O));
+        assert(!segint_p(O));
         segbuf_owner(O) = (N);
 } while (0)
 @<Type def...@>=
-struct Osegment { /* Must remain pointer-aligned. */
+struct Osegment {
  struct Osegment *next, *prev; /* Linked list of all allocated segments. */
         half length, stride; /* Notably absent: header size \AM\ alignment. */
         cell owner; /* The referencing atom; cleared and re-set during
                         garbage collection. */
-        char address[]; /* Base address of the available space (occupies
-                        no header space). */
+        char address[]; /* Address of the usable space; a pseudo-pointer
+                                which occupies no storage. */
 };
 typedef struct Osegment Osegment;
 
-@ The process-wide global list of every allocated segment. As soon
-as memory is successfully allocated it's added to this list. When
-scanning for live objects during garbage collection fails to re-set
-the owner (which have all been set to |NIL| prior to scanning) this
-list can be scanned for unused allocations to release.
+@ Every truly allocated segment except those used for the heap
+(TODO: this should change) is saved in the global linked list
+|Allocations|. The garbage collector uses this list to locate unused
+segments.
 
+@.TODO@>
 @<Global...@>=
 shared Osegment *Allocations = NULL;
 
@@ -1290,27 +1339,19 @@ void segment_release_imp (Osegment *, bool);
 void segment_release_m (cell, bool);
 cell segment_resize_m (cell, long, long, sigjmp_buf *);
 
-@ The memory underlying an allocated segment is obtained through
-|segment_alloc| or its imp. The header size is -1 if the length and
-stride together define the size to be allocated {\it including\/}
-the segment's own header (this allows heap pages to (easily) be
-exactly one operating system page).
+@ Allocating a new segment is divided into allocation of the main
+memory by |segment_alloc_imp| and the heap atom to reference it by
+|segment_new_imp|. Interned segments do not call |segment_alloc_imp|
+but those which would have been interned but for being too large
+still store their |stride| value as 0 in case the segment is shrunk
+in the future.
 
-If the stride value is zero then the real stride to calculate with
-is one but zero is stored to indicate that if the segment is
-subsequently reduced in size enough it can be interned.
-
-The rather unpleasant looking test before aborting with |LERR_OOM|
-takes advantage of {\it flagged arithmetic\/} if the \CEE/ compiler
-allows for it. Flagged arithmetic uses the flags variously raised
-after actually performing CPU arithmetic to detect overflow and
-carry rather than defensively checking that the operands are within
-range prior to each operation. After removing the noise the function
-performed appears as |size = sizeof (Osegment) + header + (length
-* stride)|.
-
-If the allocation is new then it's inserted at the end of the
-|Allocations| list.
+A segment consists of the segment header |Osegment|, an object
+header and |length| $\times$ |stride| bytes. If |header| value is
+-1 then the segment header is {\it not\/} added to the calculated
+size though the |Osegment| header is still located at the beginning
+of the allocated space. At present only the allocations for the
+heap do use this feature.
 
 TODO: These arguments should be |size_t| type.
 
@@ -1330,40 +1371,67 @@ segment_alloc_imp (Osegment   *old,
         Osegment *r;
 
         assert(header >= -1 && length >= 0 && stride >= 0);
-        if (header == -1)
-                header = - sizeof (Osegment);
         assert(old == NULL || stride == old->stride);
         assert(align == 0 || old == NULL);
-        cstride = stride ? stride : 1;
-        if (length > HALF_MAX || stride > HALF_MAX ||@|
-                    ckd_mul(&size, length, cstride) ||@|
-                    ckd_add(&size, size, header) ||
-                    ckd_add(&size, size, sizeof (Osegment)))
-                siglongjmp(*failure, LERR_OOM);
-        r = mem_alloc(old, size, align, failure);
-        r->length = length;
-        if (old == NULL) {
-                r->stride = stride;
-                r->owner = NIL;
-        }
-        if (Allocations == NULL)
-                Allocations = r->next = r->prev = r;
-        else {
-                r->next = Allocations;
-                r->prev = Allocations->prev;
-                Allocations->prev->next = r;
-                Allocations->prev = r;
-        }
+        @<Safely calculate the full size of a segment allocation@>@;
+        @<Allocate and initialise a segment@>@;
+        @<Insert a new segment into |Allocations|@>@;
         return r;
 }
 
-@ In most cases segment allocations are made by this function which
-includes the support for creating an interned segment or it allocates
-the memory and returns a new atom pointing to it.
+@ The nest of {\it ckd\_...\/} calls calculate the full allocation
+size while taking advantage of the CPU's arithmetic with carry
+operators to avoid integer overflow if the \CEE/ compiler is modern
+enough to support them\footnote{$^1$}{Arithmetic {\it with carry\/}!
+In 2022! We are truly living in the future.}.
+
+@<Safely calculate the full size of a segment allocation@>=
+if (header == -1)
+        header = -(sizeof (Osegment)); /* Total header size will sum to 0. */
+cstride = stride ? stride : 1;
+if (length > HALF_MAX || stride > HALF_MAX ||@|
+        /* |size = length * cstride + header + sizeof (Osegment)| */
+@t\hskip 3em@>  ckd_mul(&size, length, cstride) ||@|
+                ckd_add(&size, size, header) ||@|
+                ckd_add(&size, size, sizeof (Osegment)))@/
+        siglongjmp(*failure, LERR_OOM);
+
+@ |mem_alloc| ``will not'' fail, instead if it cannot allocate
+memory it calls |siglongjmp| with |LERR_OOM|.
+
+@<Allocate and initialise a segment@>=
+r = mem_alloc(old, size, align, failure);
+r->length = length;
+r->stride = stride;
+if (old == NULL)
+        r->owner = NIL; /* This is a new allocation. */
+
+@ |Allocations| is a doubly linked list threaded through the {\it
+next\/} and {\it prev\/} pointers of the segment header. The first
+allocation replaces |Allocations| with itself and points to itself.
+Further allocations insert them immediately prior to |Allocations|,
+conceptually the ``back'' of the list.
+
+@<Insert a new segment into |Allocations|@>=
+if (Allocations == NULL)
+        Allocations = r->next = r->prev = r;
+else {
+        r->next = Allocations;
+        r->prev = Allocations->prev;
+        Allocations->prev->next = r;
+        Allocations->prev = r;
+}
+
+@ In most cases segment allocations are made by this function along
+with the atom which references it, which also changes to interning
+a segment if |length| is short enough. An allocation will only be
+considered suitable for interning if |stride| is zero in which case
+|header| must be zero also.
 
 TODO: These arguments should (probably) {\it not\/} be |size_t| but
-they should probably not be |long| either.
+probably not |long| either.
 
+@.TODO@>
 @d segment_new(H,L,S,A,F) segment_new_imp(Theap, (H), (L), (S), (A),
         FORM_SEGMENT, (F))
 @c
@@ -1380,32 +1448,55 @@ segment_new_imp (Oheap      *heap,
         long total;
         Osegment *s;
 
+        assert(header >= 0);
+        assert(length >= 0);
         assert(stride >= 0);
+        assert(align >= 0);
         assert(ntag != FORM_NONE);
         if (ckd_add(&total, header, length))
                 siglongjmp(*failure, LERR_LIMIT);
         if (stride == 0 && total <= INTERN_BYTES) {
-                if (ntag == FORM_SEGMENT)
-                        ntag = FORM_SEGMENT_INTERN;
-                else
-                        assert(ntag == FORM_SYMBOL_INTERN);
-                r = atom(heap, NIL, NIL, ntag, failure);
-                segint_set_length_m(r, length);
-                return r;
+                @<``Allocate'' an interned segment@>
+        } else {
+                @<Allocate a full-size segment@>
         }
-        Tmp_ier = atom(heap, NIL, NIL, FORM_PAIR, failure);
-        s = segment_alloc(header, length, stride, align, failure);
-        TAG_SET_M(Tmp_ier, ntag);
-        ATOM_TO_ATOM(Tmp_ier)->sin = (cell) s;
-        s->owner = Tmp_ier;
-        Tmp_ier = NIL;
-        return s->owner;
 }
 
-@ When a segment is going to be used as a heap it may not be able
-to allocate the pointer to it on an existing heap so the memory and
-atom are allocated directly and |segment_init| sets up their
-attributes correctly.
+@ An interned segment isn't really allocated but stored within the
+atom and made to look like a regular segment with \CEE/ macro
+trickery. Only segments and symbols are interned in this manner.
+
+@<``Allocate'' an interned segment@>=
+assert(header == 0);
+assert(align == 0);
+if (ntag == FORM_SEGMENT)
+        ntag = FORM_SEGMENT_INTERN;
+else
+        assert(ntag == FORM_SYMBOL_INTERN);
+r = atom(heap, NIL, NIL, ntag, failure);
+segint_set_length_m(r, length);
+return r;
+
+@ Real allocation of a segment simply stuffs the value from
+|segment_alloc| into a new atom to return. The wrinkle here is that
+the allocation will be discarded if the call to |atom| calls in to
+the garbage collector.
+
+@<Allocate a full-size segment@>=
+assert(length <= HALF_MAX);
+assert(stride <= HALF_MAX);
+Tmp_ier = atom(heap, NIL, NIL, FORM_PAIR, failure);
+s = segment_alloc(header, length, stride, align, failure);
+TAG_SET_M(Tmp_ier, ntag);
+ATOM_TO_ATOM(Tmp_ier)->sin = (cell) s;
+s->owner = Tmp_ier;
+Tmp_ier = NIL;
+return s->owner;
+
+@ When a new heap page is being allocated there is no heap available
+to allocate the segment atom, so after the page is allocated with
+|segment_alloc| a new atom is initialised separately by |segment_init|
+and |segment_new| is not used.
 
 @c
 cell
@@ -1414,19 +1505,51 @@ segment_init (Osegment *seg,
 {
         assert(!special_p(container));
         seg->owner = container;
-        ATOM_TO_TAG(container) = FORM_HEAP;
-        ATOM_TO_ATOM(container)->sin = (cell) seg;
-        ATOM_TO_ATOM(container)->dex = NIL;
+        TAG_SET_M(container, FORM_HEAP);
+        pointer_set_m(container, seg);
+        pointer_set_datum_m(container, NIL);
         return container;
 }
 
-@ A segment can be resized by passing it as an argument to
-|segment_alloc_imp|. If the segment was and remains interned then
-the stored length is simply updated or if the segment was and remains
-allocated then the allocation is resized.
+@ After a segment is freed the \CEE/ pointer to it is erased as a
+form of safety valve even though the atom should never be used
+again. However the garbage collector scans |Allocations| directly
+and doesn't have access to the atom holding the pointer, calling
+|segment_release_imp| directly.
 
-If a segment changes to/from being interned then a new allocation
-is requested and the relevant data copied.
+@c
+void
+segment_release_m (cell o,
+                   bool reclaim)
+{
+        assert(pointer_p(o)); /* Other objects piggy-back on segments. */
+        segment_release_imp(pointer(o), reclaim);
+        pointer_erase_m(o); /* For safety. */
+}
+
+@ When a segment is released the segment is removed from the
+|Allocations| list and then the memory is freed in the main allocator
+unless it is about to be re-allocated.
+
+@c
+void
+segment_release_imp (Osegment *o,
+                     bool      reclaim)
+{
+        if (o == Allocations)
+                Allocations = o->next;
+        if (o->next == o)
+                Allocations = NULL;
+        else
+                o->prev->next = o->next,
+                o->next->prev = o->prev;
+        o->next = o->prev = o; /* For safety. */
+        if (reclaim)
+                mem_free(o);
+}
+
+@ Segments can be resized after they are allocated. |segment_resize_m|
+also takes care of converting between interned and real allocations.
 
 @c
 cell
@@ -1448,72 +1571,59 @@ segment_resize_m (cell        o,
         if (segment_intern_p(o) && nlength <= INTERN_BYTES) {
                 segint_set_length_m(o, nlength);
                 return o;
-        } else if ((arraylike_p(o) || segment_stored_p(o)) &&
+        } else if ((arraylike_p(o) || segment_stored_p(o)) &&@|
                     (segbuf_base(o)->stride || nlength > INTERN_BYTES)) {
-                old = segbuf_base(o);
-                nstride = segment_stride(o);
-                segment_release_m(o, false);
-                new = segment_alloc_imp(old, header, nlength, nstride, 0,
-                        failure);
-                pointer_set_m(o, new);
-                return o;
+                @<Resize an existing allocation and |return|@>@;
+        } else {
+                @<Convert between an allocation and an internship and |return|@>
         }
-        assert(header == 0);
-        assert(segment_stride(o) == 0);
-        assert(null_p(Tmp_ier));
-        Tmp_ier = o; /* BUG: |o| must mutate not be discarded. */
-        if (failure_p(reason = sigsetjmp(cleanup, 1)))
-                unwind(failure, reason, true, 0);
-        r = segment_new(0, nlength, 0, 0, &cleanup);
-        if (segment_length(Tmp_ier) < nlength)
-                nlength = segment_length(Tmp_ier);
-        for (i = 0; i < nlength; i++)
-                segment_address(r)[i] = segment_address(Tmp_ier)[i];
-        Tmp_ier = NIL;
-        return r;
 }
 
-@ When a segment is released explicitly the pointer to it which is
-in its heap atom is erased to avoid the possibility of using
-deallocated memory.
+@ An allocation which can't be interned is simply resized and the
+atom updated.
 
-@c
-void
-segment_release_m (cell o,
-                   bool reclaim)
-{
-        assert(pointer_p(o)); /* Useful objects piggy-back on segments. */
-        segment_release_imp(pointer(o), reclaim);
-        pointer_erase_m(o); /* For safety. */
-}
+TODO: If |segment_alloc_imp| fails then the segment is no longer
+listed in |Allocations| but its memory has not been freed.
 
-@ When a segment is released by the garbage collector its heap atom
-has already been lost so it calls the release imp directly to remove
-the segment from the |Allocations| list and reclaim the underlying
-storage.
+@.TODO@>
+@<Resize an existing allocation and |return|@>=
+old = segbuf_base(o);
+nstride = segment_stride(o);
+segment_release_m(o, false);
+new = segment_alloc_imp(old, header, nlength, nstride, 0,
+        failure);
+pointer_set_m(o, new);
+return o;
 
-@c
-void
-segment_release_imp (Osegment *o,
-                     bool      reclaim)
-{
-        if (o == Allocations)
-                Allocations = o->next;
-        if (o->next == o)
-                Allocations = NULL;
-        else
-                o->prev->next = o->next,
-                o->next->prev = o->prev;
-        o->next = o->prev = o; /* For safety. */
-        if (reclaim)
-                mem_free(o);
-}
+@ Whether converting from an allocation to an internship or vice
+versa the process is the same: Create a new segment and copy the
+smaller of the two segments' sizes from the old to the new.
+
+Note that this does {\it not\/} mutate the atom. TODO: Should it?
+
+@.TODO@>
+@<Convert between an allocation and an internship and |return|@>=
+assert(header == 0);
+assert(segment_stride(o) == 0);
+assert(null_p(Tmp_ier));
+Tmp_ier = o; /* BUG: |o| must mutate not be discarded. */
+if (failure_p(reason = sigsetjmp(cleanup, 1)))
+        unwind(failure, reason, true, 0);
+r = segment_new(0, nlength, 0, 0, &cleanup);
+if (segment_length(Tmp_ier) < nlength)
+        nlength = segment_length(Tmp_ier);
+for (i = 0; i < nlength; i++)
+        segment_address(r)[i] = segment_address(Tmp_ier)[i];
+Tmp_ier = NIL;
+return r;
 
 @* Registers. To collect unused memory the garbage collector
 recursively scans the descendents of every live atom. An atom is
-considered live if it is referenced by an atom held in a {\it
-register\/}. \Ls/ defines a number of registers for various purposes
-which are explained as they are introduced.
+considered live if it is held in a {\it register\/}. \Ls/ defines
+these registers which are explained as they are introduced. The
+first three were introduced with the definition of |atom|.
+
+\.{LGCR} stands for \Ls/ Garbage Collector Register.
 
 @<Type def...@>=
 enum {
@@ -1526,15 +1636,14 @@ enum {
         LGCR_CLINK,@/
         LGCR_OPERATORS,@/
         LGCR_USER, LGCR_DEBUG,
-        LGCR_COUNT
+        LGCR_LENGTH
 };
 
-@ One register which is defined here is the user register which is
-not used by \Ls/ for any purpose but is made available by the \Ls/
-library.
+@ Two register defined here but not used directly by \Ls/ for any
+purpose are the user and debug registers.
 
 @<Global...@>=
-unique cell *Iregister[LGCR_COUNT];
+unique cell *Iregister[LGCR_LENGTH];
 shared cell  User_Register = NIL; /* Unused by \Ls/ --- for library users. */
 shared cell  Debug_Register = NIL; /* Similar --- for the \Ls/ debugger. */
 
@@ -1542,9 +1651,10 @@ shared cell  Debug_Register = NIL; /* Similar --- for the \Ls/ debugger. */
 extern unique cell *Iregister[];
 extern shared cell User_Register, Debug_Register;
 
-@ This list of pointers to the registers is re-initialised once per
-thread. Probably. The garbage collector updates the pointer if the
-atom moves.
+@ This list of registers is initialised immediately after a new
+thread's heap is initialised. |Iregister| is an array of cell
+pointers so that the garbage collector can update the address if
+it moves the register cell.
 
 @<Save reg...@>=
 Iregister[LGCR_TMPSIN]      = &Tmp_SIN;
@@ -1566,17 +1676,21 @@ Iregister[LGCR_OPERATORS]   = &Root;
 Iregister[LGCR_USER]        = &User_Register;
 Iregister[LGCR_DEBUG]       = &Debug_Register;
 
-@* Garbage Collection. \Ls/ includes two garbage collectors. A
-small, simple but moderately slow mark-and-sweep collector and a
-larger and more complicated but faster compacting collector.
+@* Garbage Collection. \Ls/ includes one garbage collector with two
+modes of operation as discussed in the introduction to the heap ---
+sweeping and compacting. The most pressing difference here is that
+the compacting collector moves the atoms which are live while the
+sweeping one does not. This introduces the problem that while
+compacting collection is going on there could still be atoms pointing
+to an atom which has moved.
 
-When the compacting collector moves a live atom it's replaced with
-a {\it collected\/} atom, sometimes called a tombstone, so that
-references to it can be correctly updated. This object does not show
-up outside the garbage collector.
+To solve this an atom which has moved is replaced with a {\it
+collected\/} object which points to the atom's new location. When
+another live atom is found which points to the collected atom it
+can be updated with the atom's new address.
 
-@d collected_datum(O)         (lcar(O))
-@d collected_set_datum_m(O,V) (lcar_set_m((O), (V)))
+@d collected_datum(O)         (lsin(O))
+@d collected_set_datum_m(O,V) (lsin_set_m((O), (V)))
 @<Fun...@>=
 size_t gc_compacting (Oheap *, bool);
 void gc_disown_segments (Oheap *);
@@ -1585,110 +1699,165 @@ size_t gc_reclaim_heap (Oheap *);
 void gc_release_segments (Oheap *);
 size_t gc_sweeping (Oheap *, bool);
 
-@ To collect a heap by sweeping up the unused atoms
+@ Garbage collection by sweeping or by compacting is broadly the
+same. The chief difference lies in how the search for live atoms
+is carried out, indicated by |compacting_p| passed to |gc_mark|.
 
+TODO: Determine whether the last two steps could be swapped around
+bringing |gc_sweeping| and |gc_compacting| closer together.
+
+@.TODO@>
 @c
 size_t
 gc_sweeping (Oheap *heap,
              bool   segments)
 {
+        bool compacting_p = false;
         size_t count, remain;
         int i;
         Oatom *a;
+        Oheap *last = heap; /* For compatibility with |gc_compacting|. */
         Oheap *p;
 
         assert((heap == Theap) || ((Sheap != NIL) && (heap == Sheap)));
-        count = remain = 0;
-        p = heap;
-        while (p != NULL) {
-                remain += HEAP_LENGTH;
-                p = p->next;
-        }
-        if (segments)
-                gc_disown_segments(heap);
-        for (i = 0; i < PRIMITIVE_LENGTH; i++)
-                Iprimitive[i].box = gc_mark(heap, Iprimitive[i].box,
-                        false, NULL, &count);
-        for (i = 0; i < LGCR_COUNT; i++)
-                if (!special_p(*Iregister[i]))
-                        *Iregister[i] = gc_mark(heap, *Iregister[i],
-                                false, NULL, &count);
-        p = heap;
-        while (p != NULL) {
-                a = HEAP_TO_LAST(p);
-                p->free = (Oatom *) NIL;
-                for (i = 0; i < HEAP_LENGTH; i++) {
-                        a--;
-                        if (ATOM_LIVE_P(a))
-                                ATOM_CLEAR_LIVE_M(a);
-                        else {
-                                ATOM_TO_TAG(a) = FORM_NONE;
-                                a->sin = NIL;
-                                a->dex = (cell) p->free;
-                                p->free = a;
-                        }
-                }
-                p = p->next;
-        }
-        count += gc_reclaim_heap (heap);
-        if (segments)
-                gc_release_segments(heap);
+        @<Count the total size of the heap@>@;
+        @<Find live atoms@>@;
+        @<Sweep the heap for unused atom@>@;
+        @<Release unused segments@>@;
         return remain - count;
 }
 
-@
+@ The other difference between the two collectors is of course in
+how the free pointer is managed. Rather than searching the entire
+heap for unused atoms |gc_compacting| only resets the free pointer
+on each page.
 
-@.TODO@>% see warning
 @c
 size_t
 gc_compacting (Oheap *heap,
                bool   segments)
 {
+        bool compacting_p = true;
         size_t count, remain;
         int i;
         Oheap *last, *p;
 
         assert((heap == Theap) || ((Sheap != NIL) && (heap == Sheap)));
-        count = remain = 0;
-        p = heap;
-        while (p != NULL) {
-                last = p;
-                remain += HEAP_LENGTH;
-                p->pair->pair = NULL;
-                p = p->next;
-        }
-        if (segments)
-                gc_disown_segments(heap);
-        for (i = 0; i < PRIMITIVE_LENGTH; i++)
-                Iprimitive[i].box = gc_mark(heap, Iprimitive[i].box,
-                        false, NULL, &count);
-        for (i = 0; i < LGCR_COUNT; i++)
-                if (!special_p(Iregister[i]))
-                        *Iregister[i] = gc_mark(last, *Iregister[i],
-                                true, NULL, &count);
-        count += gc_reclaim_heap (heap);
-        if (segments)
-                gc_release_segments(heap);
-        p = last;
-        while (p != NULL) {
-                p->pair->free = HEAP_TO_LAST(p->pair);
-                for (i = 0; i < HEAP_LENGTH; i--) {
-                        ATOM_TO_TAG(--p->pair->free) = FORM_NONE; /* warning:
-                                operation on |p->pair->free| may be undefined */
-                        p->pair->free->sin = p->pair->free->dex = NIL;
-                }
-                p->pair->pair = p;
-                heap = p;
-                p = p->next;
-        }
-        if (heap == Theap)
-                Theap = last;
-        else
-                Sheap = last;
+        @<Count the total size of the heap@>@; /* And detach the twins. */
+        @<Find live atoms@>@;
+        @<Release unused segments@>@;
+        @<Reset the free pointer in the page twins and reattach them@>@;
         return remain - count;
 }
 
-@ @c
+@ The total size of the heap is used to determine how many free atoms
+remain after collection has found (and counted) all of the live ones.
+
+The compacting heap also removes the twin link from each page as
+it goes, keeping track of a pointer to the last heap page in the
+link which will be used to reattach the twins later.
+
+@.TODO@>
+@<Count the total size of the heap@>=
+count = remain = 0;
+p = heap;
+while (p != NULL) {
+        remain += HEAP_LENGTH;
+        if (compacting_p) {
+                last = p; /* TODO: I think this should be |last = p->pair|. */
+                p->pair->pair = NULL;
+        }
+        p = p->next;
+}
+
+@ To find the atoms which are live |gc_mark| is called with each
+of the registers in |Iregister|. If the collector is compacting the
+register will have moved so the pointer in |Iregister| is updated.
+
+|Iprimitive| is treated specially to work around a bug (TODO:
+remember what it was, fix it if it remains and remove the workaround).
+
+Before scanning for live atoms all of the segments which are
+referenced by atoms on the heap being collected are {\it disowned\/}
+by having their owner field set to |NIL|. |gc_mark| will set the
+owner of segments which are live to the atom referencing them and
+so any segments which are not live will have their owner still set
+to |NIL|.
+
+@.TODO@>
+@<Find live atoms@>=
+if (segments)
+        gc_disown_segments(heap);
+for (i = 0; i < PRIMITIVE_LENGTH; i++)
+        Iprimitive[i].box = gc_mark(last, Iprimitive[i].box,
+                compacting_p, NULL, &count);
+for (i = 0; i < LGCR_LENGTH; i++)
+        if (!special_p(*Iregister[i]))
+                *Iregister[i] = gc_mark(last, *Iregister[i],
+                        compacting_p, NULL, &count);
+
+@ When the live atoms have been marked the segments which are no
+longer live remain unowned. Due to being poorly designed the heap
+segments also appear to be unowned so new pseudo-segments are
+allocated for them and then the unused segments are released.
+
+@<Release unused segments@>=
+count += gc_reclaim_heap (heap);
+if (segments)
+        gc_release_segments(heap);
+
+@ When sweeping, the whole heap is scanned top to bottom and atoms
+which were not marked by |gc_mark| are cleared and added to the
+free list.
+
+@<Sweep the heap for unused atom@>=
+p = heap;
+while (p != NULL) {
+        a = HEAP_TO_LAST(p);
+        p->free = (Oatom *) NIL;
+        for (i = 0; i < HEAP_LENGTH; i++) {
+                a--;
+                if (ATOM_LIVE_P(a))
+                        ATOM_CLEAR_LIVE_M(a);
+                else {
+                        ATOM_TO_TAG(a) = FORM_NONE;
+                        a->sin = NIL;
+                        a->dex = (cell) p->free;
+                        p->free = a;
+                }
+        }
+        p = p->next;
+}
+
+@ After moving all live atoms in one side of the page heap list
+into the other half, which was detached prior to scanning the
+registers, the free pointer in the previously-live half's pages is
+reset to the top of each page and the twin is reattached. Finally
+the global pointer |Theap| or |Sheap| is updated to the new live
+page list.
+
+@<Reset the free pointer in the page twins and reattach them@>=
+p = last;
+while (p != NULL) {
+        p->pair->free = HEAP_TO_LAST(p->pair);
+        for (i = 0; i < HEAP_LENGTH; i--) {
+                ATOM_TO_TAG(--p->pair->free) = FORM_NONE; /* warning:
+                        operation on |p->pair->free| may be undefined */
+                p->pair->free->sin = p->pair->free->dex = NIL;
+        }
+        p->pair->pair = p;
+        heap = p;
+        p = p->next;
+}
+if (heap == Theap)
+        Theap = last;
+else
+        Sheap = last;
+
+@ I'm not going to explain this loop magic because it shouldn't be
+here. A new segment atom is allocated to point to each heap page.
+
+@c
 size_t
 gc_reclaim_heap (Oheap *heap)
 {
@@ -1708,7 +1877,13 @@ gc_reclaim_heap (Oheap *heap)
         return count;
 }
 
-@ TODO: Use |heap| to determine whether this segment might be owned by another heap.
+@ Prior to garbage collection all of the segments which have atoms
+on the heap being collected have their owner set to |NIL| to detect
+those which are no longer live.
+
+In fact there is not yet support in \Ls/ for more than one heap so
+all segments are disowned. TODO: Use |heap| to determine whether
+this segment might be owned by another heap.
 
 @.TODO@>
 @c
@@ -1719,7 +1894,7 @@ gc_disown_segments (Oheap *heap @[Lunused@])
 
         s = Allocations;
         while (1) {
-                if (!null_p(s->owner) &&
+                if (!null_p(s->owner) &&@|
                             (ATOM_TO_HEAP(s->owner)->pair == NULL ||
                                 ATOM_TO_HEAP(s->owner)->pair->pair == NULL))
                         s->owner = NIL;
@@ -1728,9 +1903,9 @@ gc_disown_segments (Oheap *heap @[Lunused@])
         }
 }
 
-@ TODO: Split in two? Rename?
+@ After collection the list of segments in |Allocations| is checked
+for any unowned segments to release.
 
-@.TODO@>
 @c
 void
 gc_release_segments (Oheap *heap @[Lunused@])
@@ -1738,14 +1913,12 @@ gc_release_segments (Oheap *heap @[Lunused@])
         Osegment *s, *n;
 
         s = Allocations;
-        while (1) {
+        do {
                 n = s->next;
                 if (null_p(s->owner))
                         segment_release_imp(s, true);
-                if (n == Allocations)
-                        break;
                 s = n;
-        }
+        } while (n != Allocations);
 }
 
 @ @d atom_saved_p(O) (ATOM_TO_HEAP(O)->pair == NULL)
@@ -2454,8 +2627,8 @@ hashtable_match (cell        binding,
 
         assert(symbol_p(maybe));
         assert(pair_p(binding));
-        assert(symbol_p(lcar(binding)));
-        return ((lcar(binding) == maybe) ? 0 : -1);
+        assert(symbol_p(lsin(binding)));
+        return ((lsin(binding) == maybe) ? 0 : -1);
 }
 
 @ @c
@@ -2463,8 +2636,8 @@ Vhash
 hashtable_rehash (cell        o,
                   sigjmp_buf *failure @[Lunused@])
 {
-        assert(pair_p(o) && symbol_p(lcar(o)));
-        return symbol_hash(lcar(o));
+        assert(pair_p(o) && symbol_p(lsin(o)));
+        return symbol_hash(lsin(o));
 }
 
 @ @c
@@ -2511,17 +2684,17 @@ hashtable_pairs (cell        o,
         SS(Stmp, SO(Sret));
         for (i = 0; i < hashtable_length(SO(Sobject)); i++) {
                 p = hashtable_ref(SO(Sobject), i);
-                if (null_p(p) || undefined_p(p) || undefined_p(lcar(p)))
+                if (null_p(p) || undefined_p(p) || undefined_p(lsin(p)))
                         continue;
                 if (accessor == NULL)
                         next = p;
                 else
                         next = accessor(p);
                 next = cons(next, NIL, &cleanup);
-                lcdr_set_m(SO(Stmp), next);
+                ldex_set_m(SO(Stmp), next);
                 SS(Stmp, next);
         }
-        r = lcdr(SO(Sret));
+        r = ldex(SO(Sret));
         stack_clear(3);
         return r;
 }
@@ -2718,14 +2891,14 @@ A rope's link pair atom is always a tree variant even though |dlist_p|
 will treat a rope who's link pair is a plain |FORM_PAIR| pair as a
 doubly-linked list. This arrangement is unintentional and not used.
 
-@d dryad_datum(O)         (lcar(O))
-@d dryad_link(O)          (lcdr(O))
-@d dryad_sin(O)           (lcadr(O))
-@d dryad_dex(O)           (lcddr(O))
+@d dryad_datum(O)         (lsin(O))
+@d dryad_link(O)          (ldex(O))
+@d dryad_sin(O)           (lsin(dryad_link(O)))
+@d dryad_dex(O)           (ldex(dryad_link(O)))
 @d dryad_sin_p(O)         (!null_p(dryad_sin(O)))
 @d dryad_dex_p(O)         (!null_p(dryad_dex(O)))
-@d dryad_set_sin_m(O,V)   (lcar_set_m(lcdr(O), (V)))
-@d dryad_set_dex_m(O,V)   (lcdr_set_m(lcdr(O), (V)))
+@d dryad_set_sin_m(O,V)   (lsin_set_m(ldex(O), (V)))
+@d dryad_set_dex_m(O,V)   (ldex_set_m(ldex(O), (V)))
 @#
 @d dryadic_p(O)           (!special_p(O) &&
         (form(O) & FORM_ROPE) == FORM_ROPE)
@@ -2979,7 +3152,7 @@ dlist_set_m (cell o,
              cell datum)
 {
         assert(dlist_p(o));
-        lcar_set_m(o, datum);
+        lsin_set_m(o, datum);
 }
 
 @ @d dlist_set(DIRECTION, YIN, YANG)@/
@@ -2995,8 +3168,8 @@ dlist_set_ ##DIRECTION## _m (cell hither,
 @c
 @:dlist\_set\_next\_m@>
 @:dlist\_set\_prev\_m@>
-dlist_set(next, lcdr, lcar)@;
-dlist_set(prev, lcar, lcdr)@;
+dlist_set(next, ldex, lsin)@;
+dlist_set(prev, lsin, ldex)@;
 
 @ @d dlist_prepend_m(O,L) dlist_append_m(dlist_prev(O), (L))
 @c
@@ -3340,8 +3513,8 @@ which is split between two rope nodes.
 @d UCPLEN(V)           (((V) & 0x00e00000) >> 21)
 @d UCPFAIL(V)          (((V) & 0xff000000) >> 24) /* Only bottom 3 used. */
 @#
-@d rune_raw(O)         ((CELL_BITS >= 32) ? (int32_t) lcar(O) :@|
-        ((((int32_t) lcar(O) & 0xffff) << 16) | ((int32_t) lcdr(O) & 0xffff)))
+@d rune_raw(O)         ((CELL_BITS >= 32) ? (int32_t) lsin(O) :@|
+        ((((int32_t) lsin(O) & 0xffff) << 16) | ((int32_t) ldex(O) & 0xffff)))
 @d rune_failure_p(O)   (!!UCPFAIL(rune_raw(O)))
 @d rune_failure(O)     (UCPFAIL(rune_raw(O)))
 @d rune_parsed(O)      (UCPLEN(rune_raw(O)))
@@ -3792,9 +3965,9 @@ fail:
 @* Environments. An environment is a hash table with a link to
 another hash table which it descended from.
 
-@ @d env_layer(O)           (lcdr(O))
-@d env_previous(O)          (lcar(O))
-@d env_replace_layer_m(O,E) (lcdr_set_m((O), (E)))
+@ @d env_layer(O)           (ldex(O))
+@d env_previous(O)          (lsin(O))
+@d env_replace_layer_m(O,E) (ldex_set_m((O), (E)))
 @d env_root_p(O)            (environment_p(O) && null_p(env_previous(O)))
 @<Fun...@>=
 cell env_search (cell, cell, sigjmp_buf *);
@@ -3872,7 +4045,7 @@ env_search (cell        o,
         for (; !null_p(o); o = env_previous(o)) {
                 r = hashtable_search(env_layer(o), label, failure);
                 if (defined_p(r))
-                        return lcdr(r); /* May be |UNDEFINED|! */
+                        return ldex(r); /* May be |UNDEFINED|! */
         }
         return UNDEFINED;
 }
@@ -4100,8 +4273,8 @@ typedef enum {
 cell pend (Vpending, cell, sigjmp_buf *);
 
 @
-@d pending_datum(O) (lcdr(O))
-@d pending_stage(O) ((Vpending) lcar(O))
+@d pending_datum(O) (ldex(O))
+@d pending_stage(O) ((Vpending) lsin(O))
 @c
 cell
 pend (Vpending    stage,
@@ -4120,8 +4293,8 @@ pend (Vpending    stage,
         CONTINUATION_DELIMITER)
 @d continuation_resumption_p(O) (continuation_p(O) && cont_state(O) ==
         CONTINUATION_RESUMPTION)
-@d cont_pointer(O)              (lcdr(O))
-@d cont_state(O)                ((Vcontinuation) lcar(O))
+@d cont_pointer(O)              (ldex(O))
+@d cont_state(O)                ((Vcontinuation) lsin(O))
 @<Type def...@>=
 typedef enum {
         CONTINUATION_DELIMITER = 0,
@@ -4162,9 +4335,9 @@ run-time environment they were created in with the expression to
 evaluate and its arguments ({\it formals\/}). Applicative and
 operative closures are identified by their tag.
 
-@d closure_formals(O)     (lcar(O))
-@d closure_environment(O) (lcadr(O))
-@d closure_body(O)        (lcaddr(O))
+@d closure_formals(O)     (lsin(O))
+@d closure_environment(O) (lsin(ldex(O)))
+@d closure_body(O)        (lsin(ldex(ldex(O))))
 @<Fun...@>=
 cell closure_new (bool, cell, cell, cell, sigjmp_buf *);
 
@@ -4215,8 +4388,8 @@ an integer offset into an array of |Oprimitive| objects, |Iprimitive|.
 
 @d PRIMITIVE_PREFIX           4
 @#
-@d primitive(O)               (fix_value(lcar(O)))
-@d primitive_label(O)         (lcdr(O))
+@d primitive(O)               (fix_value(lsin(O)))
+@d primitive_label(O)         (ldex(O))
 @d primitive_base(O)          (&Iprimitive[primitive(O)])
 @d primitive_applicative_p(O) (primitive_p(O) &&
         (primitive_base(O)->schema[0] >= '0') &&
@@ -5359,7 +5532,7 @@ is ultimately invalid.
 @d parse_fail(S,E,L,F) do {
         cell _x = cons(fix((E)), (L), (F));
         SS((S), cons(_x, SO(S), (F)));
-        (L) = lcdr(lcar(SO(S)));
+        (L) = ldex(lsin(SO(S)));
 } while (0)
 @c
 cell
@@ -5427,8 +5600,8 @@ if (!null_p(SO(Swork))) {
         SS(Stmp, SO(Sbuild));
         SS(Sbuild, NIL);
         while (!null_p(SO(Swork))) {
-                SS(Sbuild, cons(lcar(SO(Swork)), SO(Sbuild), &cleanup));
-                SS(Swork, lcdr(SO(Swork)));
+                SS(Sbuild, cons(lsin(SO(Swork)), SO(Sbuild), &cleanup));
+                SS(Swork, ldex(SO(Swork)));
         }
         x = prove_invalid(SO(Sbuild), SO(Sstart), SO(Sllex), &cleanup);
         parse_fail(Sfail, LERR_SYNTAX, x, &cleanup);
@@ -5530,12 +5703,12 @@ if (null_p(SO(Swork))) {
         SS(Stmp, SO(Sstart));
         break;
 }
-x = lcar(SO(Swork)); /* The next working item to copy or process. */
+x = lsin(SO(Swork)); /* The next working item to copy or process. */
 if (!provenance_p(x)) {
         @<Finish building the list or fix its tail@>
 }
-SS(Sbuild, cons(lcar(SO(Swork)), SO(Sbuild), &cleanup));
-SS(Swork, lcdr(SO(Swork)));
+SS(Sbuild, cons(lsin(SO(Swork)), SO(Sbuild), &cleanup));
+SS(Swork, ldex(SO(Swork)));
 c++;
 
 @ |LEXICAT_DOT| can only appear under constrained circumstances (or
@@ -5558,12 +5731,12 @@ if (lexeme(x)->cat == LEXICAT_DOT) {
                 if (null_p(SO(Sbuild)))
                         parse_fail(Sfail, pfail = LERR_EMPTY_TAIL,
                                 llex, &cleanup);
-                else if (!null_p(lcdr(SO(Sbuild))))
+                else if (!null_p(ldex(SO(Sbuild))))
                         parse_fail(Sfail, pfail = LERR_HEAVY_TAIL,
                                 llex, &cleanup);
                 else {
-                        SS(Sbuild, lcar(SO(Sbuild)));
-                        SS(Swork, lcdr(SO(Swork)));
+                        SS(Sbuild, lsin(SO(Sbuild)));
+                        SS(Swork, ldex(SO(Swork)));
                         continue;
                 }
         }
@@ -5574,8 +5747,8 @@ if (lexeme(x)->cat == LEXICAT_DOT) {
         else {
                 @<Complete parsing a list-like syntax@>
         }
-        SS(Stmp, lcar(SO(Swork)));
-        SS(Swork, lcdr(SO(Swork)));
+        SS(Stmp, lsin(SO(Swork)));
+        SS(Swork, ldex(SO(Swork)));
         break;
 }
 
@@ -5601,8 +5774,8 @@ if (a != b)
 else if (a == ']') {
         x = array_new_imp(c, UNDEFINED, FORM_ARRAY, &cleanup);
         y = SO(Sbuild);
-        for (i = 0; i < c; i++, y = lcdr(y))
-                array_set_m(x, i, lcar(y));
+        for (i = 0; i < c; i++, y = ldex(y))
+                array_set_m(x, i, lsin(y));
         SS(Sbuild, x);
 } else if (a == '}')
         parse_fail(Sfail, pfail = LERR_UNIMPLEMENTED, llex, &cleanup);
@@ -5623,11 +5796,11 @@ wrapped in a \.{quote} operator.
 
 @<Parse quoted expression(s)@>=
 if (!null_p(SO(Swork)))
-        while (provenance_p(lcar(SO(Swork)))) {
-                x = lcar(SO(Swork)); /* To be quoted? */
-                if (null_p(lcdr(SO(Swork))))
+        while (provenance_p(lsin(SO(Swork)))) {
+                x = lsin(SO(Swork)); /* To be quoted? */
+                if (null_p(ldex(SO(Swork))))
                         break; /* Nope --- nothing prior. */
-                y = lcadr(SO(Swork)); /* Previously parsed... */
+                y = lsin(ldex(SO(Swork))); /* Previously parsed... */
                 if (provenance_p(y))
                         break; /* Nope --- not quoted. */
                 assert(dlist_p(y) && lexeme_p(dlist_datum(y)));
@@ -5635,11 +5808,11 @@ if (!null_p(SO(Swork)))
                 if (lexeme(z)->cat != LEXICAT_QUOTE)
                         break; /* Nope --- something else. */
                 z = cons(Iprimitive[PRIMITIVE_QUOTE].box, x, &cleanup);
-                x = lcar(SO(Swork));@+ y = lcadr(SO(Swork)); /* Maybe lost. */
+                x = lsin(SO(Swork));@+ y = lsin(ldex(SO(Swork))); /* Maybe lost. */
                 assert(provenance_p(x));
                 assert(dlist_p(y) && lexeme_p(dlist_datum(y)));
                 z = prove_new(z, y, prove_end(x), &cleanup);
-                SS(Swork, lcddr(SO(Swork))); /* Pop expression \AM\ quote. */
+                SS(Swork, ldex(ldex(SO(Swork)))); /* Pop expression \AM\ quote. */
                 SS(Swork, cons(z, SO(Swork), &cleanup));
         }
 
@@ -5742,7 +5915,7 @@ if (cat == LEXICAT_INVALID) { /* Source ended without the closing delimiter. */
         z = dlist_next(y);
         assert(lexeme(dlist_datum(y))->cat == LEXICAT_DELIMITER);
         if (!lexeme_terminator_p(dlist_datum(z))) {
-                z = prove_invalid(lex, lcar(SO(Swork)), SO(Stmp), &cleanup);
+                z = prove_invalid(lex, lsin(SO(Swork)), SO(Stmp), &cleanup);
                 parse_fail(Sfail, LERR_AMBIGUOUS, z, &cleanup);
                 lex = NIL;
         }
@@ -5989,7 +6162,7 @@ PRIMITIVE_VOV@&,
 
 @ @<Primitive imp...@>=
 case PRIMITIVE_QUOTE:
-        ACC = lcar(ARGS);
+        ACC = lsin(ARGS);
         break;
 
 @ @<Type def...@>=
@@ -6187,7 +6360,7 @@ Return: /* Check |CLINK| to see if there is more work after complete
         }
         if (null_p(CLINK))
                 return; /* |Accumulator| (|ACC|) has the result. */
-        switch(pending_stage(lcar(CLINK))) {
+        switch(pending_stage(lsin(CLINK))) {
         case PENDING_COMBINE_BUILD:    goto Combine_Build;
         case PENDING_COMBINE_DISPATCH: goto Combine_Dispatch;
         case PENDING_COMBINE_FINISH:   goto Combine_Finish;
@@ -6221,10 +6394,10 @@ Combine_Start: /* Save any |ARGS| in progress and |ENV| on |CLINK| to
                         resume later. */
         CLINK = cons(ARGS, CLINK, failure);
         CLINK = cons(ENV, CLINK, failure);
-        ARGS = lcdr(EXPR); /* Unevaluated arguments */
+        ARGS = ldex(EXPR); /* Unevaluated arguments */
         ARGS = pend(PENDING_COMBINE_DISPATCH, ARGS, failure);
         CLINK = cons(ARGS, CLINK, failure);
-        EXPR = lcar(EXPR); /* Unevaluated combiner */
+        EXPR = lsin(EXPR); /* Unevaluated combiner */
         if (Trace) {
                 lprint("(");
                 serial(EXPR, SERIAL_DETAIL, 1, NIL, NULL, failure);
@@ -6319,10 +6492,10 @@ min = schema[0] - '0';
 max = (schema[1] == '.') ? -1 : schema[1] - '0';
 while (pair_p(ARGS)) {
         count++;
-        ACC = lcar(ARGS);
+        ACC = lsin(ARGS);
         ACC = cons(LTRUE, ACC, failure);
         EXPR = cons(ACC, EXPR, failure);
-        ARGS = lcdr(ARGS);
+        ARGS = ldex(ARGS);
 }
 if (!null_p(ARGS))
         siglongjmp(*failure, LERR_IMPROPER);
@@ -6353,18 +6526,18 @@ while (count++ < PRIMITIVE_PREFIX) {
                 else if (!pair_p(ARGS))
                         siglongjmp(*failure, LERR_IMPROPER);
                 else {
-                        ACC = lcar(ARGS);
+                        ACC = lsin(ARGS);
                         ACC = cons(predicate(*schema == 'E'), ACC, failure);
                         EXPR = cons(ACC, EXPR, failure);
-                        ARGS = lcdr(ARGS);
+                        ARGS = ldex(ARGS);
                 }
         } else if ((*schema == 'e') || (*schema == '?')) { /* Optional (\AM\
                                                                 \.evaluate). */
                 if (pair_p(ARGS)) {
-                        ACC = lcar(ARGS);
+                        ACC = lsin(ARGS);
                         ACC = cons(predicate(*schema == 'e'), ACC, failure);
                         EXPR = cons(ACC, EXPR, failure);
-                        ARGS = lcdr(ARGS);
+                        ARGS = ldex(ARGS);
                 } else if (!null_p(ARGS))
                         siglongjmp(*failure, LERR_IMPROPER);
         } else if (*schema == ':') { /* Collect remaining arguments unevaluated. */
@@ -6411,11 +6584,11 @@ Combine_Applicative: /* Store the closure and evaluate its arguments. */
                 if (null_p(tmp))
                         count = 1;
                 else if (pair_p(tmp))
-                        tmp = lcdr(tmp); /* lost by cons */
-                ACC = lcar(ARGS);
+                        tmp = ldex(tmp); /* lost by cons */
+                ACC = lsin(ARGS);
                 ACC = cons(LTRUE, ACC, failure);
                 EXPR = cons(ACC, EXPR, failure);
-                ARGS = lcdr(venire(ARGS));
+                ARGS = ldex(venire(ARGS));
         }
         if (!null_p(ARGS))
                 siglongjmp(*failure, LERR_IMPROPER);
@@ -6450,8 +6623,8 @@ TODO: Move these macros?
 
 @.TODO@>
 @d next_argument(VAR, ARGS) do {
-        (VAR) = lcar(ARGS);
-        (ARGS) = lcdr(ARGS);
+        (VAR) = lsin(ARGS);
+        (ARGS) = ldex(ARGS);
 } while (0)
 @d validated_argument(V,A,S,N,P,F) do {
         next_argument((V), (A));
@@ -6464,8 +6637,8 @@ Combine_Pair: /* Prepare to append an argument, possibly after evaluation. */
         next_argument(ACC, EXPR);
         EXPR = pend(PENDING_COMBINE_BUILD, EXPR, failure);
         CLINK = cons(EXPR, CLINK, failure);
-        EXPR = lcdr(ACC); /* Next argument. */
-        if (true_p(lcar(ACC))) /* Needs evaluation? */
+        EXPR = ldex(ACC); /* Next argument. */
+        if (true_p(lsin(ACC))) /* Needs evaluation? */
                 goto Begin;
         else
                 goto Finish;
@@ -6540,25 +6713,25 @@ Combine_Operate:@;
                 }
         else if (applicative_p(ACC)) {
                 EXPR = ACC;                      /* Closure */
-                ACC = lcar(EXPR);                /* Formals */
-                EXPR = lcdr(EXPR);
-                ENV = lcar(EXPR);                /* Environment */
-                EXPR = lcdr(EXPR);
+                ACC = lsin(EXPR);                /* Formals */
+                EXPR = ldex(EXPR);
+                ENV = lsin(EXPR);                /* Environment */
+                EXPR = ldex(EXPR);
                 ENV = env_extend(ENV, failure);
-                EXPR = lcar(EXPR);               /* Body */
+                EXPR = lsin(EXPR);               /* Body */
                 validate_arguments(failure);
                 goto Begin;
         }
         else if (operative_p(ACC)) {
                 EXPR = ACC;                      /* Closure */
-                ACC = lcar(EXPR);
+                ACC = lsin(EXPR);
                 ARGS = cons(ACC, ARGS, failure); /* \.(Formals \.. Arguments\.) */
-                EXPR = lcdr(EXPR);
+                EXPR = ldex(EXPR);
                 ACC = ENV;
-                ENV = lcar(EXPR);                /* Environment */
-                EXPR = lcdr(EXPR);
+                ENV = lsin(EXPR);                /* Environment */
+                EXPR = ldex(EXPR);
                 ENV = env_extend(ENV, failure);
-                EXPR = lcar(EXPR);               /* Body */
+                EXPR = lsin(EXPR);               /* Body */
                 validate_operative(failure);     /* Sets in |ENV| as required. */
                 goto Begin;
         } else if (continuation_resumption_p(ACC)) {
@@ -6566,8 +6739,8 @@ Combine_Operate:@;
                 next_argument(ENV, ACC);
                 next_argument(ARGS, ACC);
                 while (!null_p(ACC)) {
-                        CLINK = cons(lcar(ACC), CLINK, failure);
-                        ACC = lcdr(ACC);
+                        CLINK = cons(lsin(ACC), CLINK, failure);
+                        ACC = ldex(ACC);
                 }
         } else
                 siglongjmp(*failure, LERR_INTERNAL); /* Unreachable. */
@@ -6592,10 +6765,10 @@ Combine_Finish: /* Restore the |ENV| and |ARGS| in place before
                         evaluating the combinator. */
         next_argument(EXPR, CLINK);
         EXPR = pending_datum(EXPR);
-        ENV = lcar(CLINK);
-        CLINK = lcdr(CLINK);
-        ARGS = lcar(CLINK);
-        CLINK = lcdr(CLINK);
+        ENV = lsin(CLINK);
+        CLINK = ldex(CLINK);
+        ARGS = lsin(CLINK);
+        CLINK = ldex(CLINK);
         goto Return;
 
 @ Parsed \Ls/ source code and the bodies of closures are evaluated
@@ -6630,14 +6803,14 @@ case PRIMITIVE_DO: /* (Operative) */
         while (!null_p(EXPR)) {
                 if (!pair_p(EXPR))
                         evaluate_incompatible(__LINE__, failure);
-                tmp = pend(PENDING_EVALUATE, venire(lcar(EXPR)), failure);
+                tmp = pend(PENDING_EVALUATE, venire(lsin(EXPR)), failure);
                 tmp = cons(tmp, NIL, failure);
-                lcdr_set_m(ACC, tmp);
+                ldex_set_m(ACC, tmp);
                 ACC = tmp;
-                EXPR = lcdr(EXPR);
+                EXPR = ldex(EXPR);
                 EXPR = venire(EXPR);
         }
-        lcdr_set_m(ACC, CLINK);
+        ldex_set_m(ACC, CLINK);
         CLINK = ARGS;
         break;
 
@@ -6703,10 +6876,9 @@ Each symbol should be unique but this is not validated (TODO).
 @.TODO@>
 @<Validate applicative (\.{lambda}) formals@>=
 while (pair_p(venire(ARGS))) {
-        arg = lcar(venire(ARGS));
-        ARGS = lcdr(venire(ARGS));
-        assert(provenance_p(arg));
-        arg = prove_datum(arg);
+        arg = lsin(venire(ARGS));
+        ARGS = ldex(venire(ARGS));
+        arg = venire(arg);
         if (!symbol_p(arg))
                 evaluate_incompatible(__LINE__, failure);
         ACC = cons(arg, ACC, failure);
@@ -6716,8 +6888,8 @@ if (symbol_p(venire(ARGS)))
 else if (!null_p(venire(ARGS)))
         evaluate_incompatible(__LINE__, failure);
 while (!null_p(ACC)) {
-        ARGS = cons(lcar(ACC), ARGS, failure);
-        ACC = lcdr(ACC);
+        ARGS = cons(lsin(ACC), ARGS, failure);
+        ACC = ldex(ACC);
 }
 
 @ The formals (or {\it informals\/}) argument to an operative
@@ -6750,16 +6922,16 @@ if (failure_p(reason = sigsetjmp(cleanup, 1)))
         unwind(failure, reason, false, 3);
 ARGS = venire(ARGS);
 while (pair_p(ARGS)) {
-        arg = lcar(ARGS);
+        arg = lsin(ARGS);
         arg = venire(arg);
         if (!pair_p(arg))
                 evaluate_incompatible(__LINE__, failure);
-        state = lcdr(arg);
-        arg = lcar(arg);
+        state = ldex(arg);
+        arg = lsin(arg);
         arg = venire(arg);
-        if (!symbol_p(arg) || !pair_p(state) || !null_p(lcdr(state)))
+        if (!symbol_p(arg) || !pair_p(state) || !null_p(ldex(state)))
                 evaluate_incompatible(__LINE__, failure);
-        state = lcar(state);
+        state = lsin(state);
         state = venire(state);
         if (state == Sym_VOV_ARGS || state == Sym_VOV_ARGUMENTS)@/
                 save_vov_informal(arg, Svargs);
@@ -6769,7 +6941,7 @@ while (pair_p(ARGS)) {
                 save_vov_informal(arg, Svcont);
         else
                 evaluate_incompatible(__LINE__, failure);
-        ARGS = lcdr(ARGS);
+        ARGS = ldex(ARGS);
 }
 if (!null_p(ARGS) ||
             (null_p(SO(Svargs)) && null_p(SO(Svenv)) && null_p(SO(Svcont))))
@@ -6804,11 +6976,11 @@ validate_arguments (sigjmp_buf *failure)
         SS(Sname, venire(ACC));
         SS(Sarg, ARGS);
         while (pair_p(SO(Sname))) {
-                name = lcar(SO(Sname));
-                SS(Sname, lcdr(SO(Sname)));
+                name = lsin(SO(Sname));
+                SS(Sname, ldex(SO(Sname)));
                 assert(!null_p(SO(Sarg)));
-                arg = lcar(SO(Sarg));
-                SS(Sarg, lcdr(SO(Sarg)));
+                arg = lsin(SO(Sarg));
+                SS(Sarg, ldex(SO(Sarg)));
                 env_define_m(ENV, name, arg, failure);
         }
         if (!null_p(SO(Sname))) {
@@ -6831,27 +7003,27 @@ validate_operative (sigjmp_buf *failure)
         Verror reason = LERR_NONE;
 
         assert(pair_p(ARGS));
-        stack_push(lcar(ARGS), failure);
+        stack_push(lsin(ARGS), failure);
         if (failure_p(reason = sigsetjmp(cleanup, 1)))
                 unwind(failure, reason, false, 1);
-        ARGS = lcdr(ARGS);
+        ARGS = ldex(ARGS);
 
         assert(pair_p(SO(Sinformal)));
-        if (symbol_p(lcar(SO(Sinformal))))
-                env_define_m(ENV, lcar(SO(Sinformal)), ARGS, failure);
-        SS(Sinformal, lcdr(SO(Sinformal)));
+        if (symbol_p(lsin(SO(Sinformal))))
+                env_define_m(ENV, lsin(SO(Sinformal)), ARGS, failure);
+        SS(Sinformal, ldex(SO(Sinformal)));
 
         assert(pair_p(SO(Sinformal)));
-        if (symbol_p(lcar(SO(Sinformal))))
-                env_define_m(ENV, lcar(SO(Sinformal)), ACC, failure);
-        SS(Sinformal, lcdr(SO(Sinformal)));
+        if (symbol_p(lsin(SO(Sinformal))))
+                env_define_m(ENV, lsin(SO(Sinformal)), ACC, failure);
+        SS(Sinformal, ldex(SO(Sinformal)));
 
         assert(pair_p(SO(Sinformal)));
-        if (symbol_p(lcar(SO(Sinformal)))) {
+        if (symbol_p(lsin(SO(Sinformal)))) {
                 ACC = continuation_delimit(failure);
-                env_define_m(ENV, lcar(SO(Sinformal)), ACC, failure);
+                env_define_m(ENV, lsin(SO(Sinformal)), ACC, failure);
         }
-        assert(null_p(lcdr(SO(Sinformal))));
+        assert(null_p(ldex(SO(Sinformal))));
 
         stack_clear(1);
 }
@@ -6915,8 +7087,8 @@ case PRIMITIVE_IF: /* (Operative) */
         next_argument(EXPR, ARGS); /* Consequent */
         EXPR = cons(EXPR, VOID, failure);
         if (!null_p(ARGS))
-                lcdr_set_m(EXPR, lcar(ARGS)); /* Alternate */
-        EXPR = false_p(venire(ACC)) ? lcdr(EXPR) : lcar(EXPR);
+                ldex_set_m(EXPR, lsin(ARGS)); /* Alternate */
+        EXPR = false_p(venire(ACC)) ? ldex(EXPR) : lsin(EXPR);
         goto Begin;
 
 @* Mutation Primitives \.{define!} \AM\ \.{set!}.
@@ -6981,16 +7153,16 @@ case PRIMITIVE_SET_M:
         next_argument(EXPR, ARGS);                    /* Label or named Formals */
         EXPR  = venire(EXPR);
         if (pair_p(EXPR)) { /* Named applicative closure: \.(Label \.. Formals\.) */
-                ARGS = cons(lcdr(EXPR), lcar(ARGS), failure); /* Body */
+                ARGS = cons(ldex(EXPR), lsin(ARGS), failure); /* Body */
                 ARGS = cons(Iprimitive[PRIMITIVE_LAMBDA].box, ARGS,
                         failure);
-                EXPR = lcar(EXPR);                    /* Real binding label. */
+                EXPR = lsin(EXPR);                    /* Real binding label. */
                 EXPR = venire(EXPR);
         } else if (symbol_p(EXPR)) {
-                ARGS  = lcar(ARGS);
-                if (!pair_p(ARGS) || !null_p(lcdr(ARGS)))
+                ARGS  = lsin(ARGS);
+                if (!pair_p(ARGS) || !null_p(ldex(ARGS)))
                         evaluate_incompatible(__LINE__, failure);
-                ARGS = lcar(ARGS);                   /* Value (after evaluation). */
+                ARGS = lsin(ARGS);                   /* Value (after evaluation). */
         } else
                 evaluate_incompatible(__LINE__, failure);
         EXPR = cons(predicate(flag), EXPR, failure); /* Label */
@@ -7061,10 +7233,10 @@ case PRIMITIVE_ESCAPE:
         ACC = NIL;
         while (!null_p(ARGS)) { /* Copy |CLINK| from |cont_head(ACC)| to
                                         current head \AM\ return */
-                assert(pending_p(lcar(ARGS)));
+                assert(pending_p(lsin(ARGS)));
                 if (ARGS == cont_pointer(EXPR))
                         goto Found_Delimiter;
-                switch (pending_stage(lcar(ARGS))) {
+                switch (pending_stage(lsin(ARGS))) {
                 case PENDING_COMBINE_BUILD: /* Skip argument plan */
                 case PENDING_EVALUATE: /* Skip evaluation */
                 case PENDING_MUTATE: /* Skip mutation */
@@ -7078,8 +7250,8 @@ case PRIMITIVE_ESCAPE:
                         siglongjmp(*failure, LERR_INTERNAL);
                 }
                 for (; count; count--) {
-                        ACC = cons(lcar(ARGS), ACC, failure);
-                        ARGS = lcdr(ARGS);
+                        ACC = cons(lsin(ARGS), ACC, failure);
+                        ARGS = ldex(ARGS);
                 }
         }
         if (null_p(cont_pointer(EXPR)))
@@ -7167,12 +7339,12 @@ case PRIMITIVE_CONS:
 
 case PRIMITIVE_CAR:
         validated_argument(ACC, ARGS, true, false, pair_p, failure);
-        ACC = lcar(venire(ACC));
+        ACC = lsin(venire(ACC));
         break;
 
 case PRIMITIVE_CDR:
         validated_argument(ACC, ARGS, true, false, pair_p, failure);
-        ACC = lcdr(venire(ACC));
+        ACC = ldex(venire(ACC));
         break;
 
 @* Object primitives.
@@ -7216,10 +7388,10 @@ case PRIMITIVE_NEW_HASHTABLE:
 {
         cell (*accessor)(cell) = NULL;
 case PRIMITIVE_HASHTABLE_KEYS:
-        accessor = lcar;@+
+        accessor = lsin;@+
         goto Hash_Table_Scan;
 case PRIMITIVE_HASHTABLE_VALUES:
-        accessor = lcdr;@+
+        accessor = ldex;@+
         goto Hash_Table_Scan;
 case PRIMITIVE_HASHTABLE_KEYPAIRS:
         accessor = NULL;
@@ -7241,7 +7413,7 @@ case PRIMITIVE_HASHTABLE_FETCH:
         else if (undefined_p(ACC))
                 siglongjmp(*failure, LERR_MISSING);
         else
-                ACC = lcdr(ACC);
+                ACC = ldex(ACC);
         break;
 
 @ @<Primitive imp...@>=
@@ -7256,8 +7428,8 @@ case PRIMITIVE_HASHTABLE_STORE_M:
 Hash_Table_Mutate:
         validated_argument(ACC, ARGS, false, false, hashtable_p, failure);
         validated_argument(EXPR, ARGS, true, false, symbol_p, failure);
-        hashtable_set_imp(ACC, venire(EXPR), lcar(ARGS), flag, failure);
-        ACC = lcar(ARGS);
+        hashtable_set_imp(ACC, venire(EXPR), lsin(ARGS), flag, failure);
+        ACC = lsin(ARGS);
         break;
 
 @ @<Primitive imp...@>=
@@ -7634,12 +7806,12 @@ if (pair_p(o)) {
         else if (maxdepth) {
                 if (detail)
                         serial_append(buffer, "(", 1, failure);
-                serial_imp(lcar(o), detail, maxdepth - 1, true, buffer, cycles,
+                serial_imp(lsin(o), detail, maxdepth - 1, true, buffer, cycles,
                         failure);
-                for (o = lcdr(o); pair_p(o); o = lcdr(o)) {
+                for (o = ldex(o); pair_p(o); o = ldex(o)) {
                         if (detail)
                                 serial_append(buffer, " ", 1, failure);
-                        serial_imp(lcar(o), detail, maxdepth - 1, true, buffer,
+                        serial_imp(lsin(o), detail, maxdepth - 1, true, buffer,
                                 cycles, failure);
                 }
                 if (!null_p(o)) {
@@ -8052,7 +8224,7 @@ lapi_car (cell        o,
 {
         if (!pair_p(o))
                 siglongjmp(*failure, LERR_INCOMPATIBLE);
-        return lcar(o);
+        return lsin(o);
 }
 
 cell
@@ -8061,7 +8233,7 @@ lapi_cdr (cell        o,
 {
         if (!pair_p(o))
                 siglongjmp(*failure, LERR_INCOMPATIBLE);
-        return lcdr(o);
+        return ldex(o);
 }
 
 void
@@ -8071,7 +8243,7 @@ lapi_set_car_m (cell        o,
 {
         if (!pair_p(o) || !defined_p(value))
                 siglongjmp(*failure, LERR_INCOMPATIBLE);
-        lcar_set_m(o, value);
+        lsin_set_m(o, value);
 }
 
 void
@@ -8081,7 +8253,7 @@ lapi_set_cdr_m (cell        o,
 {
         if (!pair_p(o) || !defined_p(value))
                 siglongjmp(*failure, LERR_INCOMPATIBLE);
-        lcdr_set_m(o, value);
+        ldex_set_m(o, value);
 }
 
 @ @c

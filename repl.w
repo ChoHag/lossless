@@ -211,19 +211,19 @@ if (length > 0) {
                 evaluate_program(x, &cleanup);
                 User_Register = NIL;
                 pending = false;
-        } else if (pair_p(lcdr(x)) && fix_value(lcar(lcar(lcdr(x)))) == LERR_SYNTAX &&@|
-                    pair_p(lcdr(lcdr(x))) &&
-                    fix_value(lcar(lcar(lcdr(lcdr(x))))) == LERR_UNCLOSED_OPEN &&
-                    null_p(lcdr(lcdr(lcdr(x))))) {
+        } else if (pair_p(ldex(x)) && fix_value(lsin(lsin(ldex(x)))) == LERR_SYNTAX &&@|
+                    pair_p(ldex(ldex(x))) &&
+                    fix_value(lsin(lsin(ldex(ldex(x))))) == LERR_UNCLOSED_OPEN &&
+                    null_p(ldex(ldex(ldex(x))))) {
                 pending = true;
         } else {
-                SS(0, x = lcdr(x));
+                SS(0, x = ldex(x));
                 while (pair_p(x)) {
-                        printf("  %d %s == ", fix_value(lcar(lcar(x))),
-                                Ierror[fix_value(lcar(lcar(x)))].message);
-                        serial(lcar(x), SERIAL_DETAIL, 4, NIL, NULL, &cleanup);
+                        printf("  %d %s == ", fix_value(lsin(lsin(x))),
+                                Ierror[fix_value(lsin(lsin(x)))].message);
+                        serial(lsin(x), SERIAL_DETAIL, 4, NIL, NULL, &cleanup);
                         printf("\n");
-                        SS(0, x = lcdr(x));
+                        SS(0, x = ldex(x));
                 }
                 printf("\n");
                 User_Register = NIL;
@@ -237,7 +237,7 @@ if (length > 0) {
 
 @ @c
 char *
-prompt (EditLine *e @[Lunused@]) {
+prompt (EditLine *e) {
         return "OK ";
 }
 
