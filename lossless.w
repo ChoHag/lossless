@@ -2726,8 +2726,8 @@ Symbol_Table = hashtable_new(0, failure);
 int symbol_table_match (cell, void *, sigjmp_buf *);
 long symbol_table_search (Vhash, Osymbol_compare, sigjmp_buf *);
 Vhash symbol_table_rehash (cell s, sigjmp_buf *);
-cell symbol_new_buffer (char *, long, sigjmp_buf *);
-cell symbol_new_imp (Vhash, char  *, long, sigjmp_buf *);
+cell symbol_new_buffer (char *, long, bool *, sigjmp_buf *);
+cell symbol_new_imp (Vhash, char  *, long, bool *, sigjmp_buf *);
 
 @ @d symint_base(O) ((Osymbol *) NULL)
 @d symint_buffer(O) ((char *) segment_address(O))
@@ -2799,12 +2799,13 @@ symbol_table_rehash (cell        s,
 }
 
 @ @d symbol_new_segment(O,F) (symbol_new_buffer(segment_address(O),
-        segment_length(O), (F)))
-@d symbol_new_const(O)       (symbol_new_buffer((O), -1, NULL))
+        segment_length(O), NULL, (F)))
+@d symbol_new_const(O)       (symbol_new_buffer((O), -1, NULL, NULL))
 @c
 cell
 symbol_new_buffer (char       *buf,
                    long        length,
+                   bool       *fresh,
                    sigjmp_buf *failure)
 {
         Vhash hash;
@@ -2816,7 +2817,7 @@ symbol_new_buffer (char       *buf,
                 hash = hash_buffer(buf, length, failure);
         if (length > SYMBOL_MAX)
                 siglongjmp(*failure, LERR_LIMIT);
-        return symbol_new_imp(hash, buf, length, failure);
+        return symbol_new_imp(hash, buf, length, fresh, failure);
 }
 
 @ @c
@@ -2824,13 +2825,18 @@ cell
 symbol_new_imp (Vhash       hash,
                 char       *buf,
                 long        length,
+                bool       *fresh,
                 sigjmp_buf *failure)
 {
         cell new, r = NIL;
         int i, idx;
+        bool dontcare;
         Osymbol_compare scmp = { buf, length };
 
         assert(length >= 0);
+        if (fresh == NULL)
+                fresh = &dontcare;
+        *fresh = false;
 search:
         idx = symbol_table_search(hash, scmp, failure);
         if (idx == FAIL || (null_p(hashtable_ref(Symbol_Table, idx)) &&
@@ -2842,6 +2848,7 @@ search:
         if (!null_p(hashtable_ref(Symbol_Table, idx)))
                 return hashtable_ref(Symbol_Table, idx);
 @#
+        *fresh = true;
         if (length <= INTERN_BYTES)
                 r = segment_new_imp(Theap, 0, length, 0, 0,
                         FORM_SYMBOL_INTERN, failure);
@@ -2855,6 +2862,98 @@ search:
         hashtable_save_m(Symbol_Table, idx, r, false);
         return r;
 }
+
+@ Many algorithms need a symbol but don't care what it is, provided
+that it's never been used before or will be again. This algorithm
+creates a new symbol by repeatedly appending an incrementing number
+to a given prefix and then checking that the symbol doesn't already
+exist before reifying and returning it.
+
+In general the next symbol will be available so the case when it
+is not inefficiently starts all over again.
+
+@.TODO@>
+@d buffer_prepend(BUF,LEN,BYTE) do {
+        if ((LEN) < 0) {
+                SS((BUF), segment_new(0, segment_length(SO(BUF)) +
+                        INTERN_BYTES, 0, 0, failure));
+                goto again;
+        }
+        segment_address(SO(BUF))[(LEN)] = (BYTE);
+        (LEN)--;
+} while (0)
+@c
+cell
+symbol_new_unique (cell        prefix,
+                   sigjmp_buf *failure)
+{
+        static int Sprefix = 1, Sbuf = 0;
+        static long next = 0;
+        static char hex[] = "0123456789abcdef";
+        char *p;
+        int i, length;
+        long rem;
+        bool negative, fresh;
+        cell r;
+        sigjmp_buf cleanup;
+        Verror reason = LERR_NONE;
+
+        assert(null_p(prefix) || symbol_p(prefix));
+        stack_protect(2, prefix, NIL, failure);
+        if (failure_p(reason = sigsetjmp(cleanup, 1)))
+                unwind(failure, reason, false, 2);
+        SS(Sbuf, segment_new(0, INTERN_BYTES, 0, 0, failure));
+again:
+        if (Interrupt)
+                siglongjmp(cleanup, LERR_INTERRUPT);
+        @<Obtain the next unique symbol identifier@>@;
+        @<Transcribe the symbol identifier as ASCII@>@;
+        @<Prepend the unique symbol's prefix@>@;
+        p = segment_address(SO(Sbuf)) + i + 1; /* Back up a byte. */
+        i = segment_length(SO(Sbuf)) - i - 2; /* ... \AM\ don't copy |'\0'|. */
+        r = symbol_new_buffer(p, i, &fresh, &cleanup);
+        if (!fresh)
+                goto again;
+        stack_clear(2);
+        return r;
+}
+
+@ @<Obtain the next unique symbol identifier@>=
+rem = next++;
+if (next == LONG_MAX)
+        next = LONG_MIN + 1;
+negative = rem < 0;
+if (negative)
+        rem = -rem;
+
+@ @<Transcribe the symbol identifier as ASCII@>=
+i = segment_length(SO(Sbuf)) - 1;
+buffer_prepend(Sbuf, i, '\0');
+if (rem == 0)
+        buffer_prepend(Sbuf, i, '0');
+else
+        while (rem) {
+                buffer_prepend(Sbuf, i, hex[(rem & 0xf)]);
+                rem /= 0x10; /* Or |rem >>= 4|. */
+        }
+if (negative)
+        buffer_prepend(Sbuf, i, '-');
+
+@ It's not anticipated that the prefix will be long enough to make
+a more efficient algorithm (ie. check how much space remains and
+copy en masse) worthwhile over re-using |buffer_prepend|.
+
+@d SYMBOL_PREFIX "g."
+@<Prepend the unique symbol's prefix@>=
+if (null_p(SO(Sprefix))) {
+        p = SYMBOL_PREFIX;
+        length = sizeof (SYMBOL_PREFIX) - 1;
+} else {
+        p = symbol_buffer(SO(Sprefix));
+        length = symbol_length(SO(Sprefix));
+}
+while (length--)
+        buffer_prepend(Sbuf, i, p[length]);
 
 @* Trees \AM\ Double-Linked Lists.
 
@@ -5834,7 +5933,7 @@ case LEXICAT_SYMBOL:
                         lexeme(lex)->tboffset, &cleanup);
                 for (i = 0; i < a; i++)
                         buf[i] = rope_iterate_next_byte(x, &cleanup);
-                y = symbol_new_buffer(buf, a, &cleanup);
+                y = symbol_new_buffer(buf, a, NULL, &cleanup);
                 z = prove_new(y, SO(Sllex), SO(Sllex), &cleanup);
                 buf = NULL;
         }
@@ -6149,6 +6248,7 @@ PRIMITIVE_BREAK,@/
 PRIMITIVE_DO,@/
 PRIMITIVE_DUMP,@/
 PRIMITIVE_LAMBDA,@/
+PRIMITIVE_IS_P,@/
 PRIMITIVE_QUOTE,@/
 PRIMITIVE_VOV@&,
 
@@ -6157,10 +6257,19 @@ PRIMITIVE_VOV@&,
 [PRIMITIVE_DO]     = { ":___do",     NIL, },@/
 [PRIMITIVE_DUMP]   = { "11__dump",   NIL, },@/
 [PRIMITIVE_LAMBDA] = { "!:__lambda", NIL, },@/
+[PRIMITIVE_IS_P]   = { "22__is?",    NIL, },@/
 [PRIMITIVE_QUOTE]  = { ":___quote",  NIL, },@/
 [PRIMITIVE_VOV]    = { "!:__vov",    NIL, }@&,
 
 @ @<Primitive imp...@>=
+case PRIMITIVE_IS_P:
+        next_argument(ACC, ARGS);
+        next_argument(tmp, ARGS);
+        if (fix_p(ACC) || fix_p(tmp))
+                siglongjmp(*failure, LERR_UNIMPLEMENTED);
+        ACC = predicate(ACC == tmp);
+        tmp = NIL;
+        break;
 case PRIMITIVE_QUOTE:
         ACC = lsin(ARGS);
         break;
@@ -7275,6 +7384,7 @@ PRIMITIVE_CDR,@/
 PRIMITIVE_CONS,@/
 PRIMITIVE_EOF_P,@/
 PRIMITIVE_FALSE_P,@/
+PRIMITIVE_GENSYM,@/
 PRIMITIVE_NULL_P,@/
 PRIMITIVE_OPERATIVE_P,@/
 PRIMITIVE_PAIR_P,@/
@@ -7290,6 +7400,7 @@ PRIMITIVE_VOID_P@&,
 [PRIMITIVE_CONS]          = { "22__cons",         NIL, },@/
 [PRIMITIVE_EOF_P]         = { "11__eof?",         NIL, },@/
 [PRIMITIVE_FALSE_P]       = { "11__false?",       NIL, },@/
+[PRIMITIVE_GENSYM]        = { "01__gensym",       NIL, },@/
 [PRIMITIVE_NULL_P]        = { "11__null?",        NIL, },@/
 [PRIMITIVE_OPERATIVE_P]   = { "11__operative?",   NIL, },@/
 [PRIMITIVE_PAIR_P]        = { "11__pair?",        NIL, },@/
@@ -7345,6 +7456,17 @@ case PRIMITIVE_CAR:
 case PRIMITIVE_CDR:
         validated_argument(ACC, ARGS, true, false, pair_p, failure);
         ACC = ldex(venire(ACC));
+        break;
+
+@ The only primitive which deals with symbols is \.{gensym}.
+
+@<Primitive imp...@>=
+case PRIMITIVE_GENSYM:
+        if (null_p(ARGS))
+                ACC = NIL;
+        else
+                validated_argument(ACC, ARGS, true, false, symbol_p, failure);
+        ACC = symbol_new_unique(ACC, failure);
         break;
 
 @* Object primitives.

@@ -386,5 +386,145 @@
                 (signature/assert! ARGS list?)
                 (-or ARGS ENV))))
 
+(-: Derived conditionals :-)
 
-)
+(-: cond is an operator which transforms into a chain of if expressions
+
+It will transform an expression of the form:
+
+        (cond ((<clause1> <expression1> ---) (<clause2> <expression2> ---) ---))
+
+to
+
+        (if (<clause1>)
+            (do <expression1> ---)
+            (if (<clause2>)
+                (do <expression2> ---)
+                ---))
+
+With provision for a final test-less else clause and/or changing a
+condition of the form
+
+        (<clause> => <expression>)
+
+to
+
+        (let ((TEMP (<clause>)))
+            (if TEMP
+                (<expression> TEMP)
+                ---))
+
+The case operator performs a similar transformation with a specific
+type of clause explained below. :-)
+
+(let () (-: The cond form translates its arguments and evaluates the new form
+                in the caller's environment. :-)
+
+        (define! (root-environment) cond (vau TESTS ENV
+                (-: The interface presented to the user has little to do; the
+                        list is validated while it's being processed. :-)
+                (eval (-cond/transform-next TESTS) ENV)))
+
+        (-: -cond/transform-next is a recursive algorithm called for
+                each condition in turn. If there are no conditions left
+                then a default else clause is appended so that the entire
+                expression evaluates to void, otherwise the condition
+                is applied to the -cond/transform-condition. :-)
+
+        (define-here! (-cond/transform-next TESTS)
+                (if (null? TESTS)
+                        (-cond/transform-last () ())
+                        (apply -cond/transform-condition (cdr TESTS)
+                                (car TESTS))))
+
+        (-: If the condition's CLAUSE is the symbol `else' then
+                -cond/transform-last returns a form suitable for the
+                alternate clause of an `if' expression.
+
+            Alternatively if the ACTION looks like a list who's first
+                expression is the symbol `=>' then -cond/transform-apply
+                will transform the condition into the appropriate
+                let-test-and-apply form.
+
+            Otherwise an `if' form is constructed out of the CLAUSE and
+                ACTION and control recurses back into
+                -cond/transform-next to continue. :-)
+
+        (define-here! (-cond/transform-condition REST CLAUSE . ACTION)
+                (if (is? CLAUSE 'else)
+                        (-cond/transform-last REST ACTION)
+                        (if (and (pair? ACTION) (is? (car ACTION) '=>))
+                                (apply -cond/tranform-apply REST CLAUSE (cdr ACTION))
+                                (list if CLAUSE (cons do ACTION)
+                                        (-cond/transform-next REST)))))
+
+        (-: In order to pass a value to a function if and only if the value is
+                true requires a temporary variable to hold the value in order to
+                test it and so a new variable is defined when the apply clause is
+                constructed. With traditional lisp quasi-quoting this looks like
+                        `(,let ((,TEMP ,CLAUSE))
+                                (,if ,TEMP
+                                        (,ACTION ,TEMP)
+                                        ,(-cond/transform-next REST))) :-)
+
+        (define-here! (-cond/tranform-apply REST CLAUSE ACTION)
+                (let ((TEMP (gensym)))
+                        (list let (list (list TEMP CLAUSE))
+                                (list if TEMP
+                                        (list ACTION TEMP)
+                                        (-cond/transform-next REST)))))
+
+        (-: The last condition must indeed be the last and there is
+                nothing to test. :-)
+
+        (define-here! (-cond/transform-last REST ACTION)
+                (signature/assert! REST null?)
+                (cons do ACTION))
+
+        (-: case works similarly to cond except:
+                The first argument is a value to compare,
+                Each clause is a list of expressions to test against,
+                The else action can be a function to apply the value to. :-)
+
+        (define! (root-environment) case% (vau (MATCH VALUE . TESTS) ENV
+                (let ((TEMP (gensym)))
+                        (define-here! CONDITIONS
+                                (map    (lambda (T)
+                                                (apply -case/each MATCH TEMP T))
+                                        TESTS))
+                        (eval (list let (list (list TEMP VALUE))
+                                (cons cond CONDITIONS)) ENV))))
+
+        (define! (root-environment) case (vau (VALUE . TESTS) ENV
+                (eval (cons case% (cons is? (cons VALUE TESTS))) ENV)))
+
+        (-: Transform each clause from:
+                ((x y z) foo---) to ((or (is? T X) ---) foo---)
+                ((x y z) => foo) to ((or (is? T X) ---) (foo T))
+                (else => foo) to (else (foo T))
+                (else foo---) is left as-is.
+            The final application to cond will catch a misplaced else clause. :-)
+        (define-here! (-case/each MATCH TEMP CANDIDATES . ACTION)
+                (if (and (pair? ACTION) (is? (car ACTION) '=>))
+                        (if (is? CANDIDATES 'else)
+                                (apply -case/last TEMP (cdr ACTION))
+                                (list (-case/transform-clause MATCH TEMP CANDIDATES)
+                                        (list ACTION TEMP)))
+                        (cons (-case/transform-clause MATCH TEMP CANDIDATES)
+                                ACTION)))
+
+        (-: Transform M T (x y z) into (or (M T x) (M T y) (M T z)) :-)
+        (define-here! (-case/transform-clause MATCH TEMP CANDIDATES)
+                (define-here! (-case/transform-clause/imp DATUM)
+                        (list MATCH TEMP (cons quote DATUM)))
+                (if (is? CANDIDATES 'else)
+                        'else
+                        (apply list or
+                                (map -case/transform-clause/imp CANDIDATES))))
+
+        (define-here! (-case/last TEMP ACTION)
+                (list ACTION TEMP))
+
+        )
+
+(-: done :-))
