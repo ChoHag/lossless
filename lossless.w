@@ -6655,9 +6655,9 @@ while (count++ < PRIMITIVE_PREFIX) {
                 ARGS = NIL;
         } else if (*schema == '_') { /* No more arguments permitted. */
                 if (pair_p(ARGS))
-                        siglongjmp(*failure, LERR_IMPROPER);
-                else if (!null_p(ARGS))
                         evaluate_incompatible(__LINE__, failure);
+                else if (!null_p(ARGS))
+                        siglongjmp(*failure, LERR_IMPROPER);
                 break;
         }
         schema++;
@@ -6736,9 +6736,10 @@ TODO: Move these macros?
         (ARGS) = ldex(ARGS);
 } while (0)
 @d validated_argument(V,A,S,N,P,F) do {
+        cell _v;
         next_argument((V), (A));
-        if ((!(N) && (null_p((S) ? venire(V) : (V)))) ||
-                    !P((S) ? venire(V) : (V)))
+        _v = (S) ? venire(V) : (V);
+        if (!(((N) && null_p(_v)) || P(_v)))
                 evaluate_incompatible(__LINE__, (F));
 } while (0)
 @<Eval...@>=
@@ -7244,13 +7245,13 @@ case PRIMITIVE_ROOT_ENVIRONMENT:
         ACC = Root;
         break;
 case PRIMITIVE_DEFINED_P:@;
-        validated_argument(ACC, ARGS, false, false, environment_p, failure);
+        validated_argument(ACC, ARGS, true, false, environment_p, failure);
         validated_argument(tmp, ARGS, true, false, symbol_p, failure);
         ACC = env_search(ACC, tmp, failure);
         ACC = defined_p(ACC);
         break;
 case PRIMITIVE_EXTEND:
-        validated_argument(ACC, ARGS, false, false, environment_p, failure);
+        validated_argument(ACC, ARGS, true, false, environment_p, failure);
         ACC = env_extend(ACC, failure);
         break;
 
@@ -7258,7 +7259,7 @@ case PRIMITIVE_EXTEND:
 case PRIMITIVE_DEFINE_M:
 case PRIMITIVE_SET_M:
         flag = (primitive(ACC) == PRIMITIVE_DEFINE_M);
-        validated_argument(ACC, ARGS, false, false, environment_p, failure);
+        validated_argument(ACC, ARGS, true, false, environment_p, failure);
         next_argument(EXPR, ARGS);                    /* Label or named Formals */
         EXPR  = venire(EXPR);
         if (pair_p(EXPR)) { /* Named applicative closure: \.(Label \.. Formals\.) */
@@ -7285,7 +7286,7 @@ case PRIMITIVE_SET_M:
 case PRIMITIVE_CLEAR_M:
 case PRIMITIVE_UNSET_M:
         flag = (primitive(ACC) == PRIMITIVE_CLEAR_M);
-        validated_argument(ACC, ARGS, false, false, environment_p, failure);
+        validated_argument(ACC, ARGS, true, false, environment_p, failure);
         validated_argument(EXPR, ARGS, true, false, symbol_p, failure);
         EXPR = cons(UNDEFINED, EXPR, failure);
         EXPR = cons(ACC, EXPR, failure);
@@ -7336,7 +7337,7 @@ case PRIMITIVE_CONTINUATION_DELIMITER_P:
 case PRIMITIVE_CONTINUATION_RESUMPTION_P:
         primitive_predicate(continuation_resumption_p);
 case PRIMITIVE_ESCAPE:
-        validated_argument(EXPR, ARGS, false, false,
+        validated_argument(EXPR, ARGS, true, false,
                 continuation_delimiter_p, failure);
         ARGS = CLINK;
         ACC = NIL;
@@ -7518,7 +7519,7 @@ case PRIMITIVE_HASHTABLE_VALUES:
 case PRIMITIVE_HASHTABLE_KEYPAIRS:
         accessor = NULL;
 Hash_Table_Scan:
-        validated_argument(ACC, ARGS, false, false, hashtable_p, failure);
+        validated_argument(ACC, ARGS, true, false, hashtable_p, failure);
         ACC = hashtable_pairs(ACC, accessor, failure);
         break;
 }
@@ -7527,7 +7528,7 @@ Hash_Table_Scan:
 case PRIMITIVE_HASHTABLE_EXISTS_P:@;
 case PRIMITIVE_HASHTABLE_FETCH:
         flag = (primitive(ACC) == PRIMITIVE_HASHTABLE_EXISTS_P);
-        validated_argument(ACC, ARGS, false, false, hashtable_p, failure);
+        validated_argument(ACC, ARGS, true, false, hashtable_p, failure);
         validated_argument(EXPR, ARGS, true, false, symbol_p, failure);
         ACC = hashtable_fetch(ACC, venire(EXPR), failure);
         if (flag)
@@ -7548,7 +7549,7 @@ case PRIMITIVE_HASHTABLE_REPLACE_M:
 case PRIMITIVE_HASHTABLE_STORE_M:
         flag = CAN;
 Hash_Table_Mutate:
-        validated_argument(ACC, ARGS, false, false, hashtable_p, failure);
+        validated_argument(ACC, ARGS, true, false, hashtable_p, failure);
         validated_argument(EXPR, ARGS, true, false, symbol_p, failure);
         hashtable_set_imp(ACC, venire(EXPR), lsin(ARGS), flag, failure);
         ACC = lsin(ARGS);
@@ -7558,7 +7559,7 @@ Hash_Table_Mutate:
 case PRIMITIVE_HASHTABLE_DELETE_M:@;
 case PRIMITIVE_HASHTABLE_FORGET_M:
         flag = (primitive(ACC) == PRIMITIVE_HASHTABLE_DELETE_M) ? MUST : CAN;
-        validated_argument(ACC, ARGS, false, false, hashtable_p, failure);
+        validated_argument(ACC, ARGS, true, false, hashtable_p, failure);
         validated_argument(EXPR, ARGS, true, false, symbol_p, failure);
         hashtable_delete_m(ACC, venire(EXPR), false, flag, failure);
         ACC = VOID;
