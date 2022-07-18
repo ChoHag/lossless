@@ -26,6 +26,9 @@
 \def\qc{$\rangle\!\rangle$}
 \def\qo{$\langle\!\langle$}
 \def\to{{$\rightarrow$}}
+\def\yitem#1{\yskip\item{#1}}
+\def\yhang{\yskip\hang}
+\def\dot{\vrule width4pt height5pt depth-1pt}
 
 % Ignore this bit as well which fixes CWEB's knowledge of C types.
 % Sometimes typedefs work and sometimes they don't. I'll worry about
@@ -66,11 +69,17 @@
 @s Orope_iter int
 @s Orune int
 @s Osegment int
-@s Otag int
 @s Osymbol int
 @s Osymbol_atom int
 @s Osymbol_compare int
+@s Otag int
+@s Otest_memory int
 @s Outfio int
+%
+@s llt_Thunk int
+@s llt_Initialise int
+@s llt_Fixture int
+@s llt_Fixture_Header int
 
 @** Preface. There are many programming languages and this one is
 mine. \Ls/ is a general purpose programming language with a lisp/scheme
@@ -81,11 +90,11 @@ this implentation of it are both referred to as \Ls/ interchangably
 where the sense is unambiguous (or irrelevant).
 
 The \Ls/ source code is online at
-\pdfURL{http://zeus.jtan.com/~chohag/lossless/}%
-{http://zeus.jtan.com/~chohag/lossless/} which includes the CWEB
-sources preprocessed into \CEE/ or in a git repository at
-\pdfURL{http://zeus.jtan.com/~chohag/lossless.git}%
-{http://zeus.jtan.com/~chohag/lossless.git}.
+\pdfURL{http://zeus.jtan.com/\char126chohag/lossless/}%
+{http://zeus.jtan.com/\string~chohag/lossless/} which includes the
+CWEB sources preprocessed into \CEE/ or in a git repository at
+\pdfURL{http://zeus.jtan.com/\char126chohag/lossless.git}%
+{http://zeus.jtan.com/\string~chohag/lossless.git}.
 
 @** Implementation. This document is broken down into small numbered
 sections which consist of text, \CEE/ code or usually both. These
@@ -136,10 +145,13 @@ mess instead, so the mess can remain hidden away where a compiler
 can clean it up.
 
 @(lossless.h@>=
+#ifndef LL_LOSSLESS_H
+#define LL_LOSSLESS_H
 @h
 @<Type definitions@>@;
 @<Function declarations@>@;
 @<External symbols@>@;
+#endif
 
 @ \Ls/ can be controlled from languages through the use of extra
 symbols in \.{ffi.c}, which primarily provide functional endpoints
@@ -354,6 +366,7 @@ typedef enum {
         LERR_OOM,            /* Out of memory. */
         LERR_OVERFLOW,       /* Attempt to access past the end of a buffer. */
         LERR_SYNTAX,         /* Unrecognisable syntax (insufficient alone). */
+        LERR_SYSTEM,         /* A system error, check |errno|. */
         LERR_UNCLOSED_OPEN,  /* Missing \.), \.] or \.\}. */
         LERR_UNCOMBINABLE,   /* Attempted to combine a non-program. */
         LERR_UNDERFLOW,      /* A stack was popped too far. */
@@ -394,6 +407,7 @@ Oerror Ierror[LERR_LENGTH] = {@|
         [LERR_OVERFLOW]       = { "overflow" },@|
         [LERR_LIMIT]          = { "software-limit" },@|
         [LERR_SYNTAX]         = { "syntax-error" },@|
+        [LERR_SYSTEM]         = { "system-error" },@|
         [LERR_HEAVY_TAIL]     = { "tail-mid-list" },@|
         [LERR_UNCLOSED_OPEN]  = { "unclosed-brackets" },@|
         [LERR_UNCOMBINABLE]   = { "uncombinable" },@|
@@ -528,6 +542,9 @@ mem_alloc (void       *old,
 {
         void *r;
 
+#ifdef LLTEST
+        @<Testing memory allocator@>@;
+#endif
         if (!align)
                 r = realloc(old, length);
         else {
@@ -551,6 +568,9 @@ mem_alloc (void       *old,
 void
 mem_free (void *o)
 {
+#ifdef LLTEST
+        @<Testing memory deallocator@>@;
+#endif
         free(o);
 }
 
@@ -8506,3 +8526,719 @@ int lprint (char *, ...);
 int lput (int);
 
 @ @d WARN() fprintf(stderr, "WARNING: You probably don't want to do that.\n");
+
+@** Testing.
+
+Each unit test consists of five phases:
+
+\item{1.} Prepare the environment.
+\item{2.} Run the procedure.
+\item{3.} Offer a prayer of hope to your god.
+\item{4.} Validate the result.
+\item{5.} Exit the test.
+
+@(testless.h@>=
+#ifndef LL_TESTLESS_H
+#define LL_TESTLESS_H
+
+@<Test fixture header@>@;
+
+@<Test definitions@>@;
+
+@<Test functions@>@;
+
+@<Repair the system headers@>@;
+
+#endif
+
+@ The test fixture is kept in its own section to avoid visual
+confusion within the previous one. Every test unit in every test
+suite begins with this header.
+
+Because the functions in \.{testless.c} don't know the final size
+of the fixture until after they have been linked with the test
+script this |llt_fixture_fetch| macro advances the test suite pointer
+forward by the correct size.
+
+@f llt_Forward llt_Thunk /* A \CEE/ type-mangling hack. */
+@d llt_fixture_fetch(O,I) ((llt_Fixture_Header *) (((char *) (O))
+        + Test_Fixture_Size * (I)))
+@<Test fixture header@>=
+#define LLT_FIXTURE_HEADER                                                    \
+        char       *name;      /* Name of this test unit. */                  \
+        int         id;        /* Numeric identifier for listing. */          \
+        int         total;     /* Total number ot units in the suite. */      \
+        void      **leaks;     /* Array of allocated memory. */               \
+                                                                              \
+        llt_Forward prepare;   /* Preparation function. */                    \
+        llt_Forward run;       /* Carrying out the test. */                   \
+        llt_Forward validate;  /* Verifying the result. */                    \
+        llt_Forward end;       /* Cleaning up after. */                       \
+        int         progress;  /* The unit's progress through the harness. */ \
+        int         tap;       /* The ID of the ``current'' test tap. */      \
+        int         taps;      /* The number of taps in this unit. */         \
+        int         tap_start; /* The tap ID of this unit's first tap. */     \
+                                                                              \
+        bool        perform;   /* Whether to carry out this unit. */          \
+        Verror      expect;    /* The error expected to occur. */             \
+        Verror      reason;    /* The error that did occur. */                \
+        cell        res;       /* The result if there was no error. */        \
+        void       *resp;      /* The same if a \CEE/ pointer is expected. */ \
+        cell        meta;      /* Misc.~data saved by the validator. */       \
+                                                                              \
+        int         ok;        /* The final result of this unit. */
+
+@ @<Test fun...@>=
+void llt_Fixture__init_common (llt_Fixture_Header *, int, llt_Thunk,
+        llt_Thunk, llt_Thunk, llt_Thunk);
+void llt_fixture_free (llt_Fixture_Header *);
+llt_Fixture_Header * llt_fixture_grow (llt_Fixture_Header *, int *, int,
+        sigjmp_buf *);
+int llt_fixture_leak (void ***, sigjmp_buf *);
+void llt_list_suite (llt_Fixture_Header *, sigjmp_buf *);
+llt_Fixture_Header * llt_load_tests (bool, sigjmp_buf *);
+int llt_main (int, char **, bool);
+int llt_perform_test (int, int *, llt_Fixture_Header *, sigjmp_buf *);
+void llt_print_test (llt_Fixture_Header *);
+int llt_run_suite (llt_Fixture_Header *, sigjmp_buf *);
+void llt_skip_test (int *, llt_Fixture_Header *, char *, sigjmp_buf *);
+char * llt_sprintf (void ***, sigjmp_buf *, char *, ...);
+int llt_usage (char *);
+void tap_ok (llt_Fixture_Header *, char *, bool, cell);
+void tap_out (char *, ...);
+void tap_plan (int);
+
+@ The header contains four |llt_Forward| objects which should
+actually be |llt_Thunk| to avoid problems caused by the order of
+these definitions.
+
+@<Test def...@>=
+struct llt_Fixture_Header;
+typedef int @[@] (*llt_Forward) (void *, sigjmp_buf *);
+typedef struct { LLT_FIXTURE_HEADER } llt_Fixture_Header;
+typedef llt_Fixture_Header * @[@] (*llt_Initialise) (llt_Fixture_Header *,
+        int *, bool,@| sigjmp_buf *);
+typedef int @[@] (*llt_Thunk) (llt_Fixture_Header *, sigjmp_buf *);
+
+@ @<Test common preamble@>=
+#include <assert.h>
+#include <errno.h>
+#include <limits.h>
+#include <setjmp.h>
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+@#
+#include "lossless.h"
+#include "testless.h"
+
+@ \.{testless.c} compiles to an archive containing all of the shared
+\.{llt\_} and \.{tap\_} functions.
+
+@(testless.c@>=
+#include <err.h>
+#include <getopt.h>
+extern int optind;
+@#
+@<Test common preamble@>@;
+extern llt_Initialise Test_Suite[];
+extern int Test_Fixture_Size;
+
+@ The shared |llt_main| function presents each test script with
+common \.{-h} (help) \AM\ \.{-l} (list) options and a simple way
+of specifying specific test units to run.
+
+@d LLT_DO_TESTS 0
+@d LLT_LIST_TESTS 1
+@(testless.c@>=
+int
+llt_main (int    argc,
+          char **argv,
+          bool   init)
+{
+        int act, i, opt, r;
+        char *tail;
+        unsigned long value;
+        llt_Fixture_Header *suite;
+        sigjmp_buf cleanup;
+        Verror reason = LERR_NONE;
+
+        assert(argc >= 1);
+        act = LLT_DO_TESTS;
+        if (argc > 1) {
+                @<Parse command line options@>
+        }
+
+        if (failure_p(reason = sigsetjmp(cleanup, 1)))
+                err(1, "Failure %d.", reason);
+        if (init)
+                mem_init();
+        else
+                thread_mem_init();
+        suite = llt_load_tests(act == LLT_DO_TESTS, &cleanup);
+        if (argc != 1) {
+                @<Parse a test run specification from the command line@>
+        }
+        r = 0;
+        if (act == LLT_DO_TESTS)
+                r = llt_run_suite(suite, &cleanup);
+        else
+                llt_list_suite(suite, &cleanup);
+        return r == LLT_RUN_OK;
+}
+
+@ Long options are also supported because why not?
+
+@<Parse command line options@>=
+static struct option llt_common_options[] = {@|
+        { "help", no_argument, NULL, 'h' },@|
+        { "list", no_argument, NULL, 'l' },@|
+        { NULL, 0, NULL, 0 }@/
+};
+
+while ((opt = getopt_long(argc, argv, "lh", llt_common_options, NULL)) != -1) {
+        switch (opt) {
+        case 'l':
+                act = LLT_LIST_TESTS;@+
+                break;
+        case 'h':
+                return llt_usage(argv[0]);
+        default:
+                return ! llt_usage(argv[0]);
+        }
+}
+argc -= optind - 1;
+
+@ The script with no arguments runs all test units. The script can
+be restricted to specific units can by identifying them on the
+command line. The identifier is obtained with the \.{-l}\L\.{--list}
+option.
+
+@.TODO@>
+@<Parse a test run specification from the command line@>=
+for (i = 0; i < suite->total; i++)
+        llt_fixture_fetch(suite, i)->perform = false;
+for (i = 1; i < argc; i++) {
+        if (argv[(optind - 1) + i][0] < '1' || argv[(optind - 1) + i][0] > '9') {
+@t\4@>
+invalid_id:
+                errc(1, EINVAL, "Invalid test id `%s'; maximum is %d",
+                        argv[(optind - 1) + i], suite->total);
+        } else {
+                errno = 0;
+                value = strtoul(argv[(optind - 1) + i], &tail, 10);
+                if (*tail != '\0' || errno == ERANGE || value > INT_MAX)
+                        goto invalid_id;
+                if ((int) value > suite->total)
+                        goto invalid_id;
+                if (llt_fixture_fetch(suite, value)->perform)
+                        warn("Duplicate test id %lud", value);
+                llt_fixture_fetch(suite, value - 1)->perform = true;
+        }
+}
+
+@ TODO: Adjust tabbing for the length of |name|.
+
+@.TODO@>
+@(testless.c@>=
+int
+llt_usage (char *name)
+{
+        printf("Usage:\n");
+        printf("\t%s\t\tRun all tests.\n", name);
+        printf("\t%s -l | --list\tList all of this script's test cases as"
+                " an s-expression.\n", name);
+        printf("\t%s id...\tRun the specified tests.\n", name);
+        printf("\t%s -h | --help\tDisplay this help and exit.\n", name);
+        return 0;
+}
+
+@ Test units are initialised here, which also handles casting an
+|llt_Thunk| pointer to a |llt_Forward|.
+
+As the test harness progresses through the test the |progress|
+attribute is updated to one of these flags.
+
+
+@d LLT_PROGRESS_INIT     0
+@d LLT_PROGRESS_PREPARE  1
+@d LLT_PROGRESS_RUN      2
+@d LLT_PROGRESS_VALIDATE 3
+@d LLT_PROGRESS_END      4
+@d LLT_PROGRESS_SKIP     5
+@(testless.c@>=
+void
+llt_Fixture__init_common (llt_Fixture_Header *fixture,
+                          int                 id,@|
+                          llt_Thunk           prepare,
+                          llt_Thunk           run,
+                          llt_Thunk           validate,
+                          llt_Thunk           end)
+{
+        fixture->name = "";
+        fixture->id = id;
+        fixture->total = -1;
+        fixture->leaks = NULL;
+        fixture->perform = true;
+        fixture->prepare = (llt_Forward) prepare;
+        fixture->run = (llt_Forward) run;
+        fixture->validate = (llt_Forward) validate;
+        fixture->end = (llt_Forward) end;
+        fixture->progress = LLT_PROGRESS_INIT;
+        fixture->taps = 1;
+        fixture->tap = fixture->tap_start = 0;
+        fixture->ok = false;
+        fixture->res = NIL;
+        fixture->resp = NULL;
+        fixture->reason = fixture->expect = LERR_NONE;
+}
+
+@ When the harness first starts it initialises the fixtures for all
+the test cases by calling each function mentioned in |Test_Cases|.
+Those which have an expensive initialisation routine can skip it
+if the script is only listing the test unit titles.
+
+Each test unit initialiser will enlarge the buffer holding the suite
+as much as it needse and increment the |num_tests| variable by the
+number of individual test units which were added. The number of
+taps in each unit is then counted and a running total of each unit's
+starting tap and the total number of taps is kept.
+
+@(testless.c@>=
+llt_Fixture_Header *
+llt_load_tests (bool        full,
+                sigjmp_buf *failure)
+{
+        llt_Fixture_Header *r;
+        llt_Initialise *tc;
+        int before, i, num_tests, tap;
+
+        r = mem_alloc(NULL, Test_Fixture_Size, 0, failure);
+        num_tests = 0;
+        tap = 1;
+        tc = Test_Suite;
+        while (*tc != NULL) {
+                before = num_tests;
+                r = (*tc)(r, &num_tests, full, failure);
+                for (i = before; i < num_tests; i++) {
+                        llt_fixture_fetch(r, i)->tap_start = tap;
+                        tap += llt_fixture_fetch(r, i)->taps;
+                }
+                tc++;
+        }
+        for (i = 0; i < num_tests; i++)
+                llt_fixture_fetch(r, i)->total = num_tests;
+        return r;
+}
+
+@ Listing the test units. Specifying the tests to list is probably
+pointless but easier than complaining about an erroneous specification.
+
+@(testless.c@>=
+void
+llt_list_suite (llt_Fixture_Header *suite,
+                sigjmp_buf         *failure @[Lunused@])
+{
+        int i;
+
+        for (i = 0; i < suite->total; i++)
+                if (llt_fixture_fetch(suite, i)->perform)
+                        llt_print_test(llt_fixture_fetch(suite, i));
+}
+
+@ @(testless.c@>=
+void
+llt_print_test (llt_Fixture_Header *o)
+{
+        char *p;
+
+        printf("(%d |", o->id + 1);
+        for (p = o->name; *p; p++) {
+                if (*p == '|' || *p == '#')
+                        putchar('#');
+                putchar(*p);
+        }
+        printf("|)\n");
+}
+
+@ To run a suite each unit in turn is passed through |llt_perform_test|
+or |llt_skip_test| if it wasn't included in a command line
+specification. If the number of taps a unit claimed and the number
+it performed differ then a warning will be emitted and the tap
+stream that gets output will be broken (test IDs will clash).
+
+TODO: Should I not reset the tap start ID each time and instead
+vigorously enforce incrementing the output tap id?
+
+@.TODO@>
+@d LLT_RUN_ABORT   -1
+@d LLT_RUN_FAIL     1
+@d LLT_RUN_CONTINUE 0
+@d LLT_RUN_OK       LLT_RUN_CONTINUE /* There is no try. */
+@d LLT_RUN_PANIC    2
+@(testless.c@>=
+int
+llt_run_suite (llt_Fixture_Header *suite,
+               sigjmp_buf         *failure)
+{
+        int i, r, t;
+
+        t = 0;
+        for (i = 0; i < suite->total; i++)
+                t += llt_fixture_fetch(suite, i)->taps;
+        tap_plan(t);
+        r = 0;
+        t = 1;
+        for (i = 0; r != LLT_RUN_ABORT && i < suite->total; i++) {
+                if (llt_fixture_fetch(suite, i)->perform) {
+                        t = llt_fixture_fetch(suite, i)->tap_start;
+                        r = llt_perform_test(r, &t,
+                                llt_fixture_fetch(suite, i), failure);
+                        if (t != llt_fixture_fetch(suite, i)->tap_start
+                                    + llt_fixture_fetch(suite, i)->taps)
+                                warn("Test tap mismatch: %d != %d", t,
+                                        llt_fixture_fetch(suite, i)->tap_start);
+                 } else {
+                        llt_skip_test(&t, llt_fixture_fetch(suite, i),
+                                "command line", failure);
+                }
+        }
+        return r;
+}
+
+@ If the test is being skipped then the appropriate number of taps
+are printed in place of running the unit.
+
+@(testless.c@>=
+void
+llt_skip_test (int                *tap,
+               llt_Fixture_Header *testcase,
+               char               *excuse,
+               sigjmp_buf         *failure)
+{
+        int i;
+
+        excuse = llt_sprintf(&testcase->leaks, failure,
+                "--- # SKIP %s", excuse);
+        testcase->tap = *tap;
+        testcase->progress = LLT_PROGRESS_SKIP;
+        for (i = 0; i < testcase->taps; i++)
+                tap_ok(testcase, excuse, true, NIL);
+        *tap = testcase->tap;
+}
+
+@ Actually perform a test. Call the preparatation routine if there
+is one then carry out the desiered action and validate the result.
+The protection around |Test_Memory| is necessary but the paranoia
+behind saving and restoring the prior value is probably not --- if
+|Test_Memory->active| was previously true then the clean up routine
+should certainly set it stright back to false again.
+
+Some care is taken to protect against errors in the four test stages
+themselves but really they shouldn't be necessary if the test
+complexity is kept under control.
+
+There is no need to cast the function pointers to a real |llt_Thunk|
+because the only difference from |llt_Forward| is that the latter
+uses |void *| for its pointer argument types.
+
+@(testless.c@>=
+int
+llt_perform_test (int                 runok,
+                  int                *tap,
+                  llt_Fixture_Header *testcase,
+                  sigjmp_buf         *failure)
+{
+        bool allocating;
+        int n, r;
+
+        assert(runok != LLT_RUN_ABORT);
+        assert(testcase->progress == LLT_PROGRESS_INIT);
+@#
+        n = testcase->prepare == NULL ? LLT_RUN_CONTINUE
+                : testcase->prepare(testcase, failure);
+        if (n != LLT_RUN_CONTINUE)
+                return LLT_RUN_PANIC;
+        testcase->progress = LLT_PROGRESS_PREPARE;
+@#
+        if (testcase->run == NULL)
+                siglongjmp(*failure, LERR_INTERNAL);
+        n = testcase->run(testcase, failure);
+        if (n != LLT_RUN_CONTINUE)
+                return n;
+        testcase->progress = LLT_PROGRESS_RUN;
+@#
+        if (testcase->validate == NULL)
+                siglongjmp(*failure, LERR_INTERNAL);
+        if (Test_Memory != NULL) {
+                allocating = Test_Memory->active;
+                Test_Memory->active = false;
+        }
+        testcase->tap = *tap;
+        r = testcase->validate(testcase, failure); /* These should never fail. */
+        *tap = testcase->tap;
+        if (runok != LLT_RUN_OK)
+                r = runok;
+        if (Test_Memory != NULL)
+                Test_Memory->active = allocating;
+@#
+        n = testcase->prepare == NULL ? LLT_RUN_CONTINUE
+                : testcase->end(testcase, failure);
+        if (n != LLT_RUN_CONTINUE)
+                return LLT_RUN_PANIC;
+        return r;
+}
+
+@ Increase the size of the budding test suite by |delta| unit fixtures.
+
+@(testless.c@>=
+llt_Fixture_Header *
+llt_fixture_grow (llt_Fixture_Header *o,
+                  int                *length,
+                  int                 delta,@|
+                  sigjmp_buf         *failure)
+{
+        return mem_alloc(o, Test_Fixture_Size * (*length + delta), 0, failure);
+}
+
+@ Ordinarily test scripts are expected to be run once and immediately
+quit and so expect to be able to allocate memory with wild abandon
+without caring to clean it up. In case there is a desire to have
+scripts remain in memory the allocations made by/for each fixture
+are kept in an array of pointers in the |leak| attribute, itself
+made from such an allocation the first time one is requested.
+
+@(testless.c@>=
+int
+llt_fixture_leak (void     ***abuf,
+                  sigjmp_buf *failure)
+{
+        int length;
+
+        if (*abuf == NULL) {
+                *abuf = mem_alloc(NULL, sizeof (void *) * 2, 0, failure);
+                length = 1;
+        } else {
+                length = ((long) (*abuf)[0]) + 1;
+                if (length >= INT_MAX)
+                        siglongjmp(*failure, LERR_LIMIT);
+                *abuf = mem_alloc(*abuf, sizeof (void *) * length + 1, 0,
+                        failure);
+        }
+        (*abuf)[0] = (void *) (long) length;
+        (*abuf)[length] = NULL;
+        return length;
+}
+
+@ Although nothing uses it the |llt_fixture_free| function will
+clean up a fixture's memory allocations.
+
+@(testless.c@>=
+void
+llt_fixture_free (llt_Fixture_Header *testcase)
+{
+        int i;
+
+        if (testcase->leaks != NULL) {
+                for (i = 0; i < (long) testcase->leaks[0]; i++)
+                        mem_free(testcase->leaks[i]);
+                mem_free(testcase->leaks);
+        }
+}
+
+@ The main consumer of |llt_fixture_leak| thus far is this wrapper
+around \.{printf}, which repeatedly enlarges a buffer until a
+short-ish message can be formatted into it, then reduces the
+allocation to the minimum size and returns it.
+
+@(testless.c@>=
+char *
+llt_sprintf (void     ***abuf,
+             sigjmp_buf *failure,
+             char       *fmt, ...)
+{
+        int length, ret, pidx;
+        va_list args;
+
+        pidx = llt_fixture_leak(abuf, failure);
+        length = 0;
+        (*abuf)[pidx] = NULL;
+        while (1) {
+                length += 128;
+                (*abuf)[pidx] = mem_alloc((*abuf)[pidx], sizeof (char) *
+                        length, 0, failure);
+                va_start(args, fmt);
+                ret = vsnprintf((*abuf)[pidx], length, fmt, args);
+                va_end(args);
+                if (ret < 0)
+                        siglongjmp(*failure, LERR_SYSTEM);
+                else if (ret < length)
+                        break;
+        }
+        (*abuf)[pidx] = mem_alloc((*abuf)[pidx], sizeof (char) * (ret + 1),
+                0, failure);
+        return (*abuf)[pidx];
+}
+
+@* TAP. Tap routines to implement a rudimentary stream of test
+results in the \pdfURL{{\it Test Anything Protocol\/}}%
+{http://testanything.org/}\footnote{$^1$}{\.{http://testanything.org/}}
+
+@(testless.c@>=
+void
+tap_plan (int length)
+{
+        assert(length >= 1);
+        printf("1..%d\n", length);
+}
+
+@ @(testless.c@>=
+void
+tap_ok (llt_Fixture_Header *testcase,
+        char               *title,
+        bool                result,
+        cell                meta)
+{
+        assert(testcase->progress == LLT_PROGRESS_RUN ||
+                testcase->progress == LLT_PROGRESS_SKIP);
+        testcase->meta = meta;
+        testcase->ok = result;
+        if (result)
+                tap_out("ok");
+        else
+                tap_out("not ok");
+        tap_out(" %d - ", testcase->tap++);
+        if (testcase->name != NULL)
+                tap_out("%s: ", testcase->name);
+        tap_out("%s\n", title);
+}
+
+@ @(testless.c@>=
+void
+tap_out (char *fmt, ...)
+{
+        va_list args;
+
+        va_start(args, fmt);
+        vprintf(fmt, args);
+        va_end(args);
+}
+
+@* Memory tests. Those tests which need to mock the core memory
+allocator point |Test_Memory| to an instance of this object
+(eg.~created in |main| before calling |llt_main|) with pointers to
+alternative allocation and release functions.
+
+@ @<Type def...@>=
+typedef struct {
+        bool active; /* Whether |mem_alloc| should revert to these. */
+        bool available; /* Whether the false allocation should succeed. */
+        void *(*alloc)(void *, size_t, size_t, sigjmp_buf *);
+        void (*free)(void *);
+} Otest_memory;
+
+@ @<Global...@>=
+shared Otest_memory *Test_Memory = NULL;
+
+@ @<Extern...@>=
+extern shared Otest_memory *Test_Memory;
+
+@ These sections are responsible for diverting allocation and
+deallocation to the alternatives. The code is proteced by preprocessor
+macros so it will not be included in a non-test binary.
+
+@<Testing memory allocator@>=
+if (Test_Memory != NULL && Test_Memory->active)
+        return Test_Memory->alloc(old, length, align, failure);
+
+@ @<Testing memory deallocator@>=
+if (Test_Memory != NULL && Test_Memory->active) {
+        Test_Memory->free(o);
+        return;
+}
+
+@* Sanity Tests. This test script exercises the test harness.
+
+Test scripts are created in the \.t directory. In most cases they
+include the same preamble and the same immediate call to |llt_main|.
+
+@(t/insanity.c@>=
+@<Test common preamble@>@;
+
+int
+main (int    argc,
+      char **argv)
+{@+
+        return llt_main(argc, argv, true);@+
+}
+
+@ Most test scripts will use a customised |llt_Fixture| object
+(which needn't be called that). The full size must be put in
+|Test_Fixture_Size|.
+
+@(t/insanity.c@>=
+typedef struct {
+        LLT_FIXTURE_HEADER@;
+} llt_Fixture;
+
+int Test_Fixture_Size = sizeof (llt_Fixture);
+
+@ This suite consists of a single unit initialised by |llt_Sanity__Nothing|.
+
+@(t/insanity.c@>=
+llt_Fixture_Header * llt_Sanity__Nothing (llt_Fixture_Header *, int *,
+        bool, sigjmp_buf *);
+int llt_Sanity__run (llt_Fixture_Header *, sigjmp_buf *);
+int llt_Sanity__validate (llt_Fixture_Header *, sigjmp_buf *);
+
+llt_Initialise Test_Suite[] = {
+        llt_Sanity__Nothing,
+        NULL
+};
+
+@ The Nothing test unit has a single test case in it which requires
+no preparation or cleanup.
+
+@(t/insanity.c@>=
+llt_Fixture_Header *
+llt_Sanity__Nothing (llt_Fixture_Header *suite,
+                     int                *count,@|
+                     bool                full @[Lunused@],
+                     sigjmp_buf         *failure)
+{
+        llt_Fixture *tc;
+
+        suite = llt_fixture_grow(suite, count, 1, failure);
+        tc = (llt_Fixture *) suite;
+        llt_Fixture__init_common((llt_Fixture_Header *) (tc + *count), *count,@|
+                NULL,
+                llt_Sanity__run,
+                llt_Sanity__validate,
+                NULL);
+        tc->name = "do nothing";
+        (*count)++;
+        return suite;
+}
+
+@ Nothing in \Ls/ is tested by this test although the parts used
+by the test harness are exercised.
+
+@(t/insanity.c@>=
+int
+llt_Sanity__run (llt_Fixture_Header *testcase_ptr @[Lunused@],
+                 sigjmp_buf         *failure @[Lunused@])
+{
+        return LLT_RUN_CONTINUE;
+}
+
+int
+llt_Sanity__validate (llt_Fixture_Header *testcase_ptr,
+                      sigjmp_buf         *failure @[Lunused@])
+{
+        tap_ok(testcase_ptr, "done", true, NIL);
+        return testcase_ptr->ok;
+}
+
+@** Index.

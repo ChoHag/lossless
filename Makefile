@@ -14,6 +14,8 @@ BIN_SOURCES:=   repl.c
 LIB_OBJECTS:=   ffi.o
 LIB_SOURCES:=   ffi.c
 
+TEST_SCRIPTS:=  t/insanity.t
+
 LLCOMPILE:=     $(CC) $(DEBUG) $(CFLAGS) $(LCFLAGS) $(CPPFLAGS) $(LCPPFLAGS)
 
 
@@ -22,9 +24,8 @@ all: lossless liblossless.so lossless.pdf repl.pdf ffi.perl man/mandoc.db
 
 full: test all
 
-test:
-	echo There are no tests.
-	@false
+test: $(TEST_SCRIPTS)
+	$(TEST) $(LTFLAGS) -e '' $(TEST_SCRIPTS)
 
 # Dependencies:
 ffi.o: ffi.c lossless.h
@@ -38,6 +39,10 @@ lossless.o: lossless.c lossless.h
 lossless.tex: lossless.w
 lossless.idx-in: lossless.tex
 lossless.pdf: lossless.idx llfig-1.pdf
+
+testless.c testless.h: lossless.w
+
+$(TEST_SCRIPTS:.t=.c): lossless.w
 
 llfig-1.pdf: llfig.mp
 	mpost llfig.mp
@@ -57,6 +62,9 @@ lossless: lossless.o ffi.o repl.o
 liblossless.so: lossless.o ffi.o
 	$(LLCOMPILE) $(OBJECTS) $(BIN_OBJECTS) $(LDFLAGS) $(LLDFLAGS) \
 		-shared -o liblossless.so
+
+memless.o: lossless.o
+	$(LLCOMPILE) -DLLTEST -c lossless.c -o $@
 
 ffi.perl: liblossless.so
 	ln -sfn ../liblossless.so perl/
@@ -114,17 +122,15 @@ clean:
 	$(PDFTEX) $<
 
 .w.h:
+	mkdir -p t
 	$(CTANGLE) $< - $@
 
 .w.c:
+	mkdir -p t
 	$(CTANGLE) $< - $@
 
 .c.o:
 	$(LLCOMPILE) -c $< -o $@
 
-.c.t:
-	if echo " $(ALLOC_TEST_SCRIPTS) " | grep -qF " $@ "; then          \
-		$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) llalloc.o -o $@ $<; \
-	else                                                               \
-		$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) lltest.o -o $@ $<;  \
-	fi
+.c.t: memless.o testless.o
+	$(LLCOMPILE) memless.o testless.o $< -o $@
