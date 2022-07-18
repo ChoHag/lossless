@@ -62,7 +62,7 @@ bool lapi_symbol_p (cell o)
 
 cell sym (char *buf)
         CODE:
-                llassign(symbol_new_buffer(buf, strlen(buf), &catch));
+                llassign(symbol_new_buffer(buf, strlen(buf), NULL, &catch));
         OUTPUT: RETVAL
 
 ##
