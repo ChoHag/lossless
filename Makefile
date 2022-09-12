@@ -11,8 +11,8 @@ OBJECTS:=       lossless.o
 SOURCES:=       lossless.c lossless.h
 BIN_OBJECTS:=   repl.o
 BIN_SOURCES:=   repl.c
-LIB_OBJECTS:=   ffi.o
-LIB_SOURCES:=   ffi.c
+LIB_OBJECTS:=
+LIB_SOURCES:=
 
 TEST_SCRIPTS:=  t/insanity.t
 
@@ -28,19 +28,19 @@ test: $(TEST_SCRIPTS)
 	$(TEST) $(LTFLAGS) -e '' $(TEST_SCRIPTS)
 
 # Dependencies:
-ffi.o: ffi.c lossless.h
 repl.c: repl.w
 repl.o: repl.c lossless.h
 repl.tex: repl.w
 repl.idx-in: repl.tex
 repl.pdf: repl.idx
-lossless.c lossless.h ffi.c: lossless.w
+lossless.c lossless.h: lossless.w
 lossless.o: lossless.c lossless.h
 lossless.tex: lossless.w
 lossless.idx-in: lossless.tex
 lossless.pdf: lossless.idx llfig-1.pdf
 
-testless.c testless.h: lossless.w
+testless.c testless.h: lossless.c
+testless.o: testless.c testless.h
 
 $(TEST_SCRIPTS:.t=.c): lossless.w
 
@@ -55,15 +55,15 @@ barbaroi.h: barbaroi.ll
 
 # Compilers:
 # The LDFLAGS are repeated here to build on linux; there's likely a better way
-lossless: lossless.o ffi.o repl.o
+lossless: lossless.o repl.o
 	$(LLCOMPILE) $(OBJECTS) $(BIN_OBJECTS) $(LDFLAGS) $(LLDFLAGS) \
 		-o lossless
 
-liblossless.so: lossless.o ffi.o
-	$(LLCOMPILE) $(OBJECTS) $(BIN_OBJECTS) $(LDFLAGS) $(LLDFLAGS) \
+liblossless.so: lossless.o
+	$(LLCOMPILE) $(OBJECTS) $(LIB_OBJECTS) $(LDFLAGS) $(LLDFLAGS) \
 		-shared -o liblossless.so
 
-memless.o: lossless.o
+memless.o: lossless.c
 	$(LLCOMPILE) -DLLTEST -c lossless.c -o $@
 
 ffi.perl: liblossless.so
@@ -98,7 +98,7 @@ pack:
 clean:
 	rm -f core *.core *.idx *.idx-in *.log *.scn *.toc *.o
 	rm -f liblossless.so lossless
-	rm -f lossless.[ch] repl.c ffi.c
+	rm -f lossless.[ch] testless.[ch] repl.c
 	rm -f lossless.tex lossless.pdf
 	rm -f repl.tex repl.pdf
 	rm -f lossless*tgz
@@ -133,4 +133,4 @@ clean:
 	$(LLCOMPILE) -c $< -o $@
 
 .c.t: memless.o testless.o
-	$(LLCOMPILE) memless.o testless.o $< -o $@
+	$(LLCOMPILE) $(LDFLAGS) $(LLDFLAGS) memless.o testless.o $< -o $@

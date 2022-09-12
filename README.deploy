@@ -2,13 +2,13 @@
 
 rm -r tmp/dist/tmp/lossless-0
 
-(cd tmp/dist && git pull)
+(cd tmp/dist && git pull local master)
 
 make dist VERSION=0
 
-scp lossless-0.tgz chohag@zeus.jtan.com:public_html/lossless/
+scp lossless-0.tgz jtan:public_html/lossless/
 
-cat <<EOF | ssh chohag@zeus.jtan.com
+cat <<EOF | ssh jtan
         set -e
         mkdir ~/tmp/ll
         tar -C ~/tmp/ll -xzf ~/public_html/lossless/lossless-0.tgz
