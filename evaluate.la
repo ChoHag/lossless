@@ -1,0 +1,221 @@
+#       To evaluate an expression place it in the Expression register
+#       and jump to the !Begin or --- if the return address has
+#       already been pushed onto the stack --- !Evaluate.
+
+!Begin  PEND    clink,@!Exit    Prepare the stack to exit when empty.
+!Evaluate
+        LOAD    clink,expr      Save the expression being evaluated.
+        SLO     acc,'symbol?    Call (symbol?) on it, popping the stack.
+        TEST    acc,@!Lookup    Jump to !Lookup if the value is a symbol.
+        LOAD    clink,expr      Save the expression on the stack again.
+        SLO     acc,'pair?      Call (pair?) on it this time.
+        TEST    acc,@Combine-Start
+
+#       When evaluation of an expression is finished, or if the
+#       expression is not being evaluated, control returns to !Finish
+#       to determine what to do with it.
+#
+#       Alternatively the value of a binding is placed directly
+#       into the Accumulator and control flows into !Return.
+
+!Finish LOAD    acc,expr        Save the expression in the Accumulator.
+        JUMP    @!Return
+!Lookup LOOKUP  acc,expr        Look for symbols in Environment
+!Return JUMP    =clink
+!Exit   HALT
+
+#       In order to evaluate (combine) a list the first item in the
+#       list is evaluated to determine how to continue. The stack
+#       is prepared so that interpretation will continue from
+#       Combine-Dispatch when the first item is known.
+
+Combine-Start
+        LOAD    clink,args      Stack any arguments which are currently
+        -                       being evaluated in a previous stack frame.
+        LOAD    clink,env       Also stack the current run-time environment.
+        CDR     clink,expr      Extract and stack the remainder of the
+        -                       (uncombined) list.
+        PEND    clink,@Combine-Dispatch Continue from Combine-Dispatch
+        -                       after evaluation.
+        CAR     expr,expr       The expression which should evaluate to a
+        -                       combiner (including primitives & continuations).
+        JUMP    @!Evaluate      Restart the evaluation process.
+
+#       Evaluation leaves its result in the Accumulator which should
+#       be some sort of combiner. Combine-Dispatch simply saves
+#       that result and jumps on to the appropriate routine (or
+#       aborts).
+#
+#       After reaching here from above (Combine-Start), the stack
+#       is headed by the list's remaining (unevaluated) arguments
+#       followed by a frame header (the saved Environment followed
+#       by pending Arguments).
+
+Combine-Dispatch
+        LOAD    expr,acc        Save the combiner in Expression.
+        SLO     acc,'primitive? Test if the combiner is a primitive operator.
+        TEST    acc,@Combine-Primitive
+        LOAD    clink,expr      Copy the combiner to test for an applicative.
+        SLO     acc,'applicative?
+        TEST    acc,@Combine-Applicative
+        LOAD    clink,expr      Copy the combiner to test for an operative.
+        SLO     acc,'operative?
+        TEST    acc,@Combine-Operative
+        LOAD    clink,expr      Copy the combiner to test for a continuation.
+        SLO     acc,'resumption?
+        TEST    acc,@Combine-Primitive
+        TRAP    'uncombinable   Give up trying to combine with this.
+
+#       An operative closure is the simplest environment to enter.
+#
+#       The formals associated with the closure are not used to
+#       interpret the expression but dictate which parts of the
+#       run-time are provided to the function. These are collected
+#       into a new environment and execution continues with the
+#       operative closure's program.
+#
+#       Recall that the closure being entered has been saved in
+#       Expression and the stack is unchanged from the
+#       description for Combine-Dispatch (ie. it is topped by the
+#       combiner's unevaluated arguments and a frame header).
+
+Combine-Operative
+        LOAD    r0,env          Save the current environment.
+        LOAD    r3,=clink       Remove the arguments from the stack.
+        OPEN    acc,expr        Open (activate) the closure; puts (formals
+        -                       . body) in the Accumulator.
+        EXTEND  env,env         Extend the closure's saved environment.
+        CDR     expr,acc        The program to eventually evaluate.
+        CAR     r1,acc          Save the full list of `informals'.
+        CAR     acc,r1          This informal's name (or null).
+        SLO     r2,'null?       Is the first informal (un)wanted?
+        TEST    r2,@1f
+        DEFINE! env,acc,r3      The first informal names a variable to
+        -                       bind to the caller's arguments in the closure.
+
+1h      CDR     r1,r1           The rest of the informals.
+        CAR     acc,r1          The second informal binding name.
+        CAR     clink,r1
+        SLO     r3,'null?       Use r3 for the result to obliterate the
+        -                       argument list stored there previously.
+        TEST    r3,@2f
+        DEFINE! env,acc,r0      The second informal names the binding
+        -                       variable for the caller's environment.
+
+2h      CDR     r1,r1           The last of the informals, a list of one.
+        CAR     acc,r1          The third informal binding name.
+        CAR     clink,r1
+        SLO     r2,'null?
+        TEST    r2,@3f
+        DELIMIT r2              Magic.
+        DEFINE! env,acc,r2      The last informal names a continuation delimiter.
+
+3h      CDR     expr,expr       The closure body.
+        JUMP    @!Evaluate
+
+#       The goal here is to prepare the stack to build a list out
+#       of the evaluated arguments and then continue the process
+#       of combination when they are all ready.
+#
+#       This program is entered from Combine-Dispatch, which has
+#       the unevaluated arguments sitting on top of a frame header
+#       and the combiner in Expression.
+
+Combine-Applicative
+        LOAD    args,=clink     Remove the (unevaluated) arguments from
+        -                       the stack.
+        LOAD    clink,expr      Stack the combiner until the arguments
+        -                       are evaluated.
+        PEND    clink,@Combine-Ready
+        LOAD    expr,args       Save the full argument list in case of errors.
+        LOAD    r0,#f           Flag that nothing has been stacked yet.
+1h      LOAD    clink,args
+        SLO     acc,'null?      Is the (remaining) argument list finished?
+        TEST    acc,@8f
+        LOAD    clink,args
+        SLO     acc,'pair?      Something remains, is it still a proper list?
+        TEST    acc,@2f
+        CAR     clink,args      A list, register the next item for evaluation.
+        PEND    clink,@Combine-Evaluate
+        LOAD    r0,#t           There is now at least 1 argument on the stack.
+        CDR     args,args
+        JUMP    @1b             Continue with the next argument.
+
+2h      TEST    =r0,@4f         If nothing was stacked yet there is nothing to remove.
+        PEND    acc,@Combine-Ready
+        LOAD    r0,=clink       Remove Combine-Evaluate.
+3h      LOAD    r0,=clink       Remove the argument.
+4h      CMPIS?  r0,=clink,acc   Compare the next stack item with Combine-Ready.
+        TEST    =r0,@3b         Repeat if the marker was Combine-Evaluate.
+        LOAD    args,expr       Restore the unevaluated arguments.
+        LOAD    expr,=clink     Restore the (failed) combiner.
+        TRAP    'improper-list  Abort.
+
+8h      LOAD    args,()         Prepare the list of evaluated arguments.
+        JUMP    =clink          If there were no arguments jump straight to Combine-Ready.
+
+#       Arguments has the tail of arguments which have already been evaluated.
+#       Combine-Evaluate has been popped
+#       The stack is topped by the argument followed by the next destination.
+
+#       Prepare the stack so that the evaluated result will be used
+#       to build the combination's argument list then evaluate the
+#       next argument from Expression.
+
+Combine-Evaluate
+        LOAD    expr,=clink     Load the next argument to evaluate.
+        PEND    clink,@Combine-Build    Prepare to build the evaluated
+        -                       result into the argument list.
+        JUMP    @!Evaluate
+
+#       Value in Acc, args in Args.
+
+Combine-Build
+        CONS    args,acc,args   Prepend the value to the arguments.
+        JUMP    =clink          Or via !Return, continue with
+        -                       Combine-Evaluate or Combine-Ready.
+
+#       The complete argument list is ready in Arguments. Now it
+#       can be validated against the closure's formals list (the
+#       closure was saved on the stack) while binding the variables
+#       in the Environment which has been extended in Operate-Applicative.
+#
+#       The formals list has already been validated as a list of symbols.
+
+Combine-Ready
+        LOAD    expr,=clink     Restore the closure.
+        LOAD    r0,env          Save the state registers.
+        LOAD    r1,expr          " "
+        LOAD    r2,args          " "
+        OPEN    acc,expr        Activate the closure.
+        EXTEND  env,env         Extend the closure's saved environment,
+        -                       discarding the current one (it was
+        -                       previously saved on the stack in the
+        -                       frame header).
+        CDR     clink,acc       Extract the closure's program for
+        -                       evaluation, to the stack so that
+        -                       Expression is usable.
+        CAR     expr,acc        Load the formals list.
+1h      CMPIS?  acc,expr,()     Is the formals list finished?
+        TEST    acc,@4f
+        LOAD    clink,expr
+        SLO     acc,'symbol?    Do we capture all of the remaining arguments?
+        TEST    acc,@3f
+        CMPIS?  acc,args,()     Is the arguments list finished?
+        TEST    acc,@2f         Abort if the arguments finish prematurely.
+        DEFINE! env,=expr,=args
+        JUMP    @1b
+
+#       Restore to the state prior to validating and binding the
+#       arguments and abort.
+2h      LOAD    env,r0
+        LOAD    expr,r1
+        LOAD    args,r2
+        TRAP    'incompatible-operand
+
+3h      DEFINE! env,expr,args
+4h      LOAD    expr,=clink
+        JUMP    @!Evaluate
+
+Combine-Primitive
+        TRAP    'unimplemented

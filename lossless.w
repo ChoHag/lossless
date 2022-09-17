@@ -84,6 +84,7 @@
 @s opcode int
 @s scow int
 @s segment int
+@s symbol int
 @s vm_register int
 @s word int
 %
@@ -574,7 +575,8 @@ typedef union {
 @d digit_p(O)          (positive_p(O) || negative_p(O))
 @d integer_p(O)        (fixed_p(O) || positive_p(O) || negative_p(O))
 @#
-@d larry_p(O)          (array_p(O) || hashtable_p(O))
+@d larry_p(O)          (array_p(O) || hashtable_p(O) || assembly_p(O)
+        || statement_p(O))
 @d pointer_p(O)        (segment_stored_p(O) || symbol_stored_p(O)
         || larry_p(O) || heap_p(O))
 @#
@@ -1328,12 +1330,10 @@ pointer_set_m(o, new); /* May have changed. */
 integers, addition \AM\ subtraction. More later after the rest of
 the core.
 
-@d word_high(O)  ((digit) lsin(O))
+@d word(O)         ((char *) (O))
+@d word_high(O)    ((digit) lsin(O))
 @d word_low(O)     ((digit) ldex(O))
 @d word_value(O)   (word_low(O))
-@d word_byte(O,N)  ((N > 3) ? word_byten(word_high(O), (N) - 3)
-        : word_byten(word_low(O), (N)))
-@d word_byten(W,N) (((W) >> ((N) * 2)) & 0xff)
 @#
 @d fix(V)         (FIXED | asl((V), FIXED_SHIFT))
 @d fixed_value(V) (asr((V), FIXED_SHIFT))
@@ -2107,8 +2107,7 @@ copy_hashtable (cell     o,
 
         if (!hashtable_p(o))
                 return LERR_INCOMPATIBLE;
-        orreturn(new_larry(larry_length(o), HASHTABLE_HEADER_LENGTH, NIL,
-                FORM_HASHTABLE, &new));
+        orreturn(new_hashtable(hashtable_length(o), &new));
         copy_hashtable_imp(o, hashfn, new);
         *ret = new;
         return LERR_NONE;
@@ -2152,7 +2151,6 @@ copy_hashtable_imp (cell    old,
                         nfree--;
                 }
         }
-        hashtable_set_blocked_m(new, 0);
         hashtable_set_free_m(new, nfree);
 }
 
@@ -2280,10 +2278,11 @@ hashtable_save_m (cell      o,
 
         if (!hashtable_p(o))
                 return LERR_INCOMPATIBLE;
+                printf("save ");psym((cell)ctx);printf(" in %p at %u\n",o,key);
 again:
         idx = hashtable_scan(o, key, match, ctx);
         if (idx == FAIL) {
-                if (replace)
+                if (replace && !enlarge)
                         return LERR_MISSING;
                 if (!enlarge)
                         return LERR_OUT_OF_BOUNDS;
@@ -2513,6 +2512,7 @@ error_code new_env (cell, cell *);
 cell env_get_root (cell);
 bool env_match (cell, void *);
 hash env_rehash (cell);
+error_code env_root_init (void);
 error_code env_save_m (cell, cell, cell, bool);
 error_code env_search (cell, cell, cell *);
 
@@ -2614,11 +2614,11 @@ env_save_m (cell o,
         if (!environment_p(o) || !symbol_p(label) || undefined_p(value))
                 return LERR_INCOMPATIBLE;
         orreturn(cons(label, value, &tmp));
-        return hashtable_save_m(o, symbol_key(label), tmp, env_rehash,
-                env_match, (void *) label, replace, true);
+        return hashtable_save_m(env_layer(o), symbol_key(label), tmp,
+                env_rehash, env_match, (void *) label, replace, true);
 }
 
-@* Run-time.
+@* Run-time \AM\ Primitives.
 
 An instruction address is simply a disguised pointer. TODO: account
 for different word sizes.
@@ -2630,6 +2630,80 @@ typedef uintptr_t address; /* |void *| would also be acceptable but for
                                 arithmetic. */
 @#
 typedef int32_t instruction;
+
+@
+@d primitive(O)               (fixed_value(lsin(O)))
+@d primitive_label(O)         (ldex(O))
+@d primitive_object(O)        (&Primitive[primitive(O)])
+@d primitive_applicative_p(O) (primitive_p(O)@|
+        && primitive_object(O)->schema[0] >= '0'
+        && primitive_object(O)->schema[0] <= '9')
+@d primitive_operative_p(O)   (primitive_p(O) && !primitive_applicative_p(O))
+@<Type def...@>=
+typedef enum {
+        PRIMITIVE_PAIR_P,
+        PRIMITIVE_SYMBOL_P,
+        PRIMITIVE_LENGTH
+} primitive_code;
+
+typedef struct {
+        cell  owner; /* Heap storage. */
+        error_code (*action)(cell, cell *);
+        char *schema; /* \Ls/ binding \AM\ signature. */
+} primitive_table;
+
+@ @<Global...@>=
+primitive_table Primitive[] = {
+        @<Primitive schemata@>
+};
+
+@ @<Extern...@>=
+extern primitive_table Primitive[];
+
+@ @<Populate...@>=
+for (i = 0; i < PRIMITIVE_LENGTH; i++) {
+        orreturn(new_symbol_const(Primitive[i].schema + 4, &ltmp));
+        orreturn(new_atom(fix(i), ltmp, FORM_PRIMITIVE, &Primitive[i].owner));
+        orreturn(env_save_m(Root, ltmp, Primitive[i].owner, false));
+}
+
+@ @<Fun...@>=
+error_code primitive_predicate (cell, cell *);
+error_code primitive_search (cell, cell *);
+
+@ @c
+error_code
+primitive_search (cell  o,
+                  cell *ret)
+{
+        global_search(o, primitive_p, ret)@;
+}
+
+@ @<Primitive...@>=
+[PRIMITIVE_PAIR_P]   = { NIL, primitive_predicate, "11__pair?" },@/
+[PRIMITIVE_SYMBOL_P] = { NIL, primitive_predicate, "11__symbol?" },@/
+
+@ @d primitive_call(O,R) primitive_object(O)->action((O), (R))
+@c
+error_code
+primitive_predicate (cell  o,
+                     cell *ret)
+{
+        bool answer;
+        cell value;
+        error_code reason;
+
+        assert(primitive_p(o));
+        assert(primitive_object(o)->schema[0] == '1'
+                && primitive_object(o)->schema[1] == '1');
+        orreturn(clink_pop(&Control_Link, &value));
+        switch (primitive(o)) {
+        case PRIMITIVE_PAIR_P: answer = pair_p(value);@+ break;
+        case PRIMITIVE_SYMBOL_P: answer = symbol_p(value);@+ break;
+        }
+        *ret = predicate(answer);
+        return LERR_NONE;
+}
 
 @* Segmented \CEE/ Object Wrapper.
 
@@ -2931,26 +3005,24 @@ file_handle_read_word (cell  o,
                        int   length,
                        cell *ret)
 {
-        atom got;
+        atom got = {0};
         cell new;
         char *base;
         int fd, rret;
         error_code reason;
 
-        if (length < 0 || length > CELL_BYTES)
+        if (length < 1 || length > ATOM_BYTES)
                 return LERR_INCOMPATIBLE;
 
         orreturn(file_handle_get(o, &fd, NULL));
         orreturn(new_word(0, 0, &new));
         base = (char *) &got;
-        base += CELL_BYTES - length;
         errno = 0;
         rret = read(fd, base, length);
-        if (rret == 0) {
-                ((char *) &got)[CELL_BYTES - 1] = 0;
+        if (rret == 0)
                 return LERR_EOF;
-        }
-        (*(atom *) (*ret)) = got;
+        *ret = new;
+        *((atom *) (*ret)) = got;
         if (rret == length)
                 return LERR_NONE;
         switch (errno) {
@@ -3185,8 +3257,8 @@ osthread_wait (cell  o,
         return reason;
 }
 
-@** Virtual Machine. There are 48 general registers. I don't know
-what to do with them all.
+@** Virtual Machine. There are 40-something general registers. I
+don't know what to do with them all.
 
 @d LR_r0             0
 @d LR_r1             1
@@ -3233,9 +3305,7 @@ what to do with them all.
 @d LR_r42           42
 @d LR_r43           43
 @d LR_r44           44
-@d LR_r45           45
-@d LR_r46           46
-@d LR_GENERAL       46
+@d LR_GENERAL       44
 
 @ 17 registers are used by the virtual machine including 4 which
 aren't a normal cell; these are defined later.
@@ -3247,45 +3317,51 @@ garbage collector.
 
 ``Missing'' registers: |Root|, |SCOW_Attributes|, |Threads|.
 
-@d LR_Accumulator   47 /* A */
-@d LR_Control_Link  48 /* c */ /* Special: push/pop */
-@d LR_Environment   49 /* E */ /* Typed: environment? */
-@d LR_Heap_Shared   50 /* \_ */ /* RO: heap */
-@d LR_Heap_Thread   51 /* H */ /* Typed: heap */
-@d LR_Heap_Trap     52 /* \_ */ /* Typed: heap */
-@d LR_Symbol_Table  53 /* \_ */ /* RO: hash table */
-@d LR_Arg1          54 /* \_ */
-@d LR_Arg2          55 /* \_ */
-@d LR_Result        56 /* \_ */
-@d LR_Trap_Arg1     57 /* \_ */
-@d LR_Trap_Arg2     58 /* \_ */
-@d LR_Trap_Result   59 /* v */
-@d LR_CELL          59
 
-@d LR_Ip            60 /* I */ /* Pseudo int */
-@d LR_Trap_Handler  61 /* t */ /* Pseudo array */
-@d LR_Trap_Ip       62 /* x */ /* Pseudo int */
-@d LR_Trapped       63 /* \_ */ /* RO: Pseudo bool */
+@d LR_Accumulator   45
+@d LR_Argument_List 46
+@d LR_Control_Link  47 /* Special: push/pop */
+@d LR_Environment   48 /* Typed: environment? */
+@d LR_Expression    49
+@d LR_Heap_Shared   50 /* Typed: heap */
+@d LR_Heap_Thread   51 /* Typed: heap */
+@d LR_Heap_Trap     52 /* Typed: heap */
+@d LR_Symbol_Table  53 /* RO: hash table */
+@d LR_Arg1          54
+@d LR_Arg2          55
+@d LR_Result        56
+@d LR_Trap_Arg1     57
+@d LR_Trap_Arg2     58
+@d LR_Trap_Result   59
+@d LR_CELL          59
+@#
+@d LR_Ip            60 /* RO: Pseudo int */
+@d LR_Trap_Handler  61 /* RO: Pseudo array */
+@d LR_Trap_Ip       62 /* RO: Pseudo int */
+@d LR_Trapped       63 /* RO: Pseudo bool */
 @d LR_SPECIAL       63
 @d LR_LENGTH        64 /* $2^6$ */
 @<Global...@>=
-unique cell *Register[LR_CELL + 1];
+unique cell *Register[LR_CELL + 1] = {0};
 @#
-unique cell Accumulator;
-unique cell Control_Link;
-unique cell Environment;
-shared cell Root;
-unique cell Trap_Arg1;
-unique cell Trap_Arg2;
-unique cell Trap_Result;
-unique cell VM_Arg1;
-unique cell VM_Arg2;
-unique cell VM_Result;
+unique cell Accumulator = NIL;
+unique cell Argument_List = NIL;
+unique cell Control_Link = NIL;
+unique cell Environment = NIL;
+unique cell Expression = NIL;
+shared cell Root = NIL;
+unique cell Trap_Arg1 = NIL;
+unique cell Trap_Arg2 = NIL;
+unique cell Trap_Result = NIL;
+unique cell VM_Arg1 = NIL;
+unique cell VM_Arg2 = NIL;
+unique cell VM_Result = NIL;
 
 @ @<Extern...@>=
 extern unique cell *Register[];
-extern unique cell Accumulator, Control_Link, Environment, Trap_Arg1,
-        Trap_Arg2, Trap_Result, VM_Arg1, VM_Arg2, VM_Result;
+extern unique cell Accumulator, Argument_List, Control_Link, Environment,
+        Expression, Trap_Arg1, Trap_Arg2, Trap_Result, VM_Arg1, VM_Arg2,
+        VM_Result;
 extern shared cell Root;
 
 @ @<Type def...@>=
@@ -3299,8 +3375,10 @@ typedef struct {
 @ @<Global...@>=
 shared register_table Register_Table[LR_LENGTH] = {
         [LR_Accumulator]  = { NIL, "VM:Accumulator" },@|
+        [LR_Argument_List]= { NIL, "VM:Argument-List" },@|
         [LR_Control_Link] = { NIL, "VM:Control-Link" },@|
         [LR_Environment]  = { NIL, "VM:Environment" },@|
+        [LR_Expression]   = { NIL, "VM:Expression" },@|
         [LR_Heap_Shared]  = { NIL, "VM:Heap-Shared" },@|
         [LR_Heap_Thread]  = { NIL, "VM:Heap-Thread" },@|
         [LR_Heap_Trap]    = { NIL, "VM:Heap-Trap" },@|
@@ -3311,10 +3389,11 @@ shared register_table Register_Table[LR_LENGTH] = {
         [LR_Arg1]         = { NIL, "VM:Arg1" },@|
         [LR_Arg2]         = { NIL, "VM:Arg2" },@|
         [LR_Result]       = { NIL, "VM:Result" },@|
-        [LR_Trap_Ip]      = { NIL, "VM:Trap_Ip", },@|
+        [LR_Trap_Ip]      = { NIL, "VM:Trap-Ip", },@|
         [LR_Trapped]      = { NIL, "VM:Trapped", },@|
         [LR_Trap_Handler] = { NIL, "VM:Trap-Handler" },@|
         [LR_Ip]           = { NIL, "VM:Ip" },@|
+
 @#
         [LR_r0]           = { NIL, "VM:R0" },@|
         [LR_r1]           = { NIL, "VM:R1" },@|
@@ -3361,8 +3440,6 @@ shared register_table Register_Table[LR_LENGTH] = {
         [LR_r42]          = { NIL, "VM:R42" },@|
         [LR_r43]          = { NIL, "VM:R43" },@|
         [LR_r44]          = { NIL, "VM:R44" },@|
-        [LR_r45]          = { NIL, "VM:R45" },@|
-        [LR_r46]          = { NIL, "VM:R46" },@|
 };
 
 @ @<Extern...@>=
@@ -3370,7 +3447,9 @@ extern shared register_table Register_Table[];
 
 @ @<(Re-)Initialise per thread@>=
 Register[LR_Accumulator] = &Accumulator;
+Register[LR_Argument_List] = &Argument_List;
 Register[LR_Environment] = &Environment;
+Register[LR_Expression] = &Expression;
 Register[LR_Control_Link] = &Control_Link;
 Register[LR_Arg1] = &VM_Arg1;
 Register[LR_Arg2] = &VM_Arg2;
@@ -3380,16 +3459,8 @@ Register[LR_Trap_Arg2] = &Trap_Arg2;
 Register[LR_Trap_Result] = &Trap_Result;
 
 @ @<Finish init...@>=
-Accumulator  = NIL;
-orabort(new_empty_env(&Environment));
-Root         = Environment;
-Control_Link = NIL;
-VM_Arg1      = NIL;
-VM_Arg2      = NIL;
-VM_Result    = NIL;
-Trap_Arg1    = NIL;
-Trap_Arg2    = NIL;
-Trap_Result  = NIL;
+orabort(new_empty_env(&Root));
+Environment = Root;
 
 @
 @d register_id(O)     (lsin(O))
@@ -3409,6 +3480,21 @@ for (i = 0; i < LR_LENGTH; i++) {
         ltmp = register_label(Register_Table[i].owner);
         orreturn(env_save_m(Root, ltmp, Register_Table[i].owner, false));
 }
+
+@ Three commonly-used registers are bound to an additional short
+names for convenience.
+
+@<Populate the |Root| environment@>=
+orabort(new_symbol_const("VM:Acc", &ltmp));
+orabort(env_save_m(Root, ltmp, Register_Table[LR_Accumulator].owner, false));
+orabort(new_symbol_const("VM:Args", &ltmp));
+orabort(env_save_m(Root, ltmp, Register_Table[LR_Argument_List].owner, false));
+orabort(new_symbol_const("VM:Clink", &ltmp));
+orabort(env_save_m(Root, ltmp, Register_Table[LR_Control_Link].owner, false));
+orabort(new_symbol_const("VM:Env", &ltmp));
+orabort(env_save_m(Root, ltmp, Register_Table[LR_Environment].owner, false));
+orabort(new_symbol_const("VM:Expr", &ltmp));
+orabort(env_save_m(Root, ltmp, Register_Table[LR_Expression].owner, false));
 
 @ @c
 error_code
@@ -3436,14 +3522,18 @@ typedef enum {
         OP_CMPLT,
         OP_CONS,
         OP_DEFINE_M,
+        OP_DELIMIT,
         OP_EXTEND,
         OP_HALT,
         OP_JOIN,
         OP_JUMP,
         OP_LOAD,
         OP_LOOKUP,
+        OP_OPEN,
         OP_OPERATIVE,
+        OP_PEND,
         OP_REPLACE_M,
+        OP_SLO,
         OP_SPORK,
         OP_SUB,
         OP_TEST,
@@ -3488,9 +3578,10 @@ shared opcode_table Op[OPCODE_LENGTH] = {@|
         [OP_APPLICATIVE]= { NIL, "VM:APPLICATIVE",  AREG, ALOT, ALOT },@|
         [OP_OPERATIVE]  = { NIL, "VM:OPERATIVE",    AREG, ALOT, ALOT },@|
         [OP_REPLACE_M]  = { NIL, "VM:REPLACE!",     AREG, ALOT, ALOT },@|
-        [OP_WIDESPORK]  = { NIL, "VM:WIDESPORK",    AADD, NARG, NARG },@| /**/
+        [OP_WIDESPORK]  = { NIL, "VM:WIDESPORK",    AADD, NARG, NARG },@|
         [OP_DEFINE_M]   = { NIL, "VM:DEFINE!",      AREG, ALOT, ALOT },@|
-        [OP_WIDETEST]   = { NIL, "VM:WIDETEST",     AADD, NARG, NARG },@| /**/
+        [OP_WIDETEST]   = { NIL, "VM:WIDETEST",     AADD, NARG, NARG },@|
+        [OP_DELIMIT]    = { NIL, "VM:DELIMIT",      AREG, NARG, NARG },@|
         [OP_EXTEND]     = { NIL, "VM:EXTEND",       AREG, ALOB, NARG },@|
         [OP_LOOKUP]     = { NIL, "VM:LOOKUP",       AREG, ALOB, NARG },@|
         [OP_CMPEQ]      = { NIL, "VM:CMPEQ?",       AREG, ALOT, ALOT },@|
@@ -3499,18 +3590,21 @@ shared opcode_table Op[OPCODE_LENGTH] = {@|
         [OP_CMPIS]      = { NIL, "VM:CMPIS?",       AREG, ALOT, ALOT },@|
         [OP_CMPLE]      = { NIL, "VM:CMPLE?",       AREG, ALOT, ALOT },@|
         [OP_CMPLT]      = { NIL, "VM:CMPLT?",       AREG, ALOT, ALOT },@|
-        [OP_SPORK]      = { NIL, "VM:SPORK",        AREG, AADD, NARG },@| /****/
+        [OP_SPORK]      = { NIL, "VM:SPORK",        AREG, AADD, NARG },@|
         [OP_CONS]       = { NIL, "VM:CONS",         AREG, ALOT, ALOT },@|
         [OP_HALT]       = { NIL, "VM:HALT",         NARG, NARG, NARG },@|
         [OP_JOIN]       = { NIL, "VM:JOIN",         AREG, ALOB, NARG },@|
-        [OP_JUMP]       = { NIL, "VM:JUMP",         AADD, NARG, NARG },@| /* Unconditional. */
-        [OP_TEST]       = { NIL, "VM:TEST",         AREG, AADD, NARG },@| /****/
+        [OP_JUMP]       = { NIL, "VM:JUMP",         AADD, NARG, NARG },@|
         [OP_LOAD]       = { NIL, "VM:LOAD",         AREG, ALOB, NARG },@|
+        [OP_OPEN]       = { NIL, "VM:OPEN",         AREG, ALOB, NARG },@|
+        [OP_PEND]       = { NIL, "VM:PEND",         AREG, AADD, NARG },@|
+        [OP_TEST]       = { NIL, "VM:TEST",         AREG, AADD, NARG },@|
         [OP_TRAP]       = { NIL, "VM:TRAP",         ARGH, NARG, NARG },@|
         [OP_ADD]        = { NIL, "VM:ADD",          AREG, ALOT, ALOT },@|
         [OP_CAR]        = { NIL, "VM:CAR",          AREG, ALOB, NARG },@|
         [OP_CDR]        = { NIL, "VM:CDR",          AREG, ALOB, NARG },@|
         [OP_CMP]        = { NIL, "VM:CMP",          AREG, ALOT, ALOT },@|
+        [OP_SLO]        = { NIL, "VM:SLO",          AREG, ALOB, NARG },@|
         [OP_SUB]        = { NIL, "VM:SUB",          AREG, ALOT, ALOT },@/
 };
 
@@ -3586,34 +3680,36 @@ These macros return the bits marked X shifted to the right.
 TODO: Art.
 
 @.TODO@>
-@d OP(I)   (((I) & 0x3f000000) >> 24)   /* ..XXXXXX ........ ........ ........ */
-@d MODE(I) (((I) & 0xc0000000) >> 30)   /* XX...... ........ ........ ........ */
+@d IB0(I) 42
 @#
-@d ARG0(I) (((I) & 0x00ff0000) >> 16)   /* ........ XXXXXXXX ........ ........ */
-@d REG0(I) (((I) & 0x003f0000) >> 16)   /* ........ ..XXXXXX ........ ........ */
-@d POP0(I) (((I) & 0x00800000) >> 23)   /* ........ X....... ........ ........ */
+@d ximOP(I)   (((I) & 0x3f000000) >> 24)   /* ..XXXXXX ........ ........ ........ */
+@d ximMODE(I) (((I) & 0xc0000000) >> 30)   /* XX...... ........ ........ ........ */
 @#
-@d ARG1(I) (((I) & 0x0000ff00) >>  8)   /* ........ ........ XXXXXXXX ........ */
-@d REG1(I) (((I) & 0x00003f00) >>  8)   /* ........ ........ ..XXXXXX ........ */
-@d POP1(I) (((I) & 0x00008000) >> 23)   /* ........ ........ X....... ........ */
+@d ximARG0(I) (((I) & 0x00ff0000) >> 16)   /* ........ XXXXXXXX ........ ........ */
+@d ximREG0(I) (((I) & 0x003f0000) >> 16)   /* ........ ..XXXXXX ........ ........ */
+@d ximPOP0(I) (((I) & 0x00800000) >> 23)   /* ........ X....... ........ ........ */
 @#
-@d ARG2(I) (((I) & 0x000000ff) >>  0)   /* ........ ........ ........ XXXXXXXX */
-@d REG2(I) (((I) & 0x0000003f) >>  0)   /* ........ ........ ........ ..XXXXXX */
-@d POP2(I) (((I) & 0x00000080) >> 23)   /* ........ ........ ........ X....... */
+@d ximARG1(I) (((I) & 0x0000ff00) >>  8)   /* ........ ........ XXXXXXXX ........ */
+@d ximREG1(I) (((I) & 0x00003f00) >>  8)   /* ........ ........ ..XXXXXX ........ */
+@d ximPOP1(I) (((I) & 0x00008000) >> 23)   /* ........ ........ X....... ........ */
 @#
-@d ARGD(I) (((I) & 0x0000ffff) >>  0)   /* ........ ........ XXXXXXXX XXXXXXXX */
-@d ARGT(I) (((I) & 0x00ffffff) >>  0)   /* ........ XXXXXXXX XXXXXXXX XXXXXXXX */
+@d ximARG2(I) (((I) & 0x000000ff) >>  0)   /* ........ ........ ........ XXXXXXXX */
+@d ximREG2(I) (((I) & 0x0000003f) >>  0)   /* ........ ........ ........ ..XXXXXX */
+@d ximPOP2(I) (((I) & 0x00000080) >> 23)   /* ........ ........ ........ X....... */
 @#
-@d TTOP(I) (((I) & 0x00c00000) >> 22)   /* ........ XX...... ........ ........ */
-@d TLEG(I) (((I) & 0x0000ffc0) >>  6)   /* ........ ........ XXXXXXXX XX...... */
-@d TABL(I) ((TTOP(I) << 10) | TLEG(I))  /* ........ XX--><-- XXXXXXXX XX...... */
-@d INDX(I) (((I) & 0x0000003f) >>  0)   /* ........ ........ ........ ..XXXXXX */
+@d ximARGD(I) (((I) & 0x0000ffff) >>  0)   /* ........ ........ XXXXXXXX XXXXXXXX */
+@d ximARGT(I) (((I) & 0x00ffffff) >>  0)   /* ........ XXXXXXXX XXXXXXXX XXXXXXXX */
 @#
-@d ADDD(I) (*(((uint16_t *) &(I)) + 1))
-@d INTD(I) (*(((int16_t *) &(I)) + 1))
-@d INT0(I) (*(((int8_t *) &(I)) + 1))
-@d INT1(I) (*(((int8_t *) &(I)) + 2))
-@d INT2(I) (*(((int8_t *) &(I)) + 3))
+@d ximTTOP(I) (((I) & 0x00c00000) >> 22)   /* ........ XX...... ........ ........ */
+@d ximTLEG(I) (((I) & 0x0000ffc0) >>  6)   /* ........ ........ XXXXXXXX XX...... */
+@d ximTABL(I) ((ximTTOP(I) << 10) | ximTLEG(I))  /* ........ XX--><-- XXXXXXXX XX...... */
+@d ximINDX(I) (((I) & 0x0000003f) >>  0)   /* ........ ........ ........ ..XXXXXX */
+@#
+@d ximADDD(I) (*(((uint16_t *) &(I)) + 1))
+@d ximINTD(I) (*(((int16_t *) &(I)) + 1))
+@d ximINT0(I) (*(((int8_t *) &(I)) + 1))
+@d ximINT1(I) (*(((int8_t *) &(I)) + 2))
+@d ximINT2(I) (*(((int8_t *) &(I)) + 3))
 @#
 @d TINY_MIN (-0x10)
 @d TINY_MAX ( 0x0f)
@@ -3624,6 +3720,7 @@ TODO: Art.
 @d LBC_ADDRESS_INDIRECT 1 /* Unsigned 16/24 bit offset to |PROGRAM_EXPORT_BASE|
                                 has pointer-size address. */
 @d LBC_ADDRESS_RELATIVE 2 /* Signed 16 bit delta. */
+@d LBC_ADDRESS_REGISTER 3 /* Integer in a register */
 @d LBC_FIRST_REGISTER   2 /* These are not backwards. */
 @d LBC_SECOND_REGISTER  1
 @d LBC_OBJECT_CONSTANT  0 /* Small fixed integers also; ignore low byte */
@@ -3650,8 +3747,8 @@ TODO: Art.
 @d instruction_page(O) ((O) & PROGRAM_PAGE)
 @<Global...@>=
 unique address Ip = PROGRAM_INVALID; /* Current (or previous) instruction. */
-shared cell Program_ObjectDB = NIL;
-shared int Program_ObjectDB_Free = 0;
+shared cell ObjectDB = NIL;
+shared int ObjectDB_Free = 0; /* Multiple of |OBJECTDB_TABLE_LENGTH|. */
 shared cell Program_Export_Table = NIL;
 shared address *Program_Export_Base = NULL;
 shared address Program_Export_Free = 0;
@@ -3659,8 +3756,8 @@ shared pthread_mutex_t Program_Lock;
 
 @ @<Extern...@>=
 extern unique address Ip;
-extern shared int Program_ObjectDB_Free;
-extern shared cell Program_ObjectDB, Program_Export_Table;
+extern shared int ObjectDB_Free;
+extern shared cell ObjectDB, Program_Export_Table;
 extern shared address *Program_Export_Base, Program_Export_Free;
 extern shared pthread_mutex_t Program_Lock;
 
@@ -3673,7 +3770,7 @@ refers back to them.
 
 @.TODO@>
 @<Finish init...@>=
-orabort(new_array(0, fix(0), &Program_ObjectDB));
+orabort(new_array(0, fix(0), &ObjectDB));
 orabort(mem_alloc(NULL, PROGRAM_LENGTH, 1 << PROGRAM_WIDTH,
         (void **) &Program_Export_Base));
 assert((address) Program_Export_Base == instruction_page((address)
@@ -3696,6 +3793,23 @@ no need to check for it?
 While carrying out an instruction |Ip| points to the {\it next\/}
 instruction.
 
+@d IB(I,B)  (((char *) &(I))[B])
+@d UB(I,B)  (((unsigned char *) &(I))[B])
+@#
+@d MODE(I)  ((UB((I), 0) >> 6) & 0x03)
+@d OP(I)    ((UB((I), 0) >> 0) & 0x3f)
+@#
+@d SINT(I)  ((int16_t) (be32toh(I) & 0xffff))
+@d UINT(I)  ((uint16_t) (be32toh(I) & 0xffff))
+@#
+@d TL3(I)   (((UB((I), 3) >> 6) & 0xc0) << 10)
+@d TL2(I)   (((UB((I), 2) >> 0) & 0xff) <<  2)
+@d TL1(I)   (((UB((I), 1) >> 6) & 0x03) <<  0)
+@d TABLE(I) (TL3(I) | TL2(I) | TL1(I))
+@d INDEX(I) ((UB((I), 3) >> 0) & 0x3f)
+@#
+@d REG(I,B) (UB((I), (B)) & 0x3f)
+@d POP(I,B) (UB((I), (B)) & 0x80)
 @c
 void
 interpret (void)
@@ -3746,47 +3860,35 @@ interpret_register (instruction  ins,
                     int          argc,
                     cell        *ret)
 {
-        vm_register r;
-        bool p;
-        error_code reason;
-
         assert(argc >= 0 && argc <= 2);
-        switch (argc) {
-        case 0: p = POP0(ins);@+ r = REG0(ins);@+ break;
-        case 1: p = POP1(ins);@+ r = REG1(ins);@+ break;
-        case 2: p = POP2(ins);@+ r = REG2(ins);@+ break;
-        }
-        switch (r) {
-                case LR_Control_Link:
-                        if (p)
-                                orreturn(clink_pop(Register[r], ret));
-                        else
-                                orreturn(clink_peek(Register[r], ret));
-                        break;
-                case LR_Trap_Handler:@;
+        switch (REG(ins, argc + 1)) {
+        case LR_Trap_Handler:@;
+                return LERR_INCOMPATIBLE;
+        case LR_Ip:
+                if (POP(ins, argc + 1))
                         return LERR_INCOMPATIBLE;
-                case LR_Ip:
-                        if (p)
-                                return LERR_INCOMPATIBLE;
-                        orreturn(new_int_c(Ip, true, ret));
-                        break;
-                case LR_Trap_Ip:
-                        if (p)
-                                return LERR_INCOMPATIBLE;
-                        orreturn(new_int_c(Trap_Ip, true, ret));
-                        break;
-                case LR_Trapped:
-                        if (p)
-                                return LERR_INCOMPATIBLE;
-                        *ret = predicate(Trapped);
-                        break;
-                default:
-                        if (p)
-                                orreturn(clink_pop(Register[r], ret));
-                        else
-                                *ret = *Register[r];
+                return new_int_c(Ip, true, ret);
+        case LR_Trap_Ip:
+                if (POP(ins, argc + 1))
+                        return LERR_INCOMPATIBLE;
+                return new_int_c(Trap_Ip, true, ret);
+        case LR_Trapped:
+                if (POP(ins, argc + 1))
+                        return LERR_INCOMPATIBLE;
+                *ret = predicate(Trapped);
+                return LERR_NONE;
+        case LR_Control_Link:
+                if (POP(ins, argc + 1))
+                        return clink_pop(Register[REG(ins, argc + 1)], ret);
+                else
+                        return clink_peek(Register[REG(ins, argc + 1)], ret);
+        default:
+                if (POP(ins, argc + 1))
+                        return clink_pop(Register[REG(ins, argc + 1)], ret);
+                else
+                        *ret = *Register[REG(ins, argc + 1)];
+                return LERR_NONE;
         }
-        return LERR_NONE;
 }
 
 @ @c
@@ -3798,14 +3900,11 @@ interpret_tiny_object (instruction  ins,
         int8_t value;
 
         assert(argc >= 1 && argc <= 2);
-        if (argc == 1)
-                value = INT1(ins);
-        else
-                value = INT2(ins);
-        if (special_p(value))
+        value = IB(ins, argc + 1);
+        if (fixed_p(value))
+                *ret = fix(((value >> 4) & 0xf) - (-TINY_MIN));
+        else if (special_p(value))
                 *ret = value;
-        else if (fixed_p(value))
-                *ret = fix(asr(value, 4));
         else
                 return LERR_INCOMPATIBLE;
         return LERR_NONE;
@@ -3816,68 +3915,94 @@ error_code
 interpret_solo_argument (instruction  ins,
                          cell        *ret)
 {
-        int index, table;
-        cell ltable;
+        long index;
         int16_t value;
-        error_code reason;
 
         switch(MODE(ins)) {
         case LBC_OBJECT_CONSTANT:@;
-                value = INTD(ins);
-                if (special_p(value))
-                        *ret = value;
-                else if (fixed_p(value))
-                        *ret = fix(asr(value, 4));
-                else
-                        return LERR_INCOMPATIBLE;
-                return LERR_NONE;
+                return interpret_tiny_object(ins, 1, ret);
         case LBC_OBJECT_INTEGER:@;
-                value = INTD(ins);
+                value = SINT(ins);
                 return new_int_c(value, true, ret);
         case LBC_OBJECT_REGISTER:@;
                 return interpret_register(ins, 1, ret);
         case LBC_OBJECT_TABLE:@;
-                table = TABL(ins);
-                index = INDX(ins);
-                if (table >= array_length(Program_ObjectDB))
-                        return LERR_MISSING;
-                orreturn(array_ref_c(Program_ObjectDB, table, &ltable));
-                return array_ref_c(ltable, index, ret);
+                index = TABLE(ins) << OBJECTDB_TABLE_WIDTH;
+                index |= INDEX(ins);
+                if (index > ObjectDB_Free)
+                        return LERR_OUT_OF_BOUNDS;
+                return array_ref_c(ObjectDB, index, ret);
         default:
                 return LERR_INTERNAL;
         }
 }
 
-@ @d resign24(O) (((O) & (1 << 23)) ? ((O) | (0xff << 24)) : (O))
-@d resign16(O) (((O) & (1 << 15)) ? ((O) | (0xffff << 16)) : (O))
-@c
+@ @c
+int32_t
+interpret_int16 (instruction ins,
+                 bool        sign)
+{
+        int32_t rval;
+
+        rval = (((0xff & UB(ins, 2)) << 8) | ((0xff & UB(ins, 3)) << 0));
+        if (sign && rval & 0x00008000)
+                rval |= 0xffff0000;
+        return rval;
+}
+
+@ @c
+int32_t
+interpret_int24 (instruction ins,
+                 bool        sign)
+{
+        int32_t rval;
+
+        rval = (((0xff & UB(ins, 1)) << 16)
+              | ((0xff & UB(ins, 2)) << 8)
+              | ((0xff & UB(ins, 3)) << 0));
+        if (sign && rval & 0x00800000)
+                rval |= 0xff000000;
+        return rval;
+}
+
+@ @c
 error_code
 interpret_address16 (instruction  ins,
                      address     *ret)
 {
         address from, to;
+        cell via;
+        error_code reason;
 
         from = Ip - sizeof (address);
         switch (MODE(ins)) {
         case LBC_ADDRESS_DIRECT:@;
-                to = ARGD(ins) | instruction_page(from);
+                to = interpret_int16(ins, false) | instruction_page(from);
+                break;
+        case LBC_ADDRESS_RELATIVE:@;
+                to = interpret_int16(ins, true) + from; /* `via' */
+                if (instruction_page(to) != instruction_page(from))
+                        return LERR_OUT_OF_BOUNDS;
                 break;
         case LBC_ADDRESS_INDIRECT:@;
-                to = ARGD(ins); /* `via' */
+                to = interpret_int16(ins, false); /* `via' */
                 if (to >= Program_Export_Free)
                         return LERR_OUT_OF_BOUNDS;
                 to = Program_Export_Base[to];
                 break;
-        case LBC_ADDRESS_RELATIVE:@;
-                to = from + resign16(ARGD(ins));
-                if (instruction_page(to) != instruction_page(from))
-                        return LERR_OUT_OF_BOUNDS;
+        case LBC_ADDRESS_REGISTER:@;
+                orreturn(interpret_register(ins, 1, &via));
+                if (fixed_p(via) && fixed_value(via) >= 0)
+                        to = fixed_value(via);
+                else if (positive_p(via) && !int_more_p(via))
+                        to = int_digit(via);
+                else
+                        return LERR_INCOMPATIBLE;
                 break;
         }
         *ret = to;
         return LERR_NONE;
 }
-
 
 @ The same as |interpret_address16| but using |ARGT| \AM\ |resign24|
 to obtain a 24-bit value.
@@ -3888,22 +4013,33 @@ interpret_address24 (instruction  ins,
                      address     *ret)
 {
         address from, to;
+        cell via;
+        error_code reason;
 
         from = Ip - sizeof (address);
         switch (MODE(ins)) {
         case LBC_ADDRESS_DIRECT:@;
-                to = ARGT(ins) | instruction_page(from);
+                to = interpret_int24(ins, false) | instruction_page(from);
+                break;
+        case LBC_ADDRESS_RELATIVE:@;
+                to = interpret_int24(ins, true) + from;
+                if (instruction_page(to) != instruction_page(from))
+                        return LERR_OUT_OF_BOUNDS;
                 break;
         case LBC_ADDRESS_INDIRECT:@;
-                to = ARGT(ins); /* `via' */
+                to = interpret_int24(ins, false) + from; /* `via' */
                 if (to >= Program_Export_Free)
                         return LERR_OUT_OF_BOUNDS;
                 to = Program_Export_Base[to];
                 break;
-        case LBC_ADDRESS_RELATIVE:@;
-                to = from + resign24(ARGD(ins));
-                if (instruction_page(to) != instruction_page(from))
-                        return LERR_OUT_OF_BOUNDS;
+        case LBC_ADDRESS_REGISTER:@;
+                orreturn(interpret_register(ins, 0, &via));
+                if (fixed_p(via) && fixed_value(via) >= 0)
+                        to = fixed_value(via);
+                else if (positive_p(via) && !int_more_p(via))
+                        to = int_digit(via);
+                else
+                        return LERR_INCOMPATIBLE;
                 break;
         }
         *ret = to;
@@ -3916,9 +4052,7 @@ error_code
 interpret_save (instruction ins,
                 cell        result)
 {
-        error_code reason;
-
-        switch (REG0(ins)) {
+        switch (REG(ins, 1)) {
         case LR_Ip:@; /* Could be mutable, but why? */
         case LR_Symbol_Table:@;
         case LR_Trap_Handler:@; /* TODO */
@@ -3926,23 +4060,22 @@ interpret_save (instruction ins,
         case LR_Trapped:@;
                 return LERR_IMMUTABLE;
         case LR_Control_Link:@;
-                orreturn(clink_push(Register[REG0(ins)], result));
+                return clink_push(Register[REG(ins, 1)], result);
                 break;
         case LR_Environment:
                 if (!environment_p(result))
                         return LERR_INCOMPATIBLE;
-                *Register[REG0(ins)] = result;
-                break;
+                *Register[REG(ins, 1)] = result;
+                return LERR_NONE;
         case LR_Heap_Shared:@;
         case LR_Heap_Thread:@;
         case LR_Heap_Trap:
                 if (!heap_p(result))
                         return LERR_INCOMPATIBLE;
         default:@;
-                *Register[REG0(ins)] = result;
-                break;
+                *Register[REG(ins, 1)] = result;
+                return LERR_NONE;
         }
-        return LERR_NONE;
 }
 
 @ Three special registers control the operation of the trap handler.
@@ -3984,8 +4117,9 @@ default:
         reason = LERR_INSTRUCTION;
         goto Trap;
 case OP_TRAP: /* Handle |ARG1|/|ARG2| here, if at all */
-        reason = INT0(ins); /* Ignore parsers and dive straight into |ARG0|. */
+        reason = UB(ins, 1);
 Trap:
+printf("TRAP %d\n", reason);
         Trapped = true;
         if (Trap_Handler[real_trap(reason)] != PROGRAM_INVALID) {
                 Trapped = false;
@@ -4001,17 +4135,38 @@ case OP_HALT:@;
         return;
 
 @ @<Carry out...@>=
+case OP_PEND:@;
+        ortrap(interpret_address16(ins, &link));
+        orassert(new_int_c(link, true, &VM_Result));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+
+@ @<Carry out...@>=
 case OP_JUMP:@;
         ortrap(interpret_address24(ins, &Ip));
         break;
-case OP_TEST:@;
+case OP_TEST:@; /* Although using |interpret_argument| we know arg 0 must
+                        be a register. */
         ortrap(interpret_argument(ins, 0, &VM_Result));
-        if (true_p(VM_Result))
-                ortrap(interpret_address16(ins, &Ip));
+        if (POP(ins, 1)) {
+                if (false_p(VM_Result))
+                        ortrap(interpret_address16(ins, &Ip));
+        } else {
+                if (true_p(VM_Result))
+                        ortrap(interpret_address16(ins, &Ip));
+        }
         break;
 case OP_WIDETEST:@;
         if (true_p(Accumulator))
                 ortrap(interpret_address24(ins, &Ip));
+        break;
+
+@ @<Carry out...@>=
+case OP_SLO:@;
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        ortrap(primitive_search(VM_Arg1, &VM_Arg2));
+        ortrap(primitive_call(VM_Arg2, &VM_Result));
+        ortrap(interpret_save(ins, VM_Result));
         break;
 
 @ @<Carry out...@>=
@@ -4051,7 +4206,8 @@ case OP_LOAD:@;
 @ @<Fun...@>=
 error_code clink_pop_imp (cell *, bool, cell *);
 error_code clink_push (cell *, cell);
-error_code new_closure (bool, cell, cell, cell, cell *);
+error_code new_closure (bool, cell, cell, cell *);
+error_code closure_open (cell, cell *);
 
 @ @c
 error_code
@@ -4073,7 +4229,9 @@ clink_pop_imp (cell *stack,
                cell *ret)
 {
         if (null_p(*stack))
-                return LERR_OVERFLOW;
+                return LERR_UNDERFLOW;
+        else if (!pair_p(*stack))
+                return LERR_INCOMPATIBLE;
         *ret = lsin(*stack);
         if (popping)
                 *stack = ldex(*stack);
@@ -4106,20 +4264,29 @@ case OP_CDR:@;
 case OP_APPLICATIVE:@;
         ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Formals */
         ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Body */
-        ortrap(new_closure(true, Environment, VM_Arg1, VM_Arg2, &VM_Result));
+        ortrap(new_closure(true, VM_Arg1, VM_Arg2, &VM_Result));
         ortrap(interpret_save(ins, VM_Result));
         break;
 case OP_OPERATIVE:@;
         ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Formals */
         ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Body */
-        ortrap(new_closure(false, Environment, VM_Arg1, VM_Arg2, &VM_Result));
+        ortrap(new_closure(false, VM_Arg1, VM_Arg2, &VM_Result));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+case OP_OPEN:@;
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        ortrap(closure_open(VM_Arg1, &VM_Result)); /* Sets |Environment|. */
         ortrap(interpret_save(ins, VM_Result));
         break;
 
-@ @c
+@ Needs \.{(formals . body)} for return from |closure_open|.
+
+TODO: Check formals for list-of-symbols and body for ... something.
+
+@.TODO@>
+@c
 error_code
 new_closure (bool  applicative,
-             cell  env,
              cell  formals,
              cell  body,
              cell *ret)
@@ -4127,10 +4294,22 @@ new_closure (bool  applicative,
         cell new;
         error_code reason;
 
-        orreturn(cons(body, NIL, &new));
-        orreturn(cons(env, new, &new));
-        orreturn(new_atom(applicative ? FORM_APPLICATIVE : FORM_OPERATIVE,
-                formals, new, ret));
+        orreturn(cons(formals, body, &new));
+        return new_atom(applicative ? FORM_APPLICATIVE : FORM_OPERATIVE,
+                Environment, new, ret);
+}
+
+@ @c
+error_code
+closure_open (cell  o,
+              cell *ret)
+{
+        error_code reason;
+
+        if (!closure_p(o))
+                return LERR_INCOMPATIBLE;
+        Environment = lsin(o);
+        *ret = ldex(o);
         return LERR_NONE;
 }
 
@@ -4154,14 +4333,12 @@ case OP_EXTEND:@;
 case OP_DEFINE_M:@;
         ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Label */
         ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Value */
-        ortrap(new_closure(true, Environment, VM_Arg1, VM_Arg2, &VM_Result));
         ortrap(env_save_m(Environment, VM_Arg1, VM_Arg2, false));
         ortrap(interpret_save(ins, VOID));
         break;
 case OP_REPLACE_M:@;
         ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Label */
         ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Value */
-        ortrap(new_closure(true, Environment, VM_Arg1, VM_Arg2, &VM_Result));
         ortrap(env_save_m(Environment, VM_Arg1, VM_Arg2, true));
         ortrap(interpret_save(ins, VOID));
         break;
@@ -4317,7 +4494,6 @@ who's sin half indicates how to interpret the argument datum in the
 dex half.
 
 @<Constant Sym...@>=
-LBA_ABSOLUTE,
 LBA_ADDRESS,
 LBA_ASIS,
 LBA_INDIRECT,
@@ -4328,7 +4504,6 @@ LBA_RELATIVE,
 LBA_TABLE,
 
 @ @<Finish init...@>=
-init_identifier(LBA_ABSOLUTE,     "absolute",     ltmp);
 init_identifier(LBA_ADDRESS,      "address",      ltmp);
 init_identifier(LBA_ASIS,         "as-is",        ltmp);
 init_identifier(LBA_INDIRECT,     "indirect",     ltmp);
@@ -4388,8 +4563,7 @@ statement_set_argument_m (cell o,
         if (!pair_p(datum))
                 return LERR_INCOMPATIBLE;
         label = lsin(datum);
-        if (label != Label[LBA_ABSOLUTE]
-                    && label != Label[LBA_ADDRESS]
+        if (label != Label[LBA_ADDRESS]
                     && label != Label[LBA_ASIS]@|
                     && label != Label[LBA_INDIRECT]
                     && label != Label[LBA_OBJECT]
@@ -4411,7 +4585,8 @@ typedef struct {
         cell blob; /* |NIL| or a segment of raw data. */
         cell objectdb; /* Array of \.{(object . (lines))}. */
         cell fardb; /* Hashtable of \.{\{label address\}}. */
-        cell local[10]; /* \.{(latest-reverse . (pending-forward))} (x10). */
+        cell local[20]; /* \.{latest-reverse} at \.i,
+                                \.{(pending-forward)} at \.{i + 10}. */
         cell pending_far; /* |symbol_p| or |NIL|. */
         cell pending_local; /* -1 or 0--9. */
         cell pending_comment; /* List of segments. */
@@ -4430,7 +4605,7 @@ typedef struct {
 @d ASSEMBLY_COMPLETE_HEADER    (sizeof (assembly_complete) / sizeof (cell))
 @d ASSEMBLY_WORKING_HEADER     (sizeof (assembly_working) / sizeof (cell))
 @#
-@d assembly_address(O)  (larry_base(O)[0])
+@d assembly_address(O)  (larry_ref_imp((O), 0))
 @d assembly_complete_p(O)
                         (!integer_p(assembly_address(O)))
 @d assembly_installed_p(O)
@@ -4450,6 +4625,8 @@ typedef struct {
                                 : (address) int_digit(assembly_address(O)))
 @d assembly_set_cursor_m(O,A)
                         (new_int_c((A), true, &assembly_address(O)))
+@d assembly_set_cursor_m_imp(O,A)
+                        (larry_set_m_imp((O), 0, (A)))
 @d assembly_complete_ref(O,I)
                         (larry_ref_imp((O), (I) + ASSEMBLY_COMPLETE_HEADER))
 @d assembly_working_ref(O,I)
@@ -4543,6 +4720,9 @@ new_assembly (cell *ret)
         orreturn(new_larry(ASSEMBLY_WORKING_HEADER + 16, 0, NIL,
                 FORM_ASSEMBLY, &new));
         assembly_set_cursor_m(new, 0);
+        assembly_set_pending_far_m(new, NIL);
+        assembly_set_pending_local_m(new, -1);
+        assembly_set_pending_comment_m(new, NIL);
         orreturn(new_hashtable(0, &tmp));
         assembly_set_fardb_m(new, tmp);
         orreturn(new_array(1, fix(0), &tmp));
@@ -4630,6 +4810,7 @@ new_assembly_file_handle (cell  o,
         cell nbyte; /* The next byte. */
         cell new;
         cell buffer; /* Pointer to line buffer */
+        char next;
         int i;
         intmax_t line;
         error_code reason;
@@ -4648,14 +4829,14 @@ new_assembly_file_handle (cell  o,
                                 return LERR_SYNTAX;
                 } else if (failure_p(reason))
                         return reason;
-                segment_base(buffer)[i++] = word_value(nbyte);
-                if (asm_vspace_p(word_value(nbyte))) {
+                segment_base(buffer)[i++] = word(nbyte)[0];
+                if (asm_vspace_p(word(nbyte)[0])) {
                         orreturn(assembly_line(new, line,
                                 (char *) segment_base(buffer), i));
+                        line++;
                         i = 0;
                 } else if (i > ASSEMBLY_LINE_LENGTH)
                         return LERR_SYNTAX;
-                line++;
         }
         return finish_assembly(new, ret);
 }
@@ -4714,30 +4895,32 @@ alphabetic tests case insensitive.
 @.TODO@>
 @d asm_hspace_p(O)    ((O) == ' ' || (O) == '\t')
 @d asm_vspace_p(O)    ((O) == '\n')
-@d asm_alpha_p(O)     ((((O) & 0xbf) >= 'A') && (((O) & 0xbf) <= 'Z'))
+@d asm_alpha_p(O)     ((((O) & 0xdf) >= 'A') && (((O) & 0xdf) <= 'Z'))
 @d asm_digit_p(O)     ((O) >= '0' && (O) <= '9')
 @#
-@d asm_here_p(O)      (((O) & 0xbf) == 'H')
-@d asm_back_p(O)      (((O) & 0xbf) == 'B')
-@d asm_fore_p(O)      (((O) & 0xbf) == 'F')
+@d asm_here_p(O)      (((O) & 0xdf) == 'H')
+@d asm_back_p(O)      (((O) & 0xdf) == 'B')
+@d asm_fore_p(O)      (((O) & 0xdf) == 'F')
 @d asm_local_p(O)     (asm_back_p(O) || asm_fore_p(O))
 @d asm_far_start_p(O) (asm_alpha_p(O) || (O) == '_' || (O) == ':'
-        || (O) == '$')
-@d asm_far_p(O)       (asm_far_start_p(O) /* If it quacks like a comment. */
+        || (O) == '$' || (O) == '!')
+@d asm_far_p(O)       ((asm_far_start_p(O) && (O) != '!') /* If it quacks
+                                                            like a comment. */
+        || (O) == '?'
         || (O) == '#' || (O) == '%' || (O) == '/' || (O) == '-' || (O) == '^')
 @#
 @d asm_const_p(O)     ((O) == '#')
 @d asm_label_p(O)     ((O) == '@@')
 @d asm_object_p(O)    ((O) == '\'')
 @d asm_plusminus_p(O) ((O) == '+' || (O) == '-')
-@d asm_popping_p(O)   ((O) == '!')
+@d asm_popping_p(O)   ((O) == '=')
 @d asm_separator_p(O) ((O) == ',')
 @#
 @d asm_op_start_p(O)  (asm_alpha_p(O))
 @d asm_op_p(O)        (asm_op_start_p(O) || (O) == '!' || (O) == '?')
-@d asm_false_p(O)     (((O) & 0xbf) == 'F')
-@d asm_true_p(O)      (((O) & 0xbf) == 'T')
-@d asm_greg_p(O)      (((O) & 0xbf) == 'R')
+@d asm_false_p(O)     (((O) & 0xdf) == 'F')
+@d asm_true_p(O)      (((O) & 0xdf) == 'T')
+@d asm_greg_p(O)      (((O) & 0xdf) == 'R')
 @d asm_reg_start_p(O) (asm_alpha_p(O)) /* nb.~Includes \.R! */
 @d asm_reg_p(O)       (asm_reg_start_p(O) || asm_digit_p(O)
         || (O) == '_' || (O) == '-')
@@ -4755,10 +4938,11 @@ The buffer pointed to in the arguments to |assembly_line| is
 considered immutable.
 
 @d asm_skip_some(B,L,T,P)
-        while ((T) < (L))
-                if (P((B)[(T) + 1]))
-                        (T)++ /* nb.~|P| is {\it not\/} parenthesised so
+        while ((T)++ < (L))
+                if (!((P((B)[(T)]))))
+                        /* nb.~|P| is {\it not\/} parenthesised so
                                                 the that test can be negated! */
+                        break /* No semicolon */
 @d asm_skip_space(B,L,T) asm_skip_some((B), (L), (T), asm_hspace_p)
 @c
 error_code
@@ -4805,6 +4989,11 @@ trailing_comment:
 comment:
         assembly_apply_comment(o, srcline, lbuf + cursor, length - cursor);
 finish_line:
+        if (!null_p(line) && assembly_pending_local_p(o)) {
+                orreturn(new_int_c(assembly_cursor(o) - 1, true,
+                        &(assembly_localdb(o)[assembly_pending_local(o)])));
+                assembly_set_pending_local_m(o, -1);
+        }
         return LERR_NONE;
 }
 
@@ -4816,8 +5005,6 @@ configures the assembly object to associate that label with this
 @<Look for a local label@>=
 if (length < 2 || !asm_here_p(lbuf[1]))
         return LERR_SYNTAX;
-else if (assembly_pending_local_p(o))
-        return LERR_EXISTS;
 orreturn(assembly_apply_local_label(o, srcline, lbuf[0] - '0'));
 cursor = 2;
 
@@ -4826,7 +5013,10 @@ of the label within the buffer is similarly identified and passed
 to |assembly_apply_far_label| to prepare to label the next line.
 
 @<Look for a far label@>=
-asm_skip_some(lbuf, length, cursor, asm_label_p);
+cursor++;
+asm_skip_some(lbuf, length, cursor, asm_far_p);
+if (cursor == 2)
+        goto comment;
 orreturn(assembly_apply_far_label(o, srcline, lbuf, cursor));
 
 @ From this point on we no longer have an absolute starting position
@@ -4845,9 +5035,15 @@ This block falls through to |@<Look for opcode arguments@>|.
 if (cursor == length)
         return LERR_NONE;
 more = cursor;
-if (!asm_op_start_p(lbuf[cursor++]))
-        return LERR_SYNTAX;
+if (!asm_op_start_p(lbuf[cursor++])) {
+        if (cursor == length || asm_hspace_p(lbuf[cursor + 1]))
+                goto comment;
+        else
+                return LERR_SYNTAX;
+}
 asm_skip_some(lbuf, length, cursor, asm_op_p);
+if (cursor - more == 2)
+        goto comment;
 orreturn(assembly_begin_opcode(o, line, lbuf + more, cursor - more, &line));
 
 @ Some opcodes do not accept arguments (but can still have comments).
@@ -4927,12 +5123,18 @@ assembly_scan_argument (cell  o,
         }
         switch (cat) {
         case AADD: /* An address. */
-                if (!asm_label_p(lbuf[cursor]))
+                if (asm_label_p(lbuf[cursor])) {
+                        offset++;
+                        @<Scan an address...@>@;
+                } else if ((popping = asm_popping_p(lbuf[cursor]))
+                            || asm_reg_start_p(lbuf[cursor])) {
+                        offset++;
+                        goto scan_address_register;
+                } else
                         return LERR_SYNTAX;
-                offset++;
-                @<Scan an address...@>@;
         case ALOB:@; /* Anything. */
         case ARGH: /* ... actually, only a symbol (|OP_TRAP|). */
+        printf("ARGH!\n");
                 if (lbuf[offset] == '\'') {
                         @<Scan a simple object and |goto scan_found|@>
                 } else if (cat == ARGH)
@@ -4961,28 +5163,29 @@ detected. An address argument is saved as a pair who's sinister
 half is false.
 
 @<Scan an address and |goto scan_found|@>=
-if (length - offset < 3)
+if (length - offset < 2)
         return LERR_SYNTAX;
 cursor = offset;
 if (asm_digit_p(lbuf[cursor])) { /* \.{(\ft address . $\pm$label)} */
         if (!asm_local_p(lbuf[cursor + 1]))
                 return LERR_SYNTAX;
-        minus = asm_back_p(lbuf[cursor + 1]);
-        found = fix((lbuf[cursor] - '0') * (minus ? -1 : 1));
+        found = fix(lbuf[cursor] - '0');
+        if (asm_back_p(lbuf[cursor + 1]))
+                found = fix(-(fixed_value(found) + 1));
+        orreturn(cons(Label[LBA_ADDRESS], found, &found));
         cursor += 2;
 } else if (asm_far_start_p(lbuf[cursor])) { /* \.{(\ft address . label)} */
-        orreturn(assembly_scan_far_address(lbuf + offset, length - offset,
+        orreturn(assembly_scan_far_address(lbuf + cursor, length - cursor,
                 &cursor, &found));
         cursor += offset;
 } else
         return LERR_SYNTAX;
-orreturn(cons(Label[LBA_ADDRESS], found, &found));
 goto scan_found;
 
 @ @<Scan a constant and abort or |goto scan_found|@>=
 if (asm_digit_p(lbuf[offset]))
         goto scan_integer;
-else if (lbuf[offset] == '#') {
+else if (asm_const_p(lbuf[offset])) {
         @<Scan a constant in assembly@>
 } else if (asm_plusminus_p(lbuf[offset])) {
         minus = (lbuf[offset] == '-');
@@ -4993,7 +5196,7 @@ else if (lbuf[offset] == '#') {
 } else if (length >= 2 && lbuf[offset] == '('
                 && lbuf[offset + 1] == ')') {
         cursor += 2;
-        found = NIL;
+        orreturn(cons(Label[LBA_OBJECT], NIL, &found));
         goto scan_found;
 }
 
@@ -5073,6 +5276,7 @@ popping = asm_popping_p(lbuf[offset]);
 if (popping)
         offset++;
 if (popping || asm_reg_start_p(lbuf[offset])) {
+scan_address_register:
         orreturn(assembly_scan_register(popping, lbuf + offset,
                 length - offset, &cursor, &found));
         cursor += offset;
@@ -5149,21 +5353,21 @@ else to lower case.
 
 @<Copy a register name to |tmp| with the correct case@>=
 if (*consume < length) {
-        if (!asm_reg_p(lbuf[*consume + 1]))
+        if (!asm_reg_p(lbuf[*consume]))
                 break;
         else {
-                (*consume)++;
                 if (upcase) {
-                        tmp[*consume + 2] = toupper(lbuf[*consume]);
+                        tmp[*consume + 3] = toupper(lbuf[*consume]);
                         upcase = false;
                 } else {
                         upcase = (lbuf[*consume] == '_'
                                 || lbuf[*consume] == '-');
                         if (upcase)
-                                tmp[*consume + 2] = '-';
+                                tmp[*consume + 3] = '-';
                         else
-                                tmp[*consume + 2] = tolower(lbuf[*consume]);
+                                tmp[*consume + 3] = tolower(lbuf[*consume]);
                 }
+                (*consume)++;
         }
 } else
         break;
@@ -5193,15 +5397,19 @@ assembly_scan_symbol (cell       cat,
         error_code reason;
 
         *consume = 0;
-        asm_skip_space(lbuf, length, *consume);
         if (length - *consume == 0)
                 return LERR_SYNTAX;
         offset = *consume;
-        if (!asm_far_start_p(lbuf[(*consume)++]))
+        if (!asm_far_start_p(lbuf[*consume]))
                 return LERR_SYNTAX;
+        (*consume)++;
         asm_skip_some(lbuf, length, *consume, asm_far_p);
         orreturn(new_symbol_buffer((byte *) lbuf + offset,
                 *consume - offset, NULL, &new));
+        printf("ALL...\n");
+        printf("sym "); psym(new); printf("\n");
+        printf("lbl "); for (int i = 0; i < length; i++) putchar(lbuf[i]);
+        printf("\n");
         if (lookup != NULL)
                 orreturn(lookup(new, &new));
         return cons(cat, new, ret);
@@ -5235,16 +5443,16 @@ assembly_apply_local_label (cell     o,
 
         assert(assembly_p(o) && !assembly_complete_p(o));
         assert(label >= 0 && label <= 9);
-        if (assembly_pending_local(o) >= 0)
-                return LERR_SYNTAX;
-        next = ldex(assembly_localdb(o)[label]);
+        if (assembly_pending_local_p(o))
+                return LERR_EXISTS;
+        next = assembly_localdb(o)[label + 10];
         while (!null_p(next)) {
+        printf("next %d %p?\n", label, next);
                 orassert(int_value(lsin(next), &lineat));
                 assembly_fix_address(o, lineat, assembly_cursor(o));
                 next = ldex(next);
         }
-        orassert(ldex_set_m(assembly_localdb(o)[label], NIL));
-                /* Leave sin for later. */
+        assembly_localdb(o)[label + 10] = NIL; /* Leave sin for later. */
         assembly_set_pending_local_m(o, label);
         return LERR_NONE;
 }
@@ -5258,25 +5466,27 @@ assembly_apply_far_label (cell     o,
                           char    *lbuf,
                           int      length)
 {
-        cell found, label, lline, new;
+        bool new;
+        cell found, label, lline;
         error_code reason;
 
         assert(assembly_p(o) && !assembly_complete_p(o));
         assert(length >= 1);
         if (!null_p(assembly_pending_far(o)))
                 return LERR_SYNTAX;
-        orreturn(new_symbol_buffer((byte *) lbuf, length + 3, NULL, &label));
+        orreturn(new_symbol_buffer((byte *) lbuf, length, NULL, &label));
         orreturn(new_int_c(assembly_cursor(o), true, &lline));
         orreturn(cons(label, lline, &lline));
 @#
         orreturn(hashtable_search(assembly_fardb(o), symbol_key(label),
                 env_match, (void *) label, &found));
-        new = !defined_p(found);
-        if (!new && !null_p(ldex(found)))
+        assert(undefined_p(found) || pair_p(found));
+        new = undefined_p(found);
+        if (!new && pair_p(found) && !null_p(ldex(found)))
                 return LERR_EXISTS;
 @#
         orreturn(hashtable_save_m(assembly_fardb(o), symbol_key(label),
-                lline, env_rehash, env_match, (void *) label, new, true));
+                lline, env_rehash, env_match, (void *) label, !new, true));
         assembly_set_pending_far_m(o, label);
         return LERR_NONE;
 }
@@ -5317,7 +5527,7 @@ assembly_begin_opcode (cell      o,
         tmp[1] = 'M';
         tmp[2] = ':';
         for (i = 0; i < length; i++)
-                tmp[i + 2] = lbuf[i];
+                tmp[i + 3] = lbuf[i];
         orreturn(new_symbol_buffer((byte *) tmp, length + 3, NULL, &sop));
         reason = root_search(sop, &lop);
         if (reason == LERR_MISSING)
@@ -5343,10 +5553,9 @@ assembly_begin_opcode (cell      o,
         if (!null_p(commentary))
                 assembly_set_commentary_m(o, commentary);
         assembly_set_pending_far_m(o, NIL);
-        assembly_set_pending_local_m(o, -1);
         assembly_set_pending_comment_m(o, NIL);
         assembly_set_m(o, cursor, line);
-        assembly_set_cursor_m(o, lcursor);
+        assembly_set_cursor_m_imp(o, lcursor);
         *ret = line;
         return LERR_NONE;
 }
@@ -5391,7 +5600,7 @@ assembly_apply_argument (cell     o,
                          int      argc,@|
                          cell     datum)
 {
-        cell db, found, label, op, record;
+        cell found, label, new_fore, op, record;
         int cat, id;
         intmax_t lineat, lineto, value;
         error_code reason;
@@ -5402,7 +5611,7 @@ assembly_apply_argument (cell     o,
                 return LERR_EXISTS;
         if (!pair_p(datum))
                 return LERR_INCOMPATIBLE;
-        db = NIL;
+        new_fore = NIL;
         if (lsin(datum) == Label[LBA_ADDRESS]) {
                 if (symbol_p(ldex(datum))) {
                         @<Save a record of a far label argument@>
@@ -5420,14 +5629,14 @@ assembly_apply_argument (cell     o,
                         @<Save large numbers in the object database@>
                 } else if (special_p(ldex(datum)))
                         orreturn(cons(Label[LBA_ASIS], ldex(datum), &datum));
-                else
+                else if (!error_p(ldex(datum)))
                         orreturn(assembly_save_object(o, ldex(datum), &datum));
         } else if (lsin(datum) != Label[LBA_REGISTER]
                         && lsin(datum) != Label[LBA_REGISTER_POP])
                 return LERR_INCOMPATIBLE;
         orreturn(statement_set_argument_m(line, argc, datum));
-        if (!null_p(db))
-                lsin_set_m(db, record);
+        if (!null_p(new_fore))
+                assembly_localdb(o)[id + 10] = new_fore;
         return LERR_NONE;
 }
 
@@ -5436,17 +5645,17 @@ assembly_apply_argument (cell     o,
 
 @<Save a local address argument to fix later@>=
 orreturn(new_int_c(assembly_cursor(o) - 1, true, &record));
-orreturn(cons(record, ldex(assembly_localdb(o)[id]), &record));
-ldex_set_m(assembly_localdb(o)[id], record);
+orreturn(cons(record, assembly_localdb(o)[id + 10], &new_fore));
 
 @ @<Fix a local address argument@>=
 id = -(id + 1);
-db = assembly_localdb(o)[id]; /* To be updated at the end. */
-orassert(int_value(lsin(db), &lineat));
+if (null_p(assembly_localdb(o)[id]))
+        return LERR_MISSING;
+orreturn(int_value(assembly_localdb(o)[id], &lineat));
 lineto = assembly_cursor(o) - 1;
 orreturn(new_int_c(lineto - lineat, true, &label));
-orreturn(cons(Label[LBA_RELATIVE], label, &datum)); /* Replacement label pair. */
-orreturn(new_int_c(lineto, true, &record)); /* Replacement db pointer. */
+orreturn(cons(Label[LBA_RELATIVE], label, &datum)); /* Replacement label
+                                                        pair argument. */
 
 @ @<Save a record of a far label argument@>=
 label = ldex(datum);
@@ -5496,22 +5705,20 @@ assembly_save_object (cell  o,
 {
         cell new_cursor, old, table, index;
         intmax_t cursor, nlength;
-        int i;
         error_code reason;
 
         assert(assembly_p(o) && !assembly_complete_p(o));
-        assert(symbol_p(obj) || integer_p(obj));
+        assert(symbol_p(obj) || integer_p(obj) || error_p(obj));
         index = assembly_objectdb_cursor(o);
-        orreturn(int_value(index, &cursor));
+        printf("save at %d\n", index);
         new_cursor = NIL;
-        for (i = 0; i < cursor; i++) {
-                orassert(array_ref_c(assembly_objectdb(o), i, &old));
-                if (cmpis_p(old, obj)) {
-                        cursor = i;
+        for (cursor = 0; cursor < index; cursor++) {
+                orassert(array_ref_c(assembly_objectdb(o), cursor, &old));
+                if (cmpis_p(old, obj))
                         goto found;
-                }
         }
         nlength = assembly_objectdb_length(o);
+        printf("not found %d>%d?\n",cursor,nlength);
         if (cursor >= nlength) {
                 if (nlength == OBJECTDB_TABLE_LENGTH * OBJECTDB_DB_LENGTH)
                         return LERR_LIMIT;
@@ -5519,8 +5726,8 @@ assembly_save_object (cell  o,
                 nlength += OBJECTDB_TABLE_LENGTH + 1;
                 array_resize_m(assembly_objectdb(o), nlength, NIL);
                 assembly_set_objectdb_cursor_m(o, old);
-                orreturn(new_int_c(cursor + 1, true, &new_cursor));
         }
+        orreturn(new_int_c(cursor + 1, true, &new_cursor));
 found:
         orreturn(new_int_c(cursor % OBJECTDB_TABLE_LENGTH, true, &index));
         orreturn(new_int_c(cursor >> OBJECTDB_TABLE_WIDTH, true, &table));
@@ -5587,7 +5794,8 @@ assembly_apply_comment (cell      o,
                         return LERR_NONE;
                 orreturn(cons(NIL, assembly_pending_comment(o), &new));
                 assembly_set_pending_comment_m(o, new);
-        } else if (!null_p(assembly_pending_comment(o))) {
+        } else if (!null_p(assembly_pending_comment(o))
+                    || assembly_cursor(o) == 0) {
                 orreturn(cons(new, assembly_pending_comment(o), &new));
                 assembly_set_pending_comment_m(o, new);
         } else {
@@ -5610,6 +5818,8 @@ Scan fardb:
     Otherwise the cdr is an address and add the pair to exportdb (a hashtable)
 
 Copy the instructions.
+
+object db is plus 2 for false cursor
 
 @c
 error_code
@@ -5638,9 +5848,10 @@ finish_assembly (cell  o,
 @#
         assembly_set_blob_m(new, assembly_blob(o));
 @#
-        orreturn(new_array(assembly_objectdb_cursor(o), UNDEFINED, &tmp));
+        orreturn(new_array(assembly_objectdb_cursor(o) + 2, UNDEFINED, &tmp));
+        printf("newobj %d\n", array_length(tmp));
         assembly_set_objectdb_m(new, tmp);
-        for (i = 0; i < assembly_objectdb_cursor(o); i++)
+        for (i = 0; i <= assembly_objectdb_cursor(o); i++)
                 array_set_m_c(tmp, i, get_array_ref_c(assembly_objectdb(o), i));
 @#
         orreturn(new_hashtable(0, &have));
@@ -5723,7 +5934,7 @@ error_code
 install_assembly (cell  o,
                   cell *ret)
 {
-        address avalue, boffset, next, page;
+        address avalue, boffset, next, page, real;
         cell arg, blob, found, label, link, lins, op, tmp;
         cell new_export, new_objectdb, new_program;
         long i, j, ioffset, objectdb_length;
@@ -5738,12 +5949,16 @@ install_assembly (cell  o,
         @<Prepare a new code page@>@;
         if (pthread_mutex_lock(&Program_Lock) != 0)
                 goto_Trap_INTERNAL;
-        @<Ensure there is space in |Program_ObjectDB|@>@;
+        @<Ensure there is space in |ObjectDB|@>@;
         @<Look for required address symbols@>@;
         @<Add exported address symbols to a copy of |Program_Export_Table|@>@;
-        @<Copy constant objects into a copy of |Program_ObjectDB|@>@;
+        @<Copy constant objects into a copy of |ObjectDB|@>@;
         @<Install instructions as bytecode and commentary@>@;
 
+        ObjectDB = new_objectdb;
+        ObjectDB_Free += objectdb_length;
+        printf("odb len %d\n", array_length(ObjectDB));
+        Program_Export_Table = new_export;
         *ret = new_program;
         reason = LERR_NONE;
 Trap:
@@ -5772,11 +5987,13 @@ if (!null_p(blob)) {
                 ioffset++;
 }
 boffset = ioffset * sizeof (instruction);
+printf("  > %u:%u\n", boffset, ioffset);
 
-@ @<Ensure there is space in |Program_ObjectDB|@>=
-assert(!(assembly_objectdb_length(o) % OBJECTDB_TABLE_LENGTH));
-objectdb_length = array_length(Program_ObjectDB) + assembly_objectdb_length(o);
-if (objectdb_length > OBJECTDB_MAX) {
+@ @<Ensure there is space in |ObjectDB|@>=
+objectdb_length = (assembly_objectdb_length(o) & ~OBJECTDB_TABLE_LENGTH);
+objectdb_length += OBJECTDB_TABLE_LENGTH;
+printf("new objs %d .. %d\n", assembly_objectdb_length(o), objectdb_length);
+if (objectdb_length > OBJECTDB_MAX - ObjectDB_Free) {
         reason = LERR_LIMIT;
         goto Trap;
 }
@@ -5813,7 +6030,11 @@ for (i = 0; i < hashtable_length(assembly_exportdb(o)); i++) {
                     - ioffset))
                 goto_Trap_INCOMPATIBLE;
 
-        Program_Export_Base[next] = page | (ito + ioffset); /* Real location. */
+        real = ito * sizeof (instruction);
+        real += boffset;
+        real |= page;
+        printf("%2d      '", next); psym(lsin(label)); printf("'\tat %p (%d)\n", real, ito);
+        Program_Export_Base[next] = real; /* Real location. */
 @#
         ortrap(new_int_c(next, true, &link)); /* Link offset. */
         ortrap(cons(lsin(label), link, &link));
@@ -5827,14 +6048,15 @@ for (i = 0; i < hashtable_length(assembly_exportdb(o)); i++) {
 @ TODO: memmove?
 
 @.TODO@>
-@<Copy constant objects into a copy of |Program_ObjectDB|@>=
-table = array_length(Program_ObjectDB) / OBJECTDB_TABLE_LENGTH;
-ortrap(new_array(array_length(Program_ObjectDB) + assembly_objectdb_length(o),
+@<Copy constant objects into a copy of |ObjectDB|@>=
+table = array_length(ObjectDB) >> OBJECTDB_TABLE_WIDTH;
+ortrap(new_array(array_length(ObjectDB) + assembly_objectdb_length(o),
         NIL, &new_objectdb));
-for (i = 0; i < array_length(Program_ObjectDB); i++) {
-        orassert(array_ref_c(Program_ObjectDB, i, &tmp));
+for (i = 0; i < array_length(ObjectDB); i++) {
+        orassert(array_ref_c(ObjectDB, i, &tmp));
         orassert(array_set_m_c(new_objectdb, i, tmp));
 }
+        printf("newobj %d\n", assembly_objectdb_length(o));
 for (j = 0; j < assembly_objectdb_length(o); j++) {
         orassert(array_ref_c(assembly_objectdb(o), j, &tmp));
         orassert(array_set_m_c(new_objectdb, j + i, tmp));
@@ -5843,13 +6065,22 @@ for (j = 0; j < assembly_objectdb_length(o); j++) {
 @ Actually the commentary is dropped here. It should be saved in
 the data half the new program object.
 
+@d pins(O) for (int _i = 0; _i < 4; _i++)
+        printf("%02hhx", ((char *) (O))[_i])
+@d psym(O) for (int _i = 0; _i < symbol_length(O); _i++)
+        putchar(symbol_label(O)[_i]);
 @<Install instructions as bytecode and commentary@>=
+printf("  > %u:%u\n", boffset, ioffset);
 for (i = 0; i < (long) assembly_length(o); i++) {
+printf("assemble line %d...\n", i);
         lins = assembly_complete_ref(o, i);
         assert(statement_p(lins));
         op = statement_opcode(lins);
         opb = opcode_object(op);
         ins = htobe32((opcode_id(op) & 0xff) << 24);
+        printf(" %s \t", opb->label);
+        pins(&ins);
+        printf("\n");
         if (opb->arg0 == NARG) {
                 assert(opb->arg1 == NARG && opb->arg2 == NARG);
                 if (!null_p(statement_argument(lins, 0)))
@@ -5860,7 +6091,10 @@ for (i = 0; i < (long) assembly_length(o); i++) {
         @<Encode the second argument@>@;
         @<Encode the third argument@>@;
 finish_arguments:
-        ((instruction *) (page | boffset))[i + ioffset] = ins;
+        ((instruction *) (page | boffset))[i] = ins;
+        printf(" %p\t",(((instruction *) (page | boffset)) + i));
+        pins(((instruction *) (page | boffset)) + i);
+        printf(".\n");
 }
 ioffset += i;
 boffset += i * sizeof (instruction);
@@ -5883,6 +6117,7 @@ if (opb->arg0 == AADD) {
 @ ie.~24 bits.
 
 @<Encode a single address argument@>=
+assert(opb->arg1 == NARG && opb->arg2 == NARG);
 if (!null_p(statement_argument(lins, 1)))
         goto_Trap_INCOMPATIBLE;
 if (lsin(arg) == Label[LBA_RELATIVE]) {
@@ -5894,32 +6129,45 @@ if (lsin(arg) == Label[LBA_RELATIVE]) {
                 goto Trap;
         }
         ins |= htobe32((svalue & 0xffffff) | (LBC_ADDRESS_RELATIVE << 30));
-} else if (lsin(arg) == Label[LBA_ADDRESS]) {
+        printf(" relative\t"); pins(&ins); printf("\n");
+} else if (lsin(arg) == Label[LBA_INDIRECT]) {
         ortrap(program_find_address(new_export, ldex(arg), &ivalue, &avalue));
+        printf(" in");
         if (instruction_page(avalue) == page) {
                 ivalue = avalue & PROGRAM_KEY;
                 ins |= htobe32(LBC_ADDRESS_DIRECT << 30);
+                printf("\b\b");
         } else
                 ins |= htobe32(LBC_ADDRESS_INDIRECT << 30);
         ins |= htobe32(ivalue & 0xffffff);
-} else
-        goto_Trap_INCOMPATIBLE;
+        printf("direct \t"); pins(&ins); printf("\n");
+} else {
+        ortrap(assembly_encode_AREG(0, arg, &ivalue));
+        ins |= ivalue;
+        ins |= htobe32(LBC_ADDRESS_REGISTER << 30);
+        printf(" target \t"); pins(&ins); printf("\n");
+}
 
 @ TODO: Allow the error object to be obtained from a register.
 
 @<Encode an error identifier argument@>=
+assert(opb->arg1 == NARG && opb->arg2 == NARG);
 if (!null_p(statement_argument(lins, 1)) || lsin(arg) != Label[LBA_OBJECT]
                 || !error_p(ldex(arg)))
         goto_Trap_INCOMPATIBLE;
 ins |= htobe32(error_id(ldex(arg)) << 16);
+printf(" error  \t"); pins(&ins); printf("\n");
 
 @ @<Encode the first register argument@>=
 ortrap(assembly_encode_AREG(0, statement_argument(lins, 0), &ivalue));
 ins |= ivalue;
+printf(" register\t"); pins(&ins); printf("\n");
 
 @ Second argument.
 
 @<Encode the second argument@>=
+if (opb->arg1 == NARG)
+        goto finish_arguments;
 arg = statement_argument(lins, 1);
 if (null_p(arg))
         goto_Trap_INCOMPATIBLE;
@@ -5935,24 +6183,43 @@ if (opb->arg1 == AADD) {
 @ // 16-bit relative only. Don't allow indirect at all (yet?).
 
 @<Encode a 16-bit address@>=
-if (lsin(arg) != Label[LBA_RELATIVE])
+assert(opb->arg2 == NARG);
+if (lsin(arg) == Label[LBA_RELATIVE]) {
+        ortrap(assembly_encode_integer(16, true, ldex(arg), &svalue));
+        ins |= htobe32(svalue | (LBC_ADDRESS_RELATIVE << 30));
+        printf(" relative-16\t"); pins(&ins); printf("\n");
+} else if (lsin(arg) == Label[LBA_INDIRECT]) {
+        ortrap(program_find_address(new_export, ldex(arg), &ivalue, &avalue));
+        printf(" to %p %p\n", ivalue, avalue);
+        printf(" in");
+        if (instruction_page(avalue) == page) {
+                ivalue = avalue & PROGRAM_KEY;
+                ins |= htobe32(LBC_ADDRESS_DIRECT << 30);
+                printf("\b\b");
+        } else
+                goto_Trap_INCOMPATIBLE;
+        ins |= htobe32(ivalue & 0xffff);
+        printf("direct-16\t"); pins(&ins); printf("\n");
+} else
         goto_Trap_INCOMPATIBLE;
-ortrap(assembly_encode_integer(16, true, ldex(arg), &svalue));
-ins |= htobe32(svalue | (LBC_ADDRESS_RELATIVE << 30));
 
 @ // ALOB; anything: int, const, pair:reg/bool, pair:table/index
 
 @<Encode a large object or link@>=
+assert(opb->arg2 == NARG);
 if (lsin(arg) == Label[LBA_TABLE]) {
-        ortrap(assembly_encode_integer(OBJECTDB_DB_WIDTH, false, lsin(arg), &uvalue));
+        ortrap(assembly_encode_integer(OBJECTDB_DB_WIDTH, false, lsin(ldex(arg)), &uvalue));
         uvalue += table;
+printf(" tbl-%u", uvalue);
         uvalue = (uvalue & OBJECTDB_SPLIT_BOTTOM) |
                 ((uvalue & OBJECTDB_SPLIT_BOTTOM) << OBJECTDB_SPLIT_GAP);
         uvalue <<= OBJECTDB_TABLE_WIDTH;
         ins |= htobe32(uvalue);
         ortrap(assembly_encode_integer(OBJECTDB_TABLE_WIDTH, false,
-                lsin(arg), &uvalue));
+                ldex(ldex(arg)), &uvalue));
+printf(" idx-%u", uvalue);
         ins |= htobe32(uvalue | (LBC_OBJECT_TABLE << 30));
+        printf("\t"); pins(&ins); printf("\n");
 } else if (lsin(arg) == Label[LBA_ASIS] && integer_p(ldex(arg))) {
         ortrap(int_value(ldex(arg), &svalue));
         if (svalue < INT16_MIN || svalue > INT16_MAX) {
@@ -5960,6 +6227,7 @@ if (lsin(arg) == Label[LBA_TABLE]) {
                 goto Trap;
         }
         ins |= htobe32(svalue | (LBC_OBJECT_INTEGER << 30));
+        printf(" const-16\t"); pins(&ins); printf("\n");
 } else {
         ortrap(assembly_encode_ALOT(1, arg, &ivalue));
         ins |= ivalue;
@@ -5967,19 +6235,31 @@ if (lsin(arg) == Label[LBA_TABLE]) {
                 ins |= (LBC_OBJECT_CONSTANT << 30);
         else
                 ins |= (LBC_OBJECT_REGISTER << 30);
+        printf(" ALOT-0 \t"); pins(&ins); printf("\n");
 }
 
 @ @<Encode the middle ALOT@>=
+assert(opb->arg2 != NARG);
 ortrap(assembly_encode_ALOT(1, arg, &ivalue));
 ins |= ivalue;
-
-@ @<Encode the third argument@>=
-if (null_p(statement_argument(lins, 2)))
-        goto_Trap_INCOMPATIBLE;
+printf(" ALOT-1 \t"); pins(&ins);
+printf(" "); psym(lsin(arg));
+printf(" %d\n", ldex(arg));
 if (opb->arg2 != ALOT)
         goto_Trap_INTERNAL;
-ortrap(assembly_encode_ALOT(2, statement_argument(lins, 2), &ivalue));
-ins |= ivalue;
+
+@ @<Encode the third argument@>=
+if (opb->arg2 != NARG) {
+        if (opb->arg2 != ALOT)
+                goto_Trap_INTERNAL;
+        if (null_p(statement_argument(lins, 2)))
+                goto_Trap_INCOMPATIBLE;
+        ortrap(assembly_encode_ALOT(2, statement_argument(lins, 2), &ivalue));
+        ins |= ivalue;
+        printf(" ALOT-2 \t"); pins(&ins);
+printf(" "); psym(lsin(statement_argument(lins, 2)));
+printf(" %d\n", ldex(statement_argument(lins, 2)));
+}
 
 @ @d PROGRAM_LINK_MAX (PROGRAM_LENGTH / sizeof (address))
 @c
@@ -6034,12 +6314,13 @@ assembly_encode_ALOT (int          argc,
                 return assembly_encode_AREG(argc, argv, ret);
         if (fixed_p(ldex(argv)) && fixed_value(ldex(argv)) >= TINY_MIN
                         && fixed_value(ldex(argv)) <= TINY_MAX) {
-                argv = fixed_value(argv) - (-TINY_MIN);
+                argv = fixed_value(ldex(argv)) + (-TINY_MIN);
                 argv <<= 4;
                 argv |= FIXED;
         } else if (fixed_p(argv) || !special_p(ldex(argv)))
                 return LERR_INCOMPATIBLE;
-        *ret = htobe32((argv & 0xff) << ((2 - argc) * 8));
+                printf("LOT %x\n", ldex(argv));
+        *ret = htobe32((ldex(argv) & 0xff) << ((2 - argc) * 8));
         return LERR_NONE;
 }
 

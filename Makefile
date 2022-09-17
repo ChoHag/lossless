@@ -9,8 +9,10 @@ LTFLAGS?=       -v
 
 OBJECTS:=       lossless.o
 SOURCES:=       lossless.c lossless.h
-BIN_OBJECTS:=   repl.o
-BIN_SOURCES:=   repl.c
+REPL_OBJECTS:=  repl.o
+REPL_SOURCES:=  repl.c
+BOOT_OBJECTS:=  boot.o
+BOOT_SOURCES:=  boot.c
 LIB_OBJECTS:=
 LIB_SOURCES:=
 
@@ -20,7 +22,7 @@ LLCOMPILE:=     $(CC) $(DEBUG) $(CFLAGS) $(LCFLAGS) $(CPPFLAGS) $(LCPPFLAGS)
 
 
 # Major build targets:
-all: lossless liblossless.so lossless.pdf repl.pdf ffi.perl man/mandoc.db
+all: lossless liblossless.so lossless.pdf boot.pdf repl.pdf ffi.perl man/mandoc.db
 
 full: test all
 
@@ -28,11 +30,18 @@ test: $(TEST_SCRIPTS)
 	$(TEST) $(LTFLAGS) -e '' $(TEST_SCRIPTS)
 
 # Dependencies:
+boot.c: boot.w
+boot.o: boot.c lossless.h
+boot.tex: boot.w
+boot.idx-in: boot.tex
+boot.pdf: boot.idx
+
 repl.c: repl.w
 repl.o: repl.c lossless.h
 repl.tex: repl.w
 repl.idx-in: repl.tex
 repl.pdf: repl.idx
+
 lossless.c lossless.h: lossless.w
 lossless.o: lossless.c lossless.h
 lossless.tex: lossless.w
@@ -56,8 +65,12 @@ barbaroi.h: barbaroi.ll
 # Compilers:
 # The LDFLAGS are repeated here to build on linux; there's likely a better way
 lossless: lossless.o repl.o
-	$(LLCOMPILE) $(OBJECTS) $(BIN_OBJECTS) $(LDFLAGS) $(LLDFLAGS) \
+	$(LLCOMPILE) $(OBJECTS) $(REPL_OBJECTS) $(LDFLAGS) $(LLDFLAGS) \
 		-o lossless
+
+bootless: lossless.o boot.o
+	$(LLCOMPILE) $(OBJECTS) $(BOOT_OBJECTS) $(LDFLAGS) $(LLDFLAGS) \
+		-o bootless
 
 liblossless.so: lossless.o
 	$(LLCOMPILE) $(OBJECTS) $(LIB_OBJECTS) $(LDFLAGS) $(LLDFLAGS) \
