@@ -63,6 +63,7 @@
 @s unused static
 %
 @s address int
+@s array int
 @s assembly_complete int
 @s assembly_working int
 @s atom int
@@ -77,11 +78,16 @@
 @s heap_access int
 @s heap_alloc_fn int
 @s heap_enlarge_fn int
+@s heap_enlarge_p_fn int
 @s heap_init_fn int
 @s heap_pun int
 @s instruction int
+@s larry int
 @s match_fn int
 @s opcode int
+@s primitive_code int
+@s primitive_fn int
+@s primitive_table int
 @s scow int
 @s segment int
 @s symbol int
@@ -94,11 +100,195 @@
 @s llt_initialise int
 @s llt_thunk int
 
-@** Preface.
+@** Preface. There are many programming languages and this one is
+mine. \Ls/ is a general purpose programming language with a lisp/scheme
+look and feel. If you have received this document in electronic
+form it should have been accompanied with sources and a \.{README}
+file describing how to build and test \Ls/ on various platforms.
+If you received this document as a hard copy I would be very
+interested to know how and why, as it's woefully incomplete and I
+have not printed any hard copies, even for proofreading, but you'll
+have to type in the code yourself.
 
-Blurb.
+Alternatively \Ls/ exists primarily as a package of source distributed
+through the web. The primary home for the source code is at
+\pdfURL{http://zeus.jtan.com/\string~chohag/lossless/}%
+{http://zeus.jtan.com/\string~chohag/lossless/} describing the git
+repository at \pdfURL{http://zeus.jtan.com/\string~chohag/lossless.git}%
+{http://zeus.jtan.com/\string~chohag/lossless.git}. Additionally
+the sources are occasionaly packaged up in a tarball along with the
+processed \CEE/ sources so that \TeX\ is optional.
 
-@** Implementation. Library and executable, sharing \.{lossless.h}.
+If \Ls/ were complete it would include a comprehensive suite of
+documentation. This particular document would fit in that suite as
+a sort of appendix --- available for people who are familiar with
+using \Ls/ (or not) to look into and learn or improve its implementation
+--- so it is neither comprehensive nor pedagogical.
+
+Of course \Ls/ is not in fact complete and this document is its only
+one. It is laid out as follows:
+
+\yitem{1 } Introduction to the \CEE/ implementation and error handling.
+
+What source files there are and why, how to build them, how to run
+\Ls/ and/or link to and use it dynamically.
+
+Includes a description of the rules governing variable and function
+(etc.) names.
+
+\yitem{2 } Memory \AM\ data structures.
+
+How to allocate and release (free) memory, and the
+mostly-functional\footnote{$^1$}{Functional in the mathematical
+sense not (only) in that they are fully operational.} code to
+implement the few object required to operate the virtual machine.
+
+\yitem{3 } Bare stubs to support I/O and threading.
+
+Just enough of an object wrapping around a file descriptor to read
+and assemble source code, and enough of a threads implentation to
+put mutexes around critical process-global objects.
+
+\yitem{4a} A bytecode-interpreting virtual machine.
+
+Decode, Execute, Repeat. Like a REPL for robots, which don't read.
+
+\yitem{4b} A bytecode assembler.
+
+Far more effort than it seems like it should require, even this
+strictly line-based parser and assembler is the largest, most
+complicated piece of this implementation.
+
+\yitem{5 } Test suite.
+
+Some things it's better to begin with than try to retro-fit to an
+existing product. As well as thread support from day one \Ls/ also
+begins its existence with a comprehensive test suite.
+
+\yitem{6 } Leftovers.
+
+Vaguely unimportant things that don't belong anywhere else, and the
+index.
+
+It should be evident by now that your author is not particularly
+skilled in the \TeX nical arts but rather is using it as a means
+to an end. I will also endeavour to talk only in the third person
+as I try to avoid referring to the author anyway.
+
+@** Implementation. Although its appearance as a PDF file (or
+similar) is unconventional \Ls/ is a fairly trivial \CEE/ program
+with no dependencies other than the standard library (and \TeX\
+which is huge, semi-optional and also has minimal dependencies).
+
+\Ls/' source comes in the these files:
+
+\yskip\hskip3em\vbox{\halign{\quad#\hfil&\quad#\hfil&\quad#\hfil\cr
+\.{README}&Unpacking the source\cr
+\.{README.deploy}&Packing the source\cr
+\.{lossless.w}&The \CEE/ parts of \Ls/ (including {\it primitives\/})\cr
+\.{barbaroi.ll}&The \Ls/ parts of \Ls/ (not primitive)\cr
+\.{boot.w}&Bootstrapping the virtual machine\cr
+\.{evaluate.la}&Assembly source of the \Ls/ interpreter\cr
+\.{repl.w}&A crude REPL linked with libedit\cr
+\.{man/man{\it n\/}l/*}&Neglected unix manual page documentation\cr
+\.{man/man{\it n\/}l/intro.{\it n\/}l}&A description of each section's
+        contents\cr
+\.{man/man9l/TEMPLATE.9l}&Manual page source template\cr
+\.{perl/*}&Neglected proof-of-concept library wrapper\cr
+\.{Makefile}&Build Plumbing\cr
+\.{bin/lloader}&\ditto\cr
+\.{bin/reindex}&\ditto\cr
+\.{.gitignore}&Administrivia \AM\ Notes\cr
+\.{LICENSE}&\ditto\cr
+\.{llfig.mp}&\ditto\cr
+\.{PLAN}&\ditto\cr
+\.{PLAN.man}&\ditto\cr
+}}
+
+\yskip When \Ls/ is built these files are generated. Alternatively
+if you have downloaded the packaged sources rather than cloning a
+source repository then they come pre-built inside it and you don't
+need \TeX\ to compile \Ls/.
+
+\yskip\hskip3em\vbox{\halign{\quad#\hfil&\quad#\hfil&\quad#\hfil\cr
+\.{lossless.c}&The \CEE/ parts of \Ls/\cr
+\.{lossless.h}&A header file for linking to \.{lossless.o} or its
+        dynamic equivalent\cr
+\.{testless.c}&\CEE/ code shared between test units\cr
+\.{testless.h}&\ditto\cr
+\.{t/*.c}&A comprehensive suite of test units\cr
+}}
+
+Building generates a bit of mess in the working directory which
+\.{make clean} removes (mostly) and of course each \CEE/ source
+file is compiled to a corresponding static library (\.{*.o}). The
+following files are also created:
+
+\yskip\hskip3em\vbox{\halign{\quad#\hfil&\quad#\hfil&\quad#\hfil\cr
+\.{lossless}&\Ls/\cr
+\.{memless.o}&\.{lossless.o} for tests of the memory allocator\cr
+\.{liblossless.so}&Shared library for linking to \Ls/ dynamically\cr
+}}\footnote{$^1$}{Windows support is practically non-existent, but is
+        planned and would call this \.{lossless.dll}.}
+
+As well as \.{clean} and the default \.{all} there are other
+interesting \.{make} targets:
+
+\yskip\hskip3em\vbox{\halign{\quad#\hfil&\quad#\hfil&\quad#\hfil\cr
+\.{test}&Build and lauch the comprehensive test suite\cr
+\.{lossless}&\Ls/ with a REPL by linking with libedit\cr
+\.{bootless}&Sandbox for experimenting with the virtual machine\cr
+\.{man/mandoc.db}&\Ls/\cr
+}}
+
+@ The bulk of \Ls/' source is in \.{lossless.w}. This \.{CWEB}
+source file is compiled by \.{ctangle} to produce \CEE/ sources or
+by \.{cweave} to produce \TeX\ sources. The \TeX\ sources are
+compiled by \TeX\ to produce this document \.{lossless.pdf} while
+the \CEE/ sources are compiled by a \CEE/ compiler into static and
+shared libraries.
+
+The main library file produced is the static \.{lossless.o} and
+there's a variant which has hooks in the memory allocator named
+\.{memless.o}. Also produced from \.{lossless.w} is \.{testless.o}
+which is linked into each test script alongside \.{memless.o} and
+contains the functions shared by \Ls/' test suite.
+
+\.{repl.w} and \.{boot.w} follow a similar approach but producing
+only a single library each. They are used primarily to develop \Ls/
+and their existence and purpose is subject to change.
+
+The \Ls/ shared library needs only \.{lossless.o}. The repl
+additionally includes \.{repl.o} and \.{libedit}, and links in
+\.{barbaroi.ll} to initialise the \Ls/ run-time environment. The
+bootstrap utility includes \.{boot.o} and compiles the assembly in
+\.{evaluate.la}.
+
+All of this is taken care of in the \.{Makefile}, compatible with
+BSD and GNU make simultaneously.
+
+@ The only intermediate source file of interest outside the \Ls/
+build process is \.{lossless.h} which is necessary to link to the
+\Ls/ shared library or write extensions, although for practical
+reasons it contains many more definitions than library users require
+(that is: all of them).
+
+The contents of \.{lossless.h} are described by the code block
+attached to this section. Such code blocks may be named with a
+filename presented in a monospace font (\.{@@(filename@@>=} in
+\.{CWEB} source) and cause \.{CWEB} to concatenate all such sections
+and produce the file so named. In fact \.{lossless.h} is generated
+by just this one section however it includes references to other
+sections by name (such as the next one, |@<System head...@>|) which
+are themselves concatenated and inserted in place.
+
+The special section name ``Preprocessor definitions'' consists of
+all the \#|define| lines (\.{@@d} in \.{CWEB}) that preceed code
+sections.
+
+Finally there are sections that do have a block of code but one
+without a name. These become \.{lossless.c} (or \.{repl.c} or
+\.{boot.c}) and begin \.{@@c} in \.{CWEB}.
 
 @(lossless.h@>=
 #ifndef LL_LOSSLESS_H
@@ -111,7 +301,15 @@ Blurb.
 @<External \CEE/ symbols@>@;
 #endif
 
-@ @<System headers@>=
+@ These headers are included by \.{lossless.h}, used for type
+definitions and \CEE/ macros. Some particularly ugly \CEE/ macros
+finish off the system headers but they are relegated to the back
+of this document for reasons of taste.
+
+Not all of these headers are or should be required and some future
+work will remove the fat and explain or excuse the rest.
+
+@<System headers@>=
 #include <err.h>
 #include <errno.h>
 #include <limits.h>
@@ -123,24 +321,34 @@ Blurb.
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <unistd.h>
-@<Portability hacks@>@; /* These are listed at the end. */
+@<Portability hacks@>@; /* These are listed at the back. */
 
-@ This becomes \.{lossless.c} with all the other unnamed sections.
-More headers are needed.
+@ This is the first of many sections which will become \.{lossless.c}.
+It includes the \.{lossless.h} just described bringing in the headers
+above and includes a handful more which which will not be needed
+after \Ls/ is built.
 
 @c
 #include "lossless.h"
-#include <assert.h>
-#ifdef LDEBUG
-#include <stdio.h>
-#endif
-#include <ctype.h>
-#include <string.h>
+#include <assert.h> /* Definitely not for library code. */
+#include <stdio.h> /* To be removed when \Ls/ I/O is usable. */
+#include <ctype.h> /* Some ASCII macros. */
+#include <string.h> /* Bulk memory transfers, and |strlen|. */
 @<Global variables@>@;
 
-@* Errors. Most functions return one of these values. Most receivers
-of them will then want to immediately abort if it indicates a
-failure.
+@* Errors. All code comes with errors and before going any further
+than the system header files previously listed, the errors that can
+occur in \Ls/ are defined here. The simplest of mechanisms is used
+for functions which could fail, which is nearly all of them: a
+success status code, or one representing what went wrong, is returned.
+The actual value being returned is saved to an address pointed to
+by the last argument.
+
+The macros below check the error status code of such a function and
+``give up'' somehow, depending on what is most appropriate. The
+macros were created in an ad-hoc fashion as the need arose and now
+only {\it orabort\/}, {\it orassert\/}, {\it orreturn\/} and {\it
+ortrap\/} are used --- mostly the latter two.
 
 @d failure_p(O) ((O) != LERR_NONE)
 @d just_abort(E,M) err((E), "%s: %u", (M), (E))
@@ -156,6 +364,11 @@ failure.
         assert(#I && !failure_p(R));@+ }@+ while (0)
 @d orassert(I) do@+ {@+ if (failure_p((reason = (I))))
         assert(#I && !failure_p(reason));@+ }@+ while (0)
+
+@ These are all the ways that an \Ls/ internal function can fail.
+Some of these codes were defined when \Ls/ still had a custom parser
+and remain here in case it ever comes back.
+
 @<Type def...@>=
 typedef enum {
         LERR_NONE,@/
@@ -184,7 +397,7 @@ typedef enum {
         LERR_OOM,            /* Out of memory. */
         LERR_OUT_OF_BOUNDS,  /* Bounds exceeded. */
         LERR_OVERFLOW,       /* Attempt to access past the end of a buffer. */
-        LERR_SELF,           /* An attempt to wait for one's self. */
+        LERR_SELF,           /* An attempt to wait for oneself. */
         LERR_SYNTAX,         /* Unrecognisable syntax (insufficient alone). */
         LERR_SYSTEM,         /* A system error, check |errno|. */
         LERR_THREAD,         /* Failed to correctly join a thread. */
@@ -200,12 +413,30 @@ typedef enum {
         LERR_LENGTH
 } error_code;
 
+@ Every error condition is represented by an object at run-time
+which associates a human-readable name with the numeric identifier
+from above. To do this a symbol is generated for each error with
+an atom to hold the symbol and the identifier. This is actually
+slightly wasteful --- the string here is {\it copied\/} into a new
+symbol object then ignored but remains in memory. This could be
+remedied with trickery to convert the buffer to a `real' symbol
+object.
+
+TODO: Trickery. Sections like this which include \.{@@.TODO@@>}
+in \.{CWEB} are listed together in the index.
+
+@.TODO@>
+@q Bring the next list onto the current page while the TODO note is here@>
+@<Type def...@>=
 typedef struct {
-        cell  owner;
+        cell  owner;@+
         char *label;
 } error_table;
 
-@ @<Global...@>=
+@ This is the same list with the run-time label and object it will
+be bound to.
+
+@<Global...@>=
 shared error_table Error[LERR_LENGTH] = {@|
         [LERR_FINISHED]       = { NIL, "already-finished" },@|
         [LERR_AMBIGUOUS]      = { NIL, "ambiguous-syntax" },@|
@@ -219,7 +450,7 @@ shared error_table Error[LERR_LENGTH] = {@|
         [LERR_INSTRUCTION]    = { NIL, "invalid-instruction" },@|
         [LERR_INCOMPATIBLE]   = { NIL, "incompatible-operand" },@|
         [LERR_INTERRUPT]      = { NIL, "interrupted" },@|
-        [LERR_IO]             = { NIL, "io" },@| /* The least helpful error report. */
+        [LERR_IO]             = { NIL, "io" }, /* Helpful. */@t\iII@>
         [LERR_INTERNAL]       = { NIL, "lossless-error" },@|
         [LERR_MISMATCH]       = { NIL, "mismatched-brackets" },@|
         [LERR_MISSING]        = { NIL, "missing" },@|
@@ -229,7 +460,8 @@ shared error_table Error[LERR_LENGTH] = {@|
         [LERR_OUT_OF_BOUNDS]  = { NIL, "out-of-bounds" },@|
         [LERR_OOM]            = { NIL, "out-of-memory" },@|
         [LERR_OVERFLOW]       = { NIL, "overflow" },@|
-        [LERR_USER]           = { NIL, "pebkac" },@| /* (user error) */
+        [LERR_USER]           = { NIL, "pebdac" }, /* Problem Exists
+                                Between Developer And Compiler. */@t\iII@>
         [LERR_BUSY]           = { NIL, "resource-busy" },@|
         [LERR_LEAK]           = { NIL, "resource-leak" },@|
         [LERR_LIMIT]          = { NIL, "software-limit" },@|
@@ -240,7 +472,7 @@ shared error_table Error[LERR_LENGTH] = {@|
         [LERR_UNCOMBINABLE]   = { NIL, "uncombinable" },@|
         [LERR_UNDERFLOW]      = { NIL, "underflow" },@|
         [LERR_UNIMPLEMENTED]  = { NIL, "unimplemented" },@|
-        [LERR_UNLOCKED]       = { NIL, "unlocked-resourcd" },@|
+        [LERR_UNLOCKED]       = { NIL, "unlocked-resource" },@|
         [LERR_UNOPENED_CLOSE] = { NIL, "unopened-brackets" },@|
         [LERR_UNPRINTABLE]    = { NIL, "unprintable" },@|
         [LERR_UNSCANNABLE]    = { NIL, "unscannable-lexeme" },@|
@@ -248,42 +480,76 @@ shared error_table Error[LERR_LENGTH] = {@|
         [LERR_SELF]           = { NIL, "wait-for-self" },@/
 };
 
-@ @<Extern...@>=
+@ The \Ls/ header file declares every function and global variable
+that's defined, even those which should arguably be kept private,
+and |Error| is no exception.
+
+@<Extern...@>=
 shared extern error_table Error[];
 
-@
+@ Run-time error objects have just two attributes: the numeric ID
+and the \Ls/ symbol which represents it. How these work (|lsin|
+\AM\ |ldex|) is described below. The label returned by |error_label|
+is the {\it symbol\/} created during initialisation not the |char
+*| pointer above.
+
 @d error_id(O)     (lsin(O))
 @d error_label(O)  (ldex(O))
 @d error_object(O) (&Error[error_id(O)])
 @<Fun...@>=
 error_code error_search (cell, cell *);
 
-@ @<Finish init...@>=
+@ The initialisation process is a somewhat messy affair which had
+grown as \Ls/ components have been written. It will be described
+more fully in the section later on memory but broadly speaking
+there's the carefully orchestrated memory initialisation routines
+and then everything else, which starts here: generating a new symbol
+for each error's label followed by a |FORM_ERROR| wrapper object
+to tie that label to the error code.
+
+@<Finish init...@>=
 for (i = 0; i < LERR_LENGTH; i++) {
         orabort(new_symbol_const(Error[i].label, &ltmp));
         orabort(new_atom(i, ltmp, FORM_ERROR, &Error[i].owner));
 }
 
-@ @<Populate the |Root| environment@>=
+@ An error object holds the numeric and readable representations
+of an error. To find the error object from its symbolic name a
+binding is created in the root environment from the label to the
+object. These concepts are explained in the Environment chapter.
+
+This should probably be done at the same time as the previous
+initialisation step (TODO).
+
+@.TODO@>
+@<Populate the |Root| environment@>=
 for (i = 0; i < LERR_LENGTH; i++)
-        orreturn(env_save_m(Root, error_label(Error[i].owner), Error[i].owner, false));
+        orreturn(env_save_m(Root, error_label(Error[i].owner),
+                Error[i].owner, false));
 
-@ This same symbol lookup method is use later on.
+@ The bindings in the root environment can be overshadowed at
+run-time by another environment layer. To ensure that internal
+routines can always obtain the real error object |error_search|
+will look for an error binding directly in the root environment.
 
-@d global_search(O,P,R) {
-        cell rval;
+This same critical symbol lookup method is use later when other
+global identifiers are created so the body of the function is a
+macro substituting the object to search for (|O|), a predicate
+function or macro to validate the search result with (|P|) and the
+pointer to return the result to (|R|).  The signature for these
+functions is identifed by the |search_fn| type definition.
+
+@d global_search(O,P,R) { /* O, Predicate, R */
+        cell rval; /* Used so that |R| is unchanged if the result is invalid. */
         error_code reason;
 
         orreturn(env_search(Root, (O), &rval));
         if (!P(rval))
-                return LERR_INCOMPATIBLE;
+                return LERR_INCOMPATIBLE; /* No parentheses around |P|! */
         *(R) = rval;
         return LERR_NONE;
 }
-@<Type def...@>=
-typedef error_code @[@] (*search_fn) (cell, cell *);
-
-@ @c
+@c
 error_code
 error_search (cell  o,
               cell *ret)
@@ -291,27 +557,121 @@ error_search (cell  o,
         global_search(o, error_p, ret)@;
 }
 
-@** Memory. The lowest-level memory routines are wrappers around
-malloc which check for failure.
+@ A function pointer representing the above function (or another
+with the same signature).
 
-@d SYSTEM_PAGE_LENGTH sysconf(_SC_PAGESIZE)
+@<Type def...@>=
+typedef error_code @[@] (*search_fn) (cell, cell *);
+
+@* Naming things. Harder than the halting problem, this has also
+not been solved. Much improvement could be made to the names currently
+in use.
+
+Macro constants are named in |ALL_CAPS|.
+
+Global variables are named using |Title_Case|.
+
+Everything else is named in |lower_case| except macro variables,
+which are a single capital letter.
+
+\yskip
+
+Some variable names always mean the same thing in their local
+context:
+
+|o|: The object being considered; the first or only argument to a
+function.
+
+|O|: The same, in a macro.
+
+|reason|: The local error code value.
+
+|ret|: A pointer to the location to save the value being returned.
+
+\yskip
+
+Function/macro naming conventions:
+
+\.{new\_}{\it noun\/}: Allocate memory for and return an object
+(and in one case, although it should arguably be two, \.{alloc\_}{\it
+noun\/}).
+
+\.{noun\_}{\it verb\/}: Perform some action on or with an object.
+
+These may be specialised further, eg.~|new_segment| vs.~|new_segment_copy|.
+
+Prefix \.{get\_}: Discard errors and return a value directly.
+
+Prefix \.{set\_}: Mutate an object.
+
+Suffix \.{\_p}: Predicate (returns a \CEE/ boolean).
+
+Suffix \.{\_m}: Mutates some state, usually the object |o|.
+
+Suffix \.{\_imp}: The real implementation of some routine.
+
+Suffix \.{\_c}: A variant of a function taking \CEE/-formatted
+(eg.~integer) data.
+
+Suffix \.{\_ref}: Lookup by index in an array-like object.
+
+An object's attribute mutator is named {\it object\/}\.{\_set\_}{\it
+attribute\/}\.{\_m}.
+
+Multiple suffixes are appended in an unspecified but --- I think
+--- strict order.
+
+\yskip
+
+Other conventions.
+
+Many objects are based on a memory allocation (known as a {\it
+segment}) and consist of a header followed by an arbitrary number
+of bytes. The macro to evaluate the \CEE/ struct representing the
+object is named {\it object\/}\.{\_pointer}; the base of the data
+is named {\it object\/}\.{\_base}.
+
+``Length'' is the length of an object in whatever its base unit is,
+not bytes. If the number of bytes needs to be tracked too it is the
+``width''.
+
+@** Memory. Now that \Ls/ has errors there is enough in place to
+turn to the lowest-level memory allocation routines. This API is
+little more than a wrapper around the system allocator (|malloc|)
+with some error handling.
+
+It's not clear that the \.{*\_Ready} variables serve any practical
+purpose. TODO: review while breaking apart memory initialisation.
+
+@.TODO@>
+@d SYSTEM_PAGE_LENGTH sysconf(_SC_PAGESIZE) /* An Operating
+                                                System page length. */
 @<Global...@>=
-char *malloc_options = "S";
-shared bool Memory_Ready = false;
-shared bool Lossless_Ready = false;
-unique bool Thread_Ready = false;
+char *malloc_options = "S"; /* Enable |malloc| security features. */
+shared bool Memory_Ready = false; /* Main memory routines are ready. */
+unique bool Thread_Ready = false; /* Thread initialisation if finished. */
+shared bool Lossless_Ready = false; /* \Ls/ is ready. */
 
 @ @<Extern...@>=
 extern shared bool Memory_Ready, Lossless_Ready;
 extern unique bool Thread_Ready;
 
-@ @<Fun...@>=
+@ The API is simple: initialise, then allocate and free at will.
+Initialisation is divided into global initialisation and thread-specific
+initialisation (including for the first `thread').
+
+@<Fun...@>=
 error_code mem_init (void);
 error_code mem_init_thread (void);
 error_code mem_alloc (void *, size_t, size_t, void **);
 error_code mem_free (void *);
 
-@ @c
+@ This routine has become a bit of a mess to keep the initialisation
+process in the correct order and should be rewritten (TODO). It's
+called once prior to anything else then never again.
+
+@.TODO@>
+@c
 error_code
 mem_init (void)
 {
@@ -320,25 +680,44 @@ mem_init (void)
         int i;
         error_code reason;
 
-        @<Initialise memory allocator@>@;
-        @<Initialise heap \AM\ symbol table@>@;
+        @<Initialise memory allocator@>@; /* Prepare global lock. */
+        @<Initialise heap \AM\ symbol table@>@; /* Prepare main memory area. */
         Memory_Ready = true;
-        orreturn(mem_init_thread());
-        @<Finish initialisation after memory is ready@>@;
+        orreturn(mem_init_thread()); /* Finish initialisation for the
+                                                first thread. */
+        @<Finish initialisation after memory is ready@>@; /* Everything else. */
         Lossless_Ready = true;
         return LERR_NONE;
 }
 
-@ @c
+@ Some of the global variables are shared between all threads in a
+process but some are unique to each thread such as those used by
+the virtual machine. These thread-local variables are initialised
+the first time \Ls/ loads and reinitialised (that is to say, the
+new thread's private copy is initialised) after a new thread is
+started.
+
+@c
 error_code
 mem_init_thread (void)
 {
+        Thread_Ready = false;
         @<(Re-)Initialise per thread@>@;
         Thread_Ready = true;
         return LERR_NONE;
 }
 
-@ @c
+@ Memory is allocated with this straightforward wrapper around
+|malloc|. In order to test the resiliance of this and other allocation
+routines the test suite defined (much) later may need to insert
+hooks into the memory allocator.
+
+Of course these hooks shouldn't even be available in a regular build
+so they're included only if |LLTEST| is defined by the \CEE/ compiler.
+The normal \Ls/ build process produces \.{memless.o}, with the hooks
+enabled, alongside the otherwise identical \.{lossless.o}.
+
+@c
 error_code
 mem_alloc (void    *old,
            size_t   length,
@@ -371,7 +750,10 @@ mem_alloc (void    *old,
         return LERR_NONE;
 }
 
-@ @c
+@ It's not clear what could go wrong here or what the caller is
+expected to do about it. The API is nicely symmetrical though.
+
+@c
 error_code
 mem_free (void *o)
 {
@@ -382,7 +764,22 @@ mem_free (void *o)
         return LERR_NONE;
 }
 
-@* Portability.
+@* Portability. Not all the world's a VAX. In fact this code has never
+been near a VAX.
+
+The most common object in \Ls/ is the {\it cell\/}, which is a
+normal \CEE/ pointer disguised as an integer. Ignoring for a moment
+some special values this pointer is to an {\it atom\/} --- two
+cells\footnote{$^1$}{As indivisible as a real atom.}. Every atom
+has an 8 bit `tag' associated with it.
+
+The macros defined here should make this work seamlessly whether
+\Ls/ is built on a 16, 32 or 64 bit architecture however only a 64
+bit environment has seen any testing.
+
+Some data (eg.~lengths of things) will never need all the range
+available in a cell so {\it half\/} is defined to use its space
+more efficiently.
 
 @d TAG_BITS     8
 @d TAG_BYTES    1
@@ -427,7 +824,10 @@ typedef int32_t half; /* Records the size of memory objects. */
 #define HALF_MAX   INT16_MAX
 typedef int16_t half;
 
-@ @<Define a 16-bit addressing environment@>=
+@ It's unclear how useful this could be given that it's already
+2022 but it costs nothing to include it.
+
+@<Define a 16-bit addressing environment@>=
 #define CELL_BITS  16
 #define CELL_BYTES 2
 #define CELL_SHIFT 2
@@ -437,7 +837,16 @@ typedef int16_t half;
 #define HALF_MAX   INT8_MAX
 typedef int8_t half;
 
-@* Atoms.
+@* Atoms. A \Ls/ atom is two cells so their size is an even number
+of bytes and with the right care they will never exist at an
+odd-valued address. Conversely an odd number can never be a pointer
+to an atom, odd numbers are therefore used to represent constant
+values which don't require any storage.
+
+0 is the odd one out as it's not odd but will never be a pointer
+to a valid atom. Instead zero is used for the constant |NIL|/\.{()}.
+Note that in most {\it but not all\/} cases \CEE/'s \.{NULL} (|NULL|)
+has the same value 0.
 
 @d NIL            ((cell)  0) /* Nothing, the empty list, \.{()}. */
 @d LFALSE         ((cell)  1) /* Boolean false, \.{\#f} or \.{\#F}. */
@@ -451,7 +860,7 @@ typedef int8_t half;
 @d UNDEFINED      ((cell) 13) /* The value of a variable that isn't there. */
 @d FIXED          ((cell) 15) /* A small fixed-width integer. */
 @#
-@d null_p(O)      ((intptr_t) (O) == NIL) /* May {\it not\/} be |NULL|. */
+@d null_p(O)      ((intptr_t) (O) == NIL) /* Might {\it not\/} be |NULL|. */
 @d special_p(O)   (null_p(O) || ((intptr_t) (O)) & 1)
 @d boolean_p(O)   ((O) == LFALSE || (O) == LTRUE)
 @d false_p(O)     ((O) == LFALSE)
@@ -466,10 +875,25 @@ typedef int8_t half;
 @#
 @d predicate(O)   ((O) ? LTRUE : LFALSE)
 
-@ 2 bits for the GC, 2 bits shared with GC \AM\ format, lower 4 for
-format only.
+@ Every atom has an 8 bit tag located nearby (precisely where will
+be made clear shortly). The first two of the 8 bits are reserved
+for the garbage collector leaving an enormous 6 bits to identify
+the object held in the atom. Of these the next two have the double
+purpose of identifying whether either half of an atom is a pointer
+to another object or not.
 
-@d LTAG_LIVE 0x80 /* Atom is referenced from a register. */
+The atom's two halves are referred to with the archaic Latin terms
+{\it sinister\/} and {\it dexter\/}, sortened to {\it sin\/} and
+{\it dex\/}. This emphasises (except to Latin speakers) that the
+two halves have no particular relation or meaning and keeps them
+distinct from the established Lisp terms \.{car} \AM\ \.{cdr} which
+are almost identical.
+
+The atom union defined here isn't used as such except to access the
+|sin| and |dex| attributes, although it has proven helpful while
+debugging \Ls/.
+
+@d LTAG_LIVE 0x80 /* Atom has been reached from a register. */
 @d LTAG_TODO 0x40 /* Atom has been partially scanned. */
 @d LTAG_PSIN 0x20 /* Atom's sin half points to an atom. */
 @d LTAG_PDEX 0x10 /* Atom's dex half points to an atom. */
@@ -508,40 +932,48 @@ typedef union {
         };
 } atom;
 
-@
-@d FORM_NONE           (LTAG_NONE | 0x00)
-@d FORM_ARRAY          (LTAG_NONE | 0x01) /* Structured Data/Arrays. */
-@d FORM_ASSEMBLY       (LTAG_NONE | 0x02)
-@d FORM_COLLECTED      (LTAG_NONE | 0x03) /* Memory/Garbage Collection. */
-@d FORM_HASHTABLE      (LTAG_NONE | 0x04) /* Structural Data/Symbols \AM\ Tables. */
-@d FORM_HEAP           (LTAG_NONE | 0x05) /* Memory/Heap. */
-@d FORM_RUNE           (LTAG_NONE | 0x06) /* Valuable Data/Characters (Runes). */
-@d FORM_SEGMENT_INTERN (LTAG_NONE | 0x07) /* Memory/Segments. */
-@d FORM_SYMBOL         (LTAG_NONE | 0x08) /* Structural Data/Symbols \AM\ Tables. */
-@d FORM_SYMBOL_INTERN  (LTAG_NONE | 0x09) /* Structural Data/Symbols \AM\ Tables. */
-@d FORM_WORD           (LTAG_NONE | 0x0a)
-@#
-@d FORM_CSTRUCT        (LTAG_PDEX | 0x00)
-@d FORM_CONTINUATION   (LTAG_PDEX | 0x01) /* Compute. */
-@d FORM_ERROR          (LTAG_PDEX | 0x02)
-@d FORM_FILE_HANDLE    (LTAG_PDEX | 0x03)
-@d FORM_LEXEME         (LTAG_PDEX | 0x04)
-@d FORM_NEGATIVE       (LTAG_PDEX | 0x05) /* Negative integer (head only). */
-@d FORM_OPCODE         (LTAG_PDEX | 0x06)
-@d FORM_PENDING        (LTAG_PDEX | 0x07) /* Operational Data/Pending Computation. */
-@d FORM_POSITIVE       (LTAG_PDEX | 0x08) /* Positive integer and/or digit. */
-@d FORM_PRIMITIVE      (LTAG_PDEX | 0x09) /* Compute. */
-@d FORM_PROGRAM        (LTAG_PDEX | 0x0a)
-@d FORM_REGISTER       (LTAG_PDEX | 0x0b)
-@d FORM_SEGMENT        (LTAG_PDEX | 0x0c) /* Memory/Segments. */
-@#
-@d FORM_PAIR           (LTAG_BOTH | 0x00) /* Memory/Atoms. */
-@d FORM_APPLICATIVE    (LTAG_BOTH | 0x01) /* Operational Data/Programs (Closures). */
-@d FORM_ENVIRONMENT    (LTAG_BOTH | 0x02) /* Operational Data/Environments. */
-@d FORM_OPERATIVE      (LTAG_BOTH | 0x03) /* Operational Data/Programs (Closures). */
-@d FORM_STATEMENT      (LTAG_BOTH | 0x04)
+@ All of the objects known to \Ls/ are declared here (and also
+|FORM_NONE|). Some are placeholders for functionality which has
+been removed during \Ls/' development but are expected to make a
+comeback.
 
-@
+@d FORM_NONE           (LTAG_NONE | 0x00) /* Unallocated. */
+@d FORM_ARRAY          (LTAG_NONE | 0x01) /* Zero or more sequential cells. */
+@d FORM_ASSEMBLY       (LTAG_NONE | 0x02) /* (Partially) assembled bytecode. */
+@d FORM_COLLECTED      (LTAG_NONE | 0x03) /* Garbage collector tombstone. */
+@d FORM_HASHTABLE      (LTAG_NONE | 0x04) /* Key:value store. */
+@d FORM_HEAP           (LTAG_NONE | 0x05) /* Preallocated storage for atoms. */
+@d FORM_RUNE           (LTAG_NONE | 0x06) /* Unicode code point. */
+@d FORM_SEGMENT_INTERN (LTAG_NONE | 0x07) /* Tiny memory allocation. */
+@d FORM_SYMBOL         (LTAG_NONE | 0x08) /* Symbol. */
+@d FORM_SYMBOL_INTERN  (LTAG_NONE | 0x09) /* Tiny symbol. */
+@d FORM_WORD           (LTAG_NONE | 0x0a) /* Arbitrary bytes. */
+@#
+@d FORM_CSTRUCT        (LTAG_PDEX | 0x00) /* A \CEE/ struct. */
+@d FORM_CONTINUATION   (LTAG_PDEX | 0x01) /* Continuation delimiter. */
+@d FORM_ERROR          (LTAG_PDEX | 0x02) /* An error (above). */
+@d FORM_FILE_HANDLE    (LTAG_PDEX | 0x03) /* File descriptor or equivalent. */
+@d FORM_LEXEME         (LTAG_PDEX | 0x04) /* A lexeme in source code. */
+@d FORM_NEGATIVE       (LTAG_PDEX | 0x05) /* Large negative integer. */
+@d FORM_OPCODE         (LTAG_PDEX | 0x06) /* A virtual machine's operator. */
+@d FORM_PENDING        (LTAG_PDEX | 0x07) /* Stack marker? */
+@d FORM_POSITIVE       (LTAG_PDEX | 0x08) /* Large positive integer. */
+@d FORM_PRIMITIVE      (LTAG_PDEX | 0x09) /* A \Ls/ operator. */
+@d FORM_PROGRAM        (LTAG_PDEX | 0x0a) /* Legacy bytecode importer? */
+@d FORM_REGISTER       (LTAG_PDEX | 0x0b) /* A virtual machine register. */
+@d FORM_SEGMENT        (LTAG_PDEX | 0x0c) /* Large memory allocation. */
+@#
+@d FORM_PAIR           (LTAG_BOTH | 0x00) /* A pair of cells. */
+@d FORM_APPLICATIVE    (LTAG_BOTH | 0x01) /* Applicative closure. */
+@d FORM_ENVIRONMENT    (LTAG_BOTH | 0x02) /* Run-time environment. */
+@d FORM_OPERATIVE      (LTAG_BOTH | 0x03) /* Operative closure. */
+@d FORM_STATEMENT      (LTAG_BOTH | 0x04) /* A single assembled statement. */
+
+@ \CEE/ predicates to test whether an atom represents a particular
+object. Some objects use a segment or an array as a backing store
+or otherwise have more than a simple |form| predicate. These will
+be described as the objects are introduced.
+
 @d form(O)             (TAG(O) & LTAG_FORM)
 @d form_p(O,F)         (!special_p(O) && form(O) == FORM_##F)
 @d pair_p(O)           (form_p((O), PAIR))
@@ -586,41 +1018,67 @@ typedef union {
 @d applicative_p(O)    (form_p((O), APPLICATIVE) || primitive_applicative_p(O))
 @d operative_p(O)      (form_p((O), OPERATIVE) || primitive_operative_p(O))
 
-@* Heap.
+@* Heap. Atoms are always allocated from a {\it heap\/}. A heap is
+a list of power-of-two-sized memory allocations known as a {\it
+page\/} aligned to a page-sized boundary eg.~4KiB (4096 or |0x1000|
+bytes). The first page allocated for a heap is called the root heap
+page or simply root heap.
 
-@d HEAP_CHUNK         (SYSTEM_PAGE_LENGTH) /* Size of a heap page. */
+A heap page begins with a header followed immediately by the tags
+of the atoms it contains. After the header is (according to the atom
+and page sizes) a gap so that the first atom which follows it is
+correctly aligned. The rest of the page is dedicated to atoms.
+Like any other segment the heap page header is preceeded by a
+short segment header. Unlike regular segments though the segment
+header is {\it within\/} the heap page area.
+
+The macros here locate these from an atom or heap page's address.
+
+@d HEAP_CHUNK         (SYSTEM_PAGE_LENGTH) /* Size of a heap page (bytes). */
 @d HEAP_MASK          (HEAP_CHUNK - 1) /* Bits which will always be 0. */
-@d HEAP_BOOKEND       /* Heap header size. */
-        (sizeof (segment) + sizeof (heap))
-@d HEAP_LEFTOVER      /* Heap data size. */
-        ((HEAP_CHUNK - HEAP_BOOKEND) / (TAG_BYTES + ATOM_BYTES))
-@d HEAP_LENGTH        ((int) HEAP_LEFTOVER) /* Heap data size in bytes. */
-@d HEAP_HEADER        /* Heap header size in bytes. */
-        ((HEAP_CHUNK / ATOM_BYTES) - HEAP_LENGTH)
+@d HEAP_BOOKEND       (sizeof (segment) + sizeof (heap)) /* Full header size. */
+@d HEAP_LEFTOVER      ((HEAP_CHUNK - HEAP_BOOKEND) / (TAG_BYTES + ATOM_BYTES))
+@d HEAP_LENGTH        ((int) HEAP_LEFTOVER) /* Heap data size (bytes). */
+@d HEAP_HEADER        ((HEAP_CHUNK / ATOM_BYTES) - HEAP_LENGTH) /* (bytes) */
 @#
 @d ATOM_TO_ATOM(O)    ((atom *) (O))
-@d ATOM_TO_HEAP(O)    /* The |heap| containing an atom. */
-        (SEGMENT_TO_HEAP(ATOM_TO_SEGMENT(O)))
-@d ATOM_TO_INDEX(O)   /* The offset of an atom within a heap. */
-        (((((intptr_t) (O)) & HEAP_MASK) >> CELL_SHIFT) - HEAP_HEADER)
-@d ATOM_TO_SEGMENT(O) /* The |segment| containing an atom. */
-        ((segment *) (((intptr_t) (O)) & ~HEAP_MASK))
+@d ATOM_TO_HEAP(O)    (SEGMENT_TO_HEAP(ATOM_TO_SEGMENT(O))) /* The atom's
+                                                                heap. */
+@d ATOM_TO_INDEX(O)   (((((intptr_t) (O)) & HEAP_MASK) >> CELL_SHIFT)
+        - HEAP_HEADER) /* The offset of an atom within a heap. */
+@d ATOM_TO_SEGMENT(O) ((segment *) (((intptr_t) (O)) & ~HEAP_MASK)) /* The
+                                                segment containing an atom. */
 @d HEAP_TO_SEGMENT(O) (ATOM_TO_SEGMENT(O)) /* The segment containing a heap. */
-@d SEGMENT_TO_HEAP(O) ((heap *) (O)->base) /* The heap within a segment. */
-@d HEAP_TO_LAST(O)    /* The atom {\it after\/} the last valid |atom|
-                        within a heap. */
-        ((atom *) (((intptr_t) HEAP_TO_SEGMENT(O)) + HEAP_CHUNK))
+@d SEGMENT_TO_HEAP(O) ((heap *) (O)->base) /* The heap part of a segment. */
+@d HEAP_TO_LAST(O)    ((atom *) (((intptr_t) HEAP_TO_SEGMENT(O))
+        + HEAP_CHUNK)) /* The (invalid) atom {\it after\/} the last valid
+                                                        atom within a heap. */
 @#
-@d ATOM_TO_TAG(O)     (ATOM_TO_HEAP(O)->tag[ATOM_TO_INDEX(O)])
+@d ATOM_TO_TAG(O)     (ATOM_TO_HEAP(O)->tag[ATOM_TO_INDEX(O)]) /* The
+                                                                atom's tag. */
+
+@ A heap page's header has a pointer to the next free atom in the
+page, to the next page in the list, to an optional twin, and
+a pointer to the root heap.
+
+The root heap page's \.{root} pointer differs from other pages.
+Where a regular heap page's \.{root} pointer points to another page,
+ie.~the root page, the root heap's \.{root} pointer is really to a
+|heap_access| struct. The first member of a real heap page is its
+\.{free} pointer but the first member of a |heap_access| struct is
+a pointer-sized |HEAP_PUN_FLAG|.
+
+This sort of pointer trickery is not repeated anywhere else in \Ls/.
+
 @<Type def...@>=
 struct heap {
         atom     *free; /* Next unallocated atom. */
- struct heap     *next, *other; /* More heap. */
- struct heap_pun *root;
+ struct heap     *next, *other; /* Next \AM\ twin heap pages. */
+ struct heap_pun *root; /* Root page or |heap_access|. */
         cell_tag  tag[]; /* Atoms' tags. */
 };
 typedef struct heap heap;
-
+@#
 struct heap_pun {
         atom        *free;
  struct heap        *next, *other;
@@ -628,12 +1086,12 @@ struct heap_pun {
         cell_tag     tag[];
 };
 typedef struct heap_pun heap_pun;
-
+@#
 typedef error_code (*heap_init_fn)(heap *, heap *, heap *, heap *);
 typedef error_code (*heap_enlarge_fn)(heap *, heap **);
 typedef bool (*heap_enlarge_p_fn)(heap_pun *, heap *);
 typedef error_code (*heap_alloc_fn)(heap *, cell *);
-
+@#
 struct heap_access { /* TODO: This can be a thread local variable. */
         void              *free; /* Named free to look like a |heap| object. */
         heap_init_fn       init;
@@ -643,9 +1101,21 @@ struct heap_access { /* TODO: This can be a thread local variable. */
 };
 typedef struct heap_access heap_access;
 
-@ @d HEAP_PUN_FLAG -1
-@d shared
-@d unique __thread
+@ \Ls/ has three heaps. |Heap_Thread| is unique to each thread and
+is where most allocations will be performed, it's sometimes referred
+to simply as ``the'' heap. |Heap_Shared| is shared between all
+threads and is used for, no surprises here, sharing data between
+them. The third is |Heap_Trap| which can be allocated in advance
+for handling out-of-memory and other difficult or constrained
+run-time conditions. Only |Heap_Thread| is initialised automatically.
+
+All global \CEE/ variables are declared |shared| or |unique| (even
+though |shared| is empty) to be make each variable's thread scope
+highly visible.
+
+@d HEAP_PUN_FLAG -1 /* Fake `free pointer' sentinel to identify the root heap. */
+@d shared /* Global variable visible to all threads. */
+@d unique __thread /* Global variable private to each thread. */
 @d heap_root_p(O) ((O)->root->free == (void *) HEAP_PUN_FLAG)
 @d heap_root(O) (heap_root_p(O) ? (heap_pun *) (O) : (O)->root)
 @<Global...@>=
@@ -657,33 +1127,28 @@ unique heap *Heap_Trap = NULL; /* Per-thread heap for trap handler. */
 extern shared heap *Heap_Shared;
 extern unique heap *Heap_Thread, *Heap_Trap;
 
-@ @<Fun...@>=
-error_code heap_init_sweeping (heap *, heap *, heap *, heap *);
-error_code heap_init_compacting (heap *, heap *, heap *, heap *);
-bool heap_enlarge_p (heap_pun *, heap *);
-error_code heap_enlarge (heap *, heap **);
-error_code heap_alloc (heap *, cell *);
-bool heap_mine_p (heap *);
-bool heap_shared_p (heap *);
-bool heap_trapped_p (heap *);
-bool heap_other_p (heap *);
-@#
-error_code new_atom_imp (heap *, cell, cell, cell_tag, cell *);
-cell lsin (cell);
-error_code lsinx (cell, cell *);
-cell ldex (cell);
-error_code ldexx (cell, cell *);
-cell_tag ltag (cell);
-error_code lsin_set_m (cell, cell);
-error_code ldex_set_m (cell, cell);
+@ A heap page like all allocated memory except atoms is represented
+by a segment (description imminent) however all objects with a
+backing store including segment and heap objects are descended from
+an atom and atoms are allocated on a heap. To solve this apparent
+dilemma the first free atom in a new heap page is allocated to the
+backing segment representing the page.
 
-@ nb.~|heap->root| is |heap_pun->fun|.
+An ordinary segment increases the requested size of the allocation
+to fit its own header but heap pages must be exactly the requested
+size, which is indicated by passing the desired allocation size
+negated.
 
+The |heap_alloc| struct shouldn't be allocated with |mem_alloc| but
+the idea was put together hastily and the leak is small (TODO: fix
+this abomination).
+
+@.TODO@>
 @<Initialise heap...@>=
 orabort(alloc_segment(-HEAP_CHUNK, 1, HEAP_CHUNK, &stmp));
 Heap_Thread = SEGMENT_TO_HEAP(stmp);
 orabort(heap_init_sweeping(Heap_Thread, NULL, NULL, NULL));
-orabort(mem_alloc(NULL, sizeof (heap_access), sizeof (void *),
+orabort(mem_alloc(NULL, sizeof (heap_access), sizeof (void *),@|
         (void **) &((heap_pun *) Heap_Thread)->fun)); /* This is nasty... */
 ((heap_pun *) Heap_Thread)->fun->free = (void *) HEAP_PUN_FLAG;
 ((heap_pun *) Heap_Thread)->fun->init = heap_init_sweeping;
@@ -694,28 +1159,48 @@ orabort(new_atom(NIL, NIL, FORM_HEAP, &ltmp));
 orabort(segment_init(HEAP_TO_SEGMENT(Heap_Thread), ltmp));
 Heap_Shared = Heap_Trap = NULL;
 
-@ @c
+@ @<Fun...@>=
+bool heap_mine_p (heap *);
+bool heap_shared_p (heap *);
+bool heap_trapped_p (heap *);
+bool heap_other_p (heap *);
+@#
+error_code heap_init_sweeping (heap *, heap *, heap *, heap *);
+error_code heap_init_compacting (heap *, heap *, heap *, heap *);
+error_code heap_alloc (heap *, cell *);
+error_code heap_enlarge (heap *, heap **);
+bool heap_enlarge_p (heap_pun *, heap *);
+@#
+error_code new_atom_imp (heap *, cell, cell, cell_tag, cell *);
+cell lsin (cell);
+error_code lsinx (cell, cell *);
+cell ldex (cell);
+error_code ldexx (cell, cell *);
+cell_tag ltag (cell);
+error_code lsin_set_m (cell, cell);
+error_code ldex_set_m (cell, cell);
+
+@ These predicates query which of the three heaps a heap page belongs to.
+
+@c
 bool
 heap_mine_p (heap *o)
 {
         return (heap *) heap_root(o) == Heap_Thread;
 }
 
-@ @c
 bool
 heap_shared_p (heap *o)
 {
         return (heap *) heap_root(o) == Heap_Shared;
 }
 
-@ @c
 bool
 heap_trapped_p (heap *o)
 {
         return (heap *) heap_root(o) == Heap_Trap;
 }
 
-@ @c
 bool
 heap_other_p (heap *o)
 {
@@ -723,15 +1208,31 @@ heap_other_p (heap *o)
                 && (heap *) heap_root(o) != Heap_Shared;
 }
 
-@ @d initialise_atom(H,F) do {
+@ The |heap_alloc| struct allows new memory allocation routines
+(including garbage collection) to be added to \Ls/ dynamically.
+There are two allocators built in which differ primarily in how
+their gargbage collector works.
+
+The heap assigned to |Heap_Thread| during initialisation is a {\it
+sweeping heap\/} which maintains a linked list of free atoms and
+cleans up garbage by returning unused atoms to it. Alternatively
+there is a {\it collecting heap\/} who's |free| pointer is incremented
+to allocate an atom and cleans up garbage by twinning each page
+with an empty page and moving all used atoms in a page into that.
+
+Note that the garbage collectors have been removed from this work
+in progress.
+
+@d initialise_atom(H,F) do { /* Heap, Free; a clever-enough compiler is
+                        expected to eliminate the un{\it Free\/} branch. */
         (H)->free--; /* Move to the previous atom. */
         ATOM_TO_TAG((H)->free) = FORM_NONE; /* Free the atom. */
-        (H)->free->sin = NIL; /* Clean the atom of sin. */
+        (H)->free->sin = NIL; /* Cleanse the atom of sin. */
         if (F)
                 (H)->free->dex = (cell) ((H)->free + 1); /* Link the atom
                                                         to the free list. */
         else
-                (H)->free->dex = NIL; /* Clean the rest of the atom. */
+                (H)->free->dex = NIL; /* Scrub up the rest of the atom. */
 } while (0)
 @c
 error_code
@@ -765,7 +1266,7 @@ heap_init_sweeping (heap *new,
         return LERR_NONE;
 }
 
-@ TODO: This remains untested.
+@ TODO: This (and its missing GC etc.) remains untested.
 
 @.TODO@>
 @c
@@ -803,7 +1304,11 @@ heap_init_compacting (heap *new,
         return LERR_NONE;
 }
 
-@ @c
+@ Garbage collection is not automatic. If no atom is free this
+|heap_alloc| function determines whether to try to enlarge the heap
+with a new page or give up immediately with |LERR_OOM|.
+
+@c
 bool
 heap_enlarge_p (heap_pun *root @[unused@],
                 heap     *at @[unused@])
@@ -811,7 +1316,11 @@ heap_enlarge_p (heap_pun *root @[unused@],
         return true;
 }
 
-@ @c
+@ If none of the allocated heap pages available to the current
+thread has an atom free then the heap can be enlarged by allocating
+a new page and linking it into the heap page list.
+
+@c
 error_code
 heap_enlarge (heap  *old,
               heap **ret)
@@ -846,7 +1355,17 @@ heap_enlarge (heap  *old,
         return LERR_NONE;
 }
 
-@ @c
+@ Each heap page points (with a \CEE/ pointer) to the next heap
+page in the list, or to to |NULL| at the end. When allocating a new
+atom each page in the list is considered in turn until a free atom
+is found and returned.
+
+If the end of the chain of heap pages is reached without finding a
+free atom then enlargment may be attempted according to that heap's
+\.{enlarge\_p} member (and then an allocation is guaranteed to
+succeed), otherwise give up with |LERR_OOM|.
+
+@c
 error_code
 heap_alloc (heap *where,
             cell *ret)
@@ -870,7 +1389,16 @@ again:
         goto again;
 }
 
-@ @<Find an atom in a sweeping heap@>=
+@ A sweeping heap's free pointer is to the first unallocated atom
+forming a linked list --- the dex cell points to the next atom or
+to |NIL|. To allocate the atom the free pointer is updated to the
+next atom in the list (in the taken atom's dex help) and the atom
+is returned.
+
+A small optimisation could possibly be achieved by noting the page
+which contained a free atom prior to returning it.
+
+@<Find an atom in a sweeping heap@>=
 next = where;
 while (next != NULL) {
         h = next;
@@ -883,7 +1411,12 @@ while (next != NULL) {
         next = h->next;
 }
 
-@ @<Find an atom in a compacting heap@>=
+@ A compacting heap's free pointer also points to the next atom but
+rather than forming a linked list the free pointer is incremented
+and the atom it was previously pointing to (which is already prepared)
+is returned.
+
+@<Find an atom in a compacting heap@>=
 next = where;
 while (next != NULL) {
         h = next;
@@ -894,8 +1427,14 @@ while (next != NULL) {
         next = h->next;
 }
 
-@ @d cons(A,D,R)     (new_atom((A), (D), FORM_PAIR, (R)))
-@d new_atom(S,D,T,R) (new_atom_imp(Heap_Thread, (cell)(S), (cell)(D), (T), (R)))
+@ ``An atom'' isn't any kind of object that \Ls/ knows how to handle
+but every object constructor in the \Ls/ implementation is ultimately
+a wrapper around |new_atom|. Except for |cons| to create a
+{\it pair\/}, which literally is |new_atom|.
+
+@d cons(A,D,R)       (new_atom((A), (D), FORM_PAIR, (R))) /* cAr, cDr, R */
+@d new_atom(S,D,T,R) /* Sinister, Dexter, Tag, R */ (new_atom_imp(Heap_Thread,
+        (cell) (S), (cell) (D), (T), (R)))
 @c
 error_code
 new_atom_imp (heap     *where,
@@ -915,11 +1454,12 @@ new_atom_imp (heap     *where,
         return LERR_NONE;
 }
 
-@ The contents and tag of an atom are always reached, except by the
-garbage collector which must perform magic, through these accessor
-functions. When threading support is added these accessors will
-trap attempts to read and write from another thread's heap and
-trigger moving the objects into the shared heap.
+@ The contents and tag of an atom are always reached through these
+accessor functions except by the garbage collector which needs to
+perform deeper magic. When threading support is added these accessors
+will trap attempts to read and write from another thread's heap and
+trigger moving the objects into the shared heap with the necessary
+locks.
 
 @c
 cell_tag
@@ -930,7 +1470,10 @@ ltag (cell o)
         return TAG(o);
 }
 
-@ @c
+@ The sinister half of the atom as a return value (|lsin|), a regular
+erroring function (|lsinx|) and a pair accessor (|lcar|).
+
+@c
 cell
 lsin (cell o)
 {
@@ -956,7 +1499,9 @@ lcar (cell  o,
         return lsinx(o, ret);
 }
 
-@ @c
+@ Likewise the dexter half.
+
+@c
 cell
 ldex (cell o)
 {
@@ -982,7 +1527,9 @@ lcdr (cell  o,
         return ldexx(o, ret);
 }
 
-@ @c
+@ And mutators, for any kind of atom (sin/dex) or pairs (car/cdr).
+
+@c
 error_code
 lsin_set_m (cell o,
             cell datum)
@@ -1021,7 +1568,24 @@ lcdr_set_m (cell o,
         return ldex_set_m(o, datum);
 }
 
-@* Segments.
+@* Segments. Every allocation in \Ls/ is a segment or is within a
+segment: an arbitrary-size memory allocation. Three objects are
+used internally to define segments:
+
+A {\it pointer\/} is anything with a \CEE/ pointer in its sinister
+half (and an ignored cell in its dexter half).
+
+A {\it segment\/} is a pointer which points to an allocation.
+
+An {\it interned\/} segment is an allocation that's small enough
+to fit within the atom that would otherwise be a pointer. This can
+only be achieved for objects which don't need the segment header
+data of which there are two: plain segments and symbols.
+
+The owner of a segment is the pointer atom, allocated on the heap.
+
+Every segment (except interned segments) is included in a global
+list via its \.{next} and \.{prev} pointers.
 
 @d pointer(O)          ((void *) lsin(O))
 @d pointer_set_m(O,D)  (lsin_set_m((O), (cell) (D)))
@@ -1055,31 +1619,33 @@ lcdr_set_m (cell o,
 @d segment_stride(O)   (segint_p(O) ? segint_stride(O)  : segbuf_stride(O))
 @d segment_can_intern_p(O) (segint_p(O) || segbuf_pointer(O)->stride == 0)
 @#
-@d segment_set_owner_m(O,N) do {
+@d segment_set_owner_m(O,N) do { /* O, New */
         assert(!segint_p(O));
         segbuf_owner(O) = (N);
 } while (0)
 @<Type def...@>=
 struct segment {
- struct segment *next, *prev; /* Linked list of all allocated segments. */
-        cell owner; /* The referencing atom; cleared and re-set during
-                        garbage collection. */
+ struct segment *next, *prev; /* List of all allocated segments. */
+        cell owner; /* The referencing atom; cleared during
+                        garbage collection if not live. */
         half length, stride; /* Notably absent: alignment. */
-        byte base[]; /* Address of the usable space; a pseudo-pointer
-                                which occupies no storage. */
+        byte base[]; /* Address of the usable space. */
 };
 typedef struct segment segment;
 
-@ @<Global...@>=
+@ The list of segment allocations is reached through the global
+variable |Allocations|. The garbage collector sweeps this looking
+for segments which aren't pointed to by a live atom so that they
+can be released. The list's integrity is maintained between threads
+by a mutex to lock other threads out of the list modification code.
+
+@<Global...@>=
 shared segment *Allocations = NULL;
 shared pthread_mutex_t Allocations_Lock;
 
 @ @<Extern...@>=
 extern shared segment *Allocations;
 extern shared pthread_mutex_t Allocations_Lock;
-
-@ @<Initialise memory...@>=
-orabort(init_osthread_mutex(&Allocations_Lock, false, false));
 
 @ @<Fun...@>=
 error_code alloc_segment_imp (segment *, long, long, long, segment **);
@@ -1092,7 +1658,16 @@ error_code segment_release_imp (segment *, bool);
 error_code segment_release_m (cell, bool);
 error_code segment_resize_m (cell, long);
 
-@ TODO: These arguments should be |size_t| type? |intmax_t|?
+@ Before \Ls/ can do anything else the allocation lock is initialised.
+
+@<Initialise memory...@>=
+orabort(init_osthread_mutex(&Allocations_Lock, false, false));
+
+@ Segment allocation is a two step process: the allocation itself
+with |mem_alloc| and allocating a pointer atom on a heap. The segment
+imp here obtains and returns the allocation.
+
+TODO: These arguments should be |size_t|? |intmax_t|?
 
 TODO: |segment_base|, not |segment_pointer|, should be correctly aligned.
 
@@ -1113,8 +1688,6 @@ alloc_segment_imp (segment  *old,
 
         if (stride < 0)
                 return LERR_INCOMPATIBLE;
-        cstride = stride ? stride : 1;
-        clength = (length >= 0) ? length : -length;
         @<Calculate the full size of a segment allocation@>@;
         @<Allocate and initialise a segment@>@;
         if (pthread_mutex_lock(&Allocations_Lock) != 0) {
@@ -1127,16 +1700,21 @@ alloc_segment_imp (segment  *old,
         return LERR_NONE;
 }
 
-@ If the |header| value is -1 then the allocation will be exactly
-$length \times stride$ bytes, otherwise the user and segment headers
-are added to this length.
+@ To indicate that the segment should not add it own header |length|
+is passed as a negative value and the total allocation exactly
+$\vert length\vert \times stride$ bytes, otherwise the user and
+segment headers are added to |length| to find the total size.
+
+If |stride| is 0 then it really means 1 but the segment can be
+interned if it's small enough.
 
 @<Calculate the full size of a segment allocation@>=
+cstride = stride ? stride : 1;
+clength = (length >= 0) ? length : -length;
 if (ckd_mul(&size, clength, cstride))
         return LERR_OOM;
-if (length >= 0)
-        if (ckd_add(&size, size, sizeof (segment)))
-                return LERR_OOM;
+if (length >= 0 && ckd_add(&size, size, sizeof (segment)))
+        return LERR_OOM;
 if (size > HALF_MAX)
         return LERR_LIMIT;
 
@@ -1147,7 +1725,13 @@ new->stride = stride;
 if (old == NULL)
         new->owner = NIL; /* This is a new allocation. */
 
-@ @<Insert a new segment into |Allocations|@>=
+@ The |Allocations| list is already locked by |alloc_segment_imp|.
+The first allocation sets the global list to itself, otherwise the
+new segment is inserted into the list. It was once imagined that
+this might happen occasionaly but the test is just a waste (TODO).
+
+@.TODO@>
+@<Insert a new segment into |Allocations|@>=
 if (Allocations == NULL)
         Allocations = new->next = new->prev = new;
 else {
@@ -1157,7 +1741,17 @@ else {
         Allocations->prev = new;
 }
 
-@ @d new_segment(L,S,A,R) new_segment_imp(Heap_Thread, (L), (S), (A),
+@ An allocation can be interned if the caller says it can be and
+the space needed without the usual segment header fits entirely
+within the atom's space on the heap. In this case the only piece
+of header data necessary is the length of the allocation, the rest
+can be inferred.
+
+The caller indicates the segment could be interned with a |stride|
+and |align| value of zero and a valid |itag|. The only object to
+which this applies apart from a segment is symbols.
+
+@d new_segment(L,S,A,R) new_segment_imp(Heap_Thread, (L), (S), (A),@|
         FORM_SEGMENT, FORM_SEGMENT_INTERN, (R))
 @c
 error_code
@@ -1165,7 +1759,7 @@ new_segment_imp (heap     *where,
                  long      length,
                  long      stride,
                  long      align,
-                 cell_tag  ntag,
+                 cell_tag  ntag,@|
                  cell_tag  itag,
                  cell     *ret)
 {
@@ -1179,13 +1773,19 @@ new_segment_imp (heap     *where,
         }
 }
 
-@ @<``Allocate'' an intern...@>=
+@ If the segment can be interned then a new atom can be returned directly.
+
+@<``Allocate'' an intern...@>=
 assert(itag != FORM_NONE);
 orreturn(new_atom_imp(where, NIL, NIL, itag, ret));
 segint_set_length_m(*ret, length);
 return LERR_NONE;
 
-@ @<Allocate a full-size segment@>=
+@ A segment with a backing allocation first (cheaply) allocates the
+atom then completes its tag only if the main (expensive) allocation
+succeeds.
+
+@<Allocate a full-size segment@>=
 orreturn(new_atom_imp(where, NIL, NIL, FORM_PAIR, ret));
 orreturn(alloc_segment(length, stride, align, &s));
 TAG_SET_M(*ret, ntag);
@@ -1193,12 +1793,15 @@ ATOM_TO_ATOM(*ret)->sin = (cell) s;
 s->owner = *ret;
 return LERR_NONE;
 
-@ @c
+@ This routine allocates a segment the same size as an existing
+one and copies its contents into it.
+
+@c
 error_code
 new_segment_copy (char     *buf,
                   long      length,
                   long      stride,
-                  long      align,
+                  long      align,@|
                   cell_tag  ntag,
                   cell_tag  itag,
                   cell     *ret)
@@ -1213,7 +1816,10 @@ new_segment_copy (char     *buf,
         return LERR_NONE;
 }
 
-@ @c
+@ Heap pages need to initialise an atom to point to an area of
+memory that has been allocated already as a segment.
+
+@c
 error_code
 segment_init (segment *seg,
               cell     container)
@@ -1225,7 +1831,9 @@ segment_init (segment *seg,
         return LERR_NONE;
 }
 
-@ Not clear what could go wrong but when something does assume the worst.
+@ Segments do not need to be freed manually but they do need to be
+freed. The algorithm is in two parts to separete the time holding
+on to |Allocations_Lock| from the time spent handling the atom.
 
 @c
 error_code
@@ -1241,7 +1849,6 @@ segment_release (cell o,
         return reason;
 }
 
-@ @c
 error_code
 segment_release_imp (segment *o,
                      bool     reclaim)
@@ -1264,7 +1871,15 @@ segment_release_imp (segment *o,
                 return LERR_NONE;
 }
 
-@ Only for true segments and things based on arrays.
+@ Segments can be resized although few of the objects based on
+segments support resizing in-place. This function does so while
+taking care of switching to and from and interned segment where
+feasible.
+
+The \.{\_m} suffix indicates that the function changes (mutates)
+the object passed in to it, however in this case as usual changes
+are left until the last possible moment in case an error is
+encountered.
 
 @c
 error_code
@@ -1296,11 +1911,18 @@ segment_resize_m (cell o,
         return LERR_NONE;
 }
 
-@ @<Resize an interned segment@>=
+@ An interned segment which remains interned has its length changed.
+
+@<Resize an interned segment@>=
 segint_set_length_m(o, nlength);
 
-@ Symbols are never resized so the only valid format is |FORM_SEGMENT|
-changing to |FORM_SEGMENT_INTERN|.
+@ If a segment is being reduced small enough and can be interned
+the tag of the atom is changed and the allocation is left without
+an owner (to be cleaned up by the garbage collector). The contents
+are copied as far as they will fit.
+
+Symbols are immutable and can't be resized so this only actually
+applies to plain segments.
 
 @<Intern a previously allocated segment@>=
 TAG_SET_M(o, FORM_SEGMENT_INTERN); /* Do this first to turn the atom opaque. */
@@ -1310,7 +1932,9 @@ for (i = 0; i < nlength; i++)
         segint_base(o)[i] = old->base[i];
 orreturn(segment_release_imp(old, true));
 
-@ Aligned allocations cannot be resized.
+@ After allocating for a segment that has outgrown its internment
+the amount of space they shared is copied to the new address and
+the atom is modified to point to it.
 
 @<Allocate a segment for a previously interned segment@>=
 olength = segment_length(o);
@@ -1319,17 +1943,57 @@ for (i = 0; i < olength; i++)
         new->base[i] = segint_base(o)[i];
 pointer_set_m(o, new);
 pointer_set_datum_m(o, NIL);
-TAG_SET_M(o, FORM_SEGMENT); /* Do this last so the atom remains opaque. */
+TAG_SET_M(o, FORM_SEGMENT); /* Do this last so the atom remains opaque
+                                until ready. */
 
-@ @<Resize an allocated segment@>=
+@ Resizing a segment which was not and will not be interned is
+performed by the backend memory allocator as far as the allocation
+and its contents are concerned. The atom is changed to point to the
+``new'' allocation however there is no ``old'' allocation --- this
+is taken care of by the allocator --- except that the address may
+have changed.
+
+TODO: Check that this (ie.~|alloc_segment|) handles next/prev correctly.
+
+@.TODO@>
+@<Resize an allocated segment@>=
 old = segbuf_pointer(o);
 orreturn(alloc_segment_imp(old, nlength, segment_stride(o), 0, &new));
-pointer_set_m(o, new); /* May have changed. */
+pointer_set_m(o, new); /* May have changed but it's still the ``same''
+                                allocation. */
 
-@* Words, Bytes \AM\ Simple Integers. Definitions of fixed and big
-integers, addition \AM\ subtraction. More later after the rest of
-the core.
+@* Integers. The {\it word\/} object is a bad idea that exists only
+for the use of the rudimentary I/O stub. In effect it's an
+always-interned segment (with one extra byte where the length would
+normally be). Its use will be replaced with a segment as soon as
+the current bout of editing is done with so no more will be said
+about it (TODO).
 
+There are three integer flavours in \Ls/: small numbers or {\it
+fixed integers\/} which fit within a cell and don't consume any
+heap storage, and {\it large integers\/} --- positive and negative
+separately --- which don't fit in a cell and do require storage.
+
+Fixed integers are identified by a cell value with the lowest four
+bits set (|0xf|) to indicate that the value is a constant and not
+a pointer to an atom. The {\it signed\/} numeric value stored in a
+fixed integer is shifted above these, thus fixed integers fit within
+60, 28 or 12 bits depending on the architecture.
+
+Large integers are stored as a linked list of pointer-sized ``digits''
+beginning with the largest-magnitude digit (ie.~the list is
+big-endian); the first such digit is either |FORM_NEGATIVE| or
+|FORM_POSITIVE|.
+
+No effort has been expended researching how to store or use large
+integers efficiently, on the other hand nothing in \Ls/' core {\it
+uses\/} them except where ``any'' integer is expected and that to
+perform some maths which should eventually fit in a \CEE/ variable,
+thus everything in the previous two paragraphs is subject to change.
+However it seems likely that fixed integers, and the API described
+below, are stable.
+
+@.TODO@>
 @d word(O)         ((char *) (O))
 @d word_high(O)    ((digit) lsin(O))
 @d word_low(O)     ((digit) ldex(O))
@@ -1337,7 +2001,7 @@ the core.
 @#
 @d fix(V)         (FIXED | asl((V), FIXED_SHIFT))
 @d fixed_value(V) (asr((V), FIXED_SHIFT))
-@d int_digit(O)   (((atom *) (O))->value) /* Eeek! */
+@d int_digit(O)   (((atom *) (O))->value)
 @d int_next(O)    (((atom *) (O))->tail)
 @d int_more_p(O)  (!null_p(int_next(O)))
 @<Fun...@>=
@@ -1350,14 +2014,16 @@ error_code new_word (digit, digit, cell *);
 error_code int_abs (cell, cell *);
 error_code int_add (cell, cell, cell *);
 error_code int_cmp (cell, cell, cell *);
+error_code int_div (cell, cell, cell *);
 error_code int_mul (cell, cell, cell *);
-error_code int_reverse (cell, cell *);
 error_code int_sub (cell, cell, cell *);
 error_code int_value (cell, intmax_t *);
 error_code uint_value (cell, uintmax_t *);
 bool cmpis_p (cell, cell);
 
-@ @c
+@ These two utility functions exist because \CEE/ is a pain in the neck.
+
+@c
 intmax_t
 asl (intmax_t value,
      int      shift)
@@ -1381,7 +2047,12 @@ new_word (digit  high,
         return new_atom((cell) high, (cell) low, FORM_WORD, ret);
 }
 
-@ @c
+@ A fixed integer is a cell who's value is |FIXED| (15 or binary
+1111) with the value shifted above this. Obviously this means the
+upper four bits are unavailable so |value| must be between |FIXED_MIN|
+and |FIXED_MAX|, defined in the |@<Essential...@>| section.
+
+@c
 error_code
 new_fixed (intmax_t  value,
            cell     *ret)
@@ -1392,7 +2063,11 @@ new_fixed (intmax_t  value,
         return LERR_NONE;
 }
 
-@ @c
+@ Large integers' storage is allocated one pointer-sized digit at
+a time. The sinister cell holds the digit's value and the dexter
+cell links to the next or |NIL|.
+
+@c
 error_code
 new_digit (digit  value,
            cell   tail,
@@ -1401,8 +2076,12 @@ new_digit (digit  value,
         return new_atom(value, tail, FORM_POSITIVE, ret);
 }
 
-@ Extremely naive and slow but simple algorithm. Assumes the contents
-of base[0..length-1] are all [0-9].
+@ This naive algorithm parses a base-10 integer encoded in an ASCII
+buffer who's contents have already been validated.
+
+Allocating a new integer is the only time that an integer's backing
+store is treated as mutable, when the sign is set at the end. See
+also |new_int_c| in the next section.
 
 @c
 error_code
@@ -1426,11 +2105,14 @@ new_int_buffer (bool      minus,
         return LERR_NONE;
 }
 
-@ Maths code boxes fixnums in a secret bigint when |fixable| is
-|false|. TODO: That is unnecessary. They will always be a single
-pair and can be created in place when necessary.
+@ Large integers are not used by the \Ls/ core but share an API
+with the fixed integers that are. Nearly all\footnote{$^1$}{Numbers
+known to fit can call |fix| directly.} integer allocation is done
+by |new_int_c| which returns a fixed, negative or positive integer
+representing |value|. The argument |fixable| is a relic from when
+\Ls/ had large integer maths routines in the core and can probably
+be removed.
 
-@.TODO@>
 @c
 error_code
 new_int_c (intmax_t  value,
@@ -1463,39 +2145,11 @@ new_int_c (intmax_t  value,
         return LERR_NONE;
 }
 
-@ @c
-bool
-int_negative_p (cell o)
-{
-        if (negative_p(o))
-                return true;
-        if (fixed_p(o) && fixed_value(o) < 0)
-                return true;
-        return false;
-}
-
-@ Unused?
+@ The converse of |new_int_c| is |int_value| (or |uint_value| if
+the caller expects an unsigned integer) which extracts the value
+from any integer into a \CEE/ variable, if it fits.
 
 @c
-error_code
-int_reverse (cell  o,
-             cell *ret)
-{
-        cell tail;
-        error_code reason;
-
-        if (!negative_p(o) || !positive_p(o))
-                return LERR_INCOMPATIBLE;
-        tail = NIL;
-        while (!null_p(o)) {
-                orreturn(new_digit(int_digit(o), tail, &tail));
-                o = int_next(o);
-        }
-        *ret = tail;
-        return LERR_NONE;
-}
-
-@ @c
 error_code
 int_value (cell      value,
            intmax_t *ret)
@@ -1519,7 +2173,6 @@ int_value (cell      value,
                 return LERR_INCOMPATIBLE;
 }
 
-@ @c
 error_code
 uint_value (cell       value,
             uintmax_t *ret)
@@ -1540,7 +2193,20 @@ uint_value (cell       value,
         }
 }
 
-@ @c
+@ This identity comparator function, known as \.{eq?} in Scheme,
+is here because integers are treated specially in \Ls/. For everything
+but an integer an object is the same as another only if their cell
+value is the same (ie.~they are a pointer to the same backing store).
+Integers on the other hand are compared for {\it numerical\/}
+identity.
+
+Runes (unicode code points) also get special treatment otherwise
+the underlying architecture \Ls/ is running on could determine
+whether two code points are the same (Unicode code points require
+21 bits, plus error flags, which only fit in an unallocated cell
+on 32 and 64 bit systems)
+
+@c
 bool
 cmpis_p (cell yin,
          cell yang)
@@ -1556,12 +2222,17 @@ cmpis_p (cell yin,
         return fixed_value(answer) == 0;
 }
 
-@ Compares integers against each other, treating runes as integers
-who's value is their codepoint. Fixed integers and runes can be
-compared simply after extracting their values. Big integers are
-compared against each other digit-by-digit until one or they both
-end.
+@ Analogous to |memcmp|, compare integers against each other and
+return whether the difference from the first to the second is
+positive (1), negative (-1) or they're identical (0).
 
+That's the idea anyway. A casual glance suggests that the edge cases
+may be handled incorrectly. It's also apparent from the messy source
+code in \.{lossless.w} ({\it three\/} over-long lines! With sloppy
+punctuation!) that this function hasn't been thoroughly vetted yet,
+so mark it up TODO.
+
+@.TODO@>
 @c
 error_code
 int_cmp (cell  yin,
@@ -1625,7 +2296,13 @@ int_cmp (cell  yin,
         }
 }
 
-@ @c
+@ Return the positive value of an integer. A maximally negative
+fixed integer won't fit back into a fixed integer so |new_int_c|
+is used whenever the input is one. A negative number can be made
+positive by creating a new leading positive digit with whatever
+trailing digits the negative integer had.
+
+@c
 error_code
 int_abs (cell  o,
          cell *ret)
@@ -1651,9 +2328,19 @@ int_abs (cell  o,
         return new_digit(payload, tail, ret);
 }
 
-@ Addition and subtraction are substantially similar.
+@ Addition and subtraction are substantially similar because they're
+not implemented; maths which overflows native \CEE/ variables returns
+|LERR_UNIMPLEMENTED| to be caught and handled at run-time.
 
-@d int_extract(O,V,R) do {
+The first step is to attempt to extract the value of the integer
+into a \CEE/ variable, or give up.
+
+I don't know what I was thinking when I wrote the outer condition
+and it's clearly wrong. TODO ASAP (but no code changes in this edit
+iteration).
+
+@.TODO@>
+@d int_extract(O,V,R) do { /* O, Value, R */
         if (fixed_p(O))
                 (V) = (fixed_value(O) >= 0) ? fixed_value(O) : -fixed_value(O);
         else {
@@ -1664,6 +2351,13 @@ int_abs (cell  o,
                         return (R);
         }
 } while (0)
+
+@ The only way large integers are handled by the maths routines
+here is when one of the operands is zero and the other operand is
+the result. Otherwise any use of large integers, or fixed integers
+where the operation overflows the \CEE/ variable it's carried out
+in, return |LERR_UNIMPLEMENTED|.
+
 @c
 error_code
 int_add (cell  yin,
@@ -1692,7 +2386,6 @@ int_add (cell  yin,
         return new_int_c(result, true, ret);
 }
 
-@ @c
 error_code
 int_sub (cell  yin,
          cell  yang,
@@ -1717,7 +2410,6 @@ int_sub (cell  yin,
         return new_int_c(result, true, ret);
 }
 
-@ @c
 error_code
 int_mul (cell  yin,
          cell  yang,
@@ -1747,10 +2439,55 @@ int_mul (cell  yin,
         return new_int_c(result, true, ret);
 }
 
-@* Arrays.
+@ Integer division is not implemented in the core.
 
-The GC scanner starts looking at cells from |larry_object(O)->base[header]|
-as |scan_progress == 0|.
+@c
+error_code
+int_div (cell  yin,
+         cell  yang,
+         cell *ret @[unused@])
+{
+        if (!integer_p(yin) || !integer_p(yang))
+                return LERR_INCOMPATIBLE;
+        return LERR_UNIMPLEMENTED;
+}
+
+@* Arrays. The next most interesting object after the cell and atom
+is arbitrary length arrays of sequential cells. Arrays are a regular
+run-time object but also form the basis of other \Ls/ objects too
+complex for a single atom. All such objects are built on the hidden
+array-like object, called a {\it larry\/} due to its close similarity
+with the every-day array.
+
+A larry is a segment which begins with its own header followed by
+the desired number of cells (which can be zero). Objects which are
+based on a larry specify additional header space of their own {\it
+in cell-sized chunks\/} where necessary.
+
+The size of the two parts of the header is mostly of significance
+to the garbage collector: the amount of cell space in the outer
+larry which is reserved for header of the inner object is treated
+as {\it opaque\/} and skipped over by the garbage collector.
+
+The larry reference and mutation functions (|larry_ref| et al.)
+also increase the real index by the size of the object's header so
+that inner objects' indexes are zero-based. This gets slightly more
+confusing when run-time arrays are introduced which can offset their
+index by a user-specified amount.
+
+@d LARRY_HEADER_LENGTH  (sizeof (larry) / sizeof (cell))
+@#
+@d larry_object(O)          ((larry *) segment_base(O))
+@d larry_base(O)            (larry_object(O)->base)
+@d larry_header(O)          (larry_object(O)->header) /* Additional header size. */
+@d larry_set_header_m(O,V)  (larry_header(O) = (V))
+@d larry_scan_progress(O)   (larry_object(O)->scan_progress)
+@d larry_set_scan_progress_m(O,V)
+                            (larry_scan_progress(O) = (V))
+@d larry_length(O)          (segment_length(O) - (half) LARRY_HEADER_LENGTH)
+@# /* Reference {\it past\/} the additional header: */
+@d larry_ref_imp(O,I)       (larry_base(O)[larry_header(O) + (I)])
+@d larry_set_m_imp(O,I,V)   (larry_base(O)[larry_header(O) + (I)] = (V))
 
 @<Type def...@>=
 typedef struct {
@@ -1758,26 +2495,19 @@ typedef struct {
         cell base[];
 } larry;
 
-@ @d LARRY_HEADER_LENGTH  (sizeof (larry) / sizeof (cell))
-@#
-@d larry_object(O)          ((larry *) segment_base(O))
-@d larry_base(O)            (larry_object(O)->base)
-@d larry_header(O)          (larry_object(O)->header)
-@d larry_set_header_m(O,V)  (larry_header(O) = (V))
-@d larry_scan_progress(O)   (larry_object(O)->scan_progress)
-@d larry_set_scan_progress_m(O,V)
-                            (larry_scan_progress(O) = (V))
-@d larry_length(O)          (segment_length(O) - (half) LARRY_HEADER_LENGTH)
-@d larry_ref_imp(O,I)       (larry_base(O)[larry_header(O) + (I)])
-@d larry_set_m_imp(O,I,V)   (larry_base(O)[larry_header(O) + (I)] = (V))
+@ A larry on its own doesn't do anything but reference, mutate and
+resize.
+
 @<Fun...@>=
 error_code new_larry (intmax_t, intmax_t, cell, cell_tag, cell *);
 error_code larry_ref (cell, intmax_t, cell *);
 error_code larry_resize_m (cell, intmax_t, cell);
-error_code larry_ref (cell, intmax_t, cell *);
 error_code larry_set_m (cell, intmax_t, cell);
 
-@ |length| must be large enough to hold |header|.
+@ A larry's length {\it includes\/} the inner object's additional
+(non-larry) header. The |length| argument to |new_larry| must be
+large enough to hold |header| and they are both measured in multiples
+of cells.
 
 @c
 error_code
@@ -1797,7 +2527,8 @@ new_larry (intmax_t  length,
                 return LERR_LIMIT;
         rlength = length + LARRY_HEADER_LENGTH;
         orreturn(new_segment_imp(Heap_Thread, rlength, sizeof (cell),
-                sizeof (cell), ntag, FORM_NONE, ret));
+                sizeof (cell), ntag, FORM_NONE, ret)); /* Larry cannot be
+                                                                interned. */
         larry_set_header_m(*ret, header);
         larry_set_scan_progress_m(*ret, 0);
         if (defined_p(fill))
@@ -1806,7 +2537,9 @@ new_larry (intmax_t  length,
         return LERR_NONE;
 }
 
-@ @c
+@ Reference and mutate are a simple matter of argument validation.
+
+@c
 error_code
 larry_ref (cell      o,
            intmax_t  index,
@@ -1822,7 +2555,6 @@ larry_ref (cell      o,
         return LERR_NONE;
 }
 
-@ @c
 error_code
 larry_set_m (cell      o,
              intmax_t  index,
@@ -1838,13 +2570,15 @@ larry_set_m (cell      o,
         return LERR_NONE;
 }
 
-@ @c
+@ Larries can be resized if the object based on it supports it.
+
+@c
 error_code
 larry_resize_m (cell     o,
                 intmax_t length,
                 cell     fill)
 {
-        intmax_t i, olength, rlength;
+        intmax_t i, olength, rlength; /* Old length, Real length. */
         error_code reason;
 
         assert(larry_p(o));
@@ -1859,22 +2593,35 @@ larry_resize_m (cell     o,
         return LERR_NONE;
 }
 
-@* Lossless Arrays. Offset larry.
+@ \Ls/ run-time {\it arrays\/} are a larry without declaring an
+inner header. It does have a one-cell header but its value is always
+a real cell so need not (indeed should not) be hidden from the
+garbage collector although it {\it does\/} need to be accounted for
+by the reference \AM\ mutation functions. The false header cell
+holds the integer offset of the array's base index which can be set
+and changed at run-time.
 
-@d array_resize_m(O,L,F) (larry_resize_m((O), (L) + ARRAY_HEADER_LENGTH, (F)))
+Run-time arrays stand alone and do not form the basis of any other
+\Ls/ object; other sequential objects are all based on the core
+larry.
+
+@.TODO@>
+@d ARRAY_HEADER_LENGTH     (sizeof (array) / sizeof (cell))
+@d array_object(O)         ((array *) larry_base(O))
+@d array_base(O)           (array_object(O)->base)
+@d array_offset(O)         (array_object(O)->offset)
+@d array_set_offset_m(O,V) (array_offset(O) = (V)) /* TODO: Should be an
+                                                imp macro post validation. */
+@d array_length(O)         (larry_length(O) - (half) ARRAY_HEADER_LENGTH)
+@#
+@d array_resize_m(O,L,F)   (larry_resize_m((O), (L) + ARRAY_HEADER_LENGTH, (F)))
 @<Type def...@>=
 typedef struct {
         cell offset;
         cell base[];
 } array;
 
-@ @d ARRAY_HEADER_LENGTH (sizeof (array) / sizeof (cell))
-@d array_object(O)       ((array *) larry_base(O))
-@d array_base(O)         (array_object(O)->base)
-@d array_offset(O)       (array_object(O)->offset)
-@d array_set_offset(O,V) (array_offset(O) = (V))
-@d array_length(O)       (larry_length(O) - (half) ARRAY_HEADER_LENGTH)
-@<Fun...@>=
+@ @<Fun...@>=
 error_code new_array_imp (intmax_t, cell, cell, cell *);
 error_code array_ref_c (cell, intmax_t, cell *);
 error_code array_set_m_c (cell, intmax_t, cell);
@@ -1882,8 +2629,9 @@ error_code array_ref (cell, cell, cell *);
 error_code array_set_m (cell, cell, cell);
 cell get_array_ref_c (cell, intmax_t);
 
-@ 0 header is fine for scanning if the larry subheader is all cells,
-as they are here.
+@ Most arrays will have a base offset of zero, including all of
+those used by \Ls/' core. Compute the length including the header
+and return the filled in larry.
 
 @d new_array(L,F,R) new_array_imp((L), fix(0), (F), (R))
 @c
@@ -1893,7 +2641,7 @@ new_array_imp (intmax_t length,
                cell     fill,
                cell    *ret)
 {
-        intmax_t rlength;
+        intmax_t rlength; /* Real length including header. */
         error_code reason;
 
         assert(ARRAY_HEADER_LENGTH * sizeof (cell) == sizeof (array));
@@ -1905,11 +2653,15 @@ new_array_imp (intmax_t length,
                 return LERR_LIMIT;
         rlength = length + ARRAY_HEADER_LENGTH;
         orreturn(new_larry(rlength, 0, fill, FORM_ARRAY, ret));
-        array_set_offset(*ret, offset);
+        array_set_offset_m(*ret, offset);
         return LERR_NONE;
 }
 
-@ @c
+@ There is no need to convert \CEE/ index values to \Ls/ integers
+and back when \Ls/ is using an array directly so these reference
+and mutation functions handle an index in a \CEE/ variables.
+
+@c
 error_code
 array_ref_c (cell      o,
              intmax_t  index,
@@ -1922,19 +2674,6 @@ array_ref_c (cell      o,
         return larry_ref(o, index, ret);
 }
 
-@ @c
-cell
-get_array_ref_c (cell     o,
-                 intmax_t index)
-{
-        cell ret;
-        error_code reason;
-
-        orassert(array_ref_c(o, index, &ret));
-        return ret;
-}
-
-@ @c
 error_code
 array_set_m_c (cell     o,
                intmax_t index,
@@ -1947,7 +2686,27 @@ array_set_m_c (cell     o,
         return larry_set_m(o, index, value);
 }
 
-@ @c
+@ In many cases referencing an array is guaranteed to succeed and
+the code is clearer with the cell being returned directly to the
+calling expression.
+
+@c
+cell
+get_array_ref_c (cell     o,
+                 intmax_t index)
+{
+        cell ret;
+        error_code reason;
+
+        orassert(array_ref_c(o, index, &ret));
+        return ret;
+}
+
+@ These placeholder functions for the run-time accessible reference
+and mutate have not yet been written (TODO).
+
+@.TODO@>
+@c
 error_code
 array_ref (cell  o @[unused@],
            cell  index @[unused@],
@@ -1956,7 +2715,6 @@ array_ref (cell  o @[unused@],
         return LERR_UNIMPLEMENTED;
 }
 
-@ @c
 error_code
 array_set_m (cell o @[unused@],
              cell index @[unused@],
@@ -1965,34 +2723,34 @@ array_set_m (cell o @[unused@],
         return LERR_UNIMPLEMENTED;
 }
 
-@* Hashtables.
+@* Hashtables. A hashtable is a store of values indexed by a
+nearly-unique key calculated from the value, it's underlying storage
+is a larry. The key is a 32 bit unsigned integer calculated with
+the hashing algorithm used by pdksh\footnote{$^1$}{From the base
+system of OpenBSD as of version 7.0; Is this Thompson's algorithm?
+TODO: citation.}.
 
+Hashtables are exposed directly to the run-time and are also used
+internally. Some of the internal uses store the value in subtly
+different ways so each accessor function is accompanied by the
+necessary function pointers to query the stored data.
+
+@.TODO@>
 @<Type def...@>=
 typedef uint32_t hash;
-typedef hash @[@] (*hash_fn) (cell);
-typedef bool @[@] (*match_fn) (cell, void *);
-typedef error_code @[@] (*filter_fn) (cell, cell *);
+typedef hash @[@] (*hash_fn) (cell); /* Return an item's key. */
+typedef bool @[@] (*match_fn) (cell, void *); /* Compare an item with a
+                                                        potential match. */
+typedef error_code @[@] (*filter_fn) (cell, cell *); /* Process each item
+                                                        during iteration. */
 
 @ @<Fun...@>=
 hash hash_cstr (byte *, intmax_t *);
 hash hash_buffer (byte *, intmax_t);
 
-@ @c
-hash
-hash_cstr (byte     *buf,
-           intmax_t *length)
-{
-        hash r = 0;
-        byte *p = buf;
-
-        while (*p != '\0')
-                r = 33 * r + (unsigned char) (*p++);
-        *length = p - buf;
-        return r;
-}
-
-@ Interned symbols call this with NULL but are small so it's safe
-to ignore interrupts.
+@ These functions differ in how they determine the length of a piece
+of memory to calculate the hash value of. Calculating the hash of
+a \CEE/-string returns the string's length to the caller.
 
 @c
 hash
@@ -2008,31 +2766,43 @@ hash_buffer (byte     *buf,
         return r;
 }
 
-@ To make it easier to build on an array the two extra bits of
-hashtable state are kept at the back of the table, which is two
-larger than specified.
+hash
+hash_cstr (byte     *buf,
+           intmax_t *length)
+{
+        hash r = 0;
+        byte *p = buf;
 
-A ``tiny'' hashtable isn't enlarged until it entirely fills up.
+        while (*p != '\0')
+                r = 33 * r + (unsigned char) (*p++);
+        *length = p - buf;
+        return r;
+}
 
-As long as arrays/segments record metadata as a ``half'' the hashtable
-metadata is guaranteed to fit in a fixnum, except for signage on
-16-bit machines. The difference will be optimised away.
+@ A hash table is a larry where the real index of an item is its
+key modulo the length. Of course this means collisions if an item's
+real index matches that of another.
 
-Probably want typedefs for the function pointers.
+Collisions are resolved on a first-come-first-served basis: when
+storing a new item if the calculated index is already occupied then
+the index is decremented until an empty slot is found (rolling
+around to the top when reaching 0). Searching for an existing item
+succeeds if the calculated slot is in use {\it and\/} the item in
+it matches the one sought, again counting down until reaching an
+empty slot or a successful match.
 
-16 bit systems must limit hash tables to 255, 32 bit systems can
-store 23 bits (24 signed) in a fixnum.
+In order to minimise the number of collisions and thus the number
+of potential checks while scanning, the larry is kept no more than
+70\% full, except in the case of exceptionally small hashtables
+where even a full scan is cheap.
 
-TODO: Use the pointer datum for the free count.
+When an entry is removed from a hashtable its slot isn't made
+available immediately as that could require rescanning the entire
+hashtable. Instead slot from which an item is removed is replaced
+with |UNDEFINED| and the number of {\it blocked\/} slots is
+incremented.
 
-@<Type def...@>=
-typedef struct {
-        half free, blocked;
-        cell base[];
-} hashtable;
-
-@
-@d HASHTABLE_TINY               16
+@d HASHTABLE_TINY               16 /* Full scan is cheap at this size. */
 @#
 @d HASHTABLE_HEADER_LENGTH      (sizeof (hashtable) / sizeof (cell))
 @d hashtable_object(O)          ((hashtable *) larry_base(O))
@@ -2044,7 +2814,13 @@ typedef struct {
 @d hashtable_set_free_m(O,V)    (hashtable_object(O)->free = (V))
 @d hashtable_ref(O,I)           (hashtable_object(O)->base[(I)])
 @d hashtable_set_m(O,I,V)       (hashtable_object(O)->base[(I)] = (V))
-@<Fun...@>=
+@<Type def...@>=
+typedef struct {
+        half free, blocked;
+        cell base[];
+} hashtable;
+
+@ @<Fun...@>=
 error_code new_hashtable (intmax_t, cell *);
 error_code copy_hashtable (cell, hash_fn, cell *);
 void copy_hashtable_imp (cell, hash_fn, cell);
@@ -2059,9 +2835,19 @@ error_code hashtable_save_m (cell, hash, cell, hash_fn, match_fn, void *,
 intmax_t hashtable_scan (cell, hash, match_fn, void *);
 error_code hashtable_search (cell, hash, match_fn, void *, cell *);
 
-@
-@d hashtable_default_free(L) (((L) == HASHTABLE_TINY)
-        ? (HASHTABLE_TINY - 1)
+@ The |length| argument to |new_hashtable| is how many items the
+caller expects to store. It's rounded up to a power of two in
+|rlength|, the real length of the new hash table. After the rounding
+|hashtable_default_free| calculates how many of those slots are
+available for use, approximately 70\% for tables larger than
+|HASHTABLE_TINY|.
+
+The length of a hashtable can be 0 and is enlarged as soon as
+something's inserted into it. This is a useful saving of space in
+a few situations.
+
+@d hashtable_default_free(L) (((L) == HASHTABLE_TINY)@|
+        ? (HASHTABLE_TINY - 1) /* Guarantee at least one |NIL|. */@t\iII@>
         : ((7 * (1 << (high_bit(L) - 1))) / 10))
                 /* $\lfloor70\%\rfloor$ */
 @c
@@ -2082,8 +2868,7 @@ new_hashtable (intmax_t  length,
                 if (rlength < length)
                         rlength <<= 1;
                 if (rlength <= HASHTABLE_TINY)
-                        f = (rlength = HASHTABLE_TINY) - 1; /* Guarantee at least
-                                                                one |NIL|. */
+                        f = (rlength = HASHTABLE_TINY) - 1;
                 else
                         f = hashtable_default_free(rlength);
                 if (rlength > (intmax_t) (HALF_MAX - HASHTABLE_HEADER_LENGTH))
@@ -2096,7 +2881,18 @@ new_hashtable (intmax_t  length,
         return LERR_NONE;
 }
 
-@ @c
+@ When a copy is made of a hashtable it also has the effect of
+making blocked slots available in the copy. The algorithm is split
+in two so that |hashtable_resize_m| can also use it.
+
+To copy the contents of one hashtable to another the source is
+scanned in full and the item in any active slot (ie.~which is neither
+|NIL| nor |UNDEFINED|) is inserted afresh into the new hashtable.
+
+TODO: This should be named |new_hashtable_copy|.
+
+@.TODO@>
+@c
 error_code
 copy_hashtable (cell     o,
                 hash_fn  hashfn,
@@ -2113,16 +2909,11 @@ copy_hashtable (cell     o,
         return LERR_NONE;
 }
 
-@ Removes blockages too. Does not require |new| and |old| to be the same length.
-
-TODO: Check that new will fit everything from old.
-
-@c
 void
 copy_hashtable_imp (cell    old,
                     hash_fn hashfn,
                     cell    new)
-{
+{ /* nb.~|new| is not a ``|cell *|'' and must have already been allocated. */
         int i, j, length, nfree, nlength;
         cell pos, value;
         hash nkey;
@@ -2135,10 +2926,10 @@ copy_hashtable_imp (cell    old,
         assert(nfree >= length - (hashtable_free(old) + hashtable_blocked(old)));
         for (i = 0; i < length; i++) {
                 value = hashtable_ref(old, i);
-                if (!null_p(value) && defined_p(value)) {
+                if (!null_p(value) && defined_p(value)) { /* Slot in |old|. */
                         nkey = hashfn(value);
                         j = nkey % nlength;
-                        while (1) {
+                        while (1) { /* Find a (guaranteed) slot in |new|. */
                                 pos = hashtable_ref(new, j);
                                 if (null_p(pos))
                                         break;
@@ -2154,8 +2945,13 @@ copy_hashtable_imp (cell    old,
         hashtable_set_free_m(new, nfree);
 }
 
-@ TODO: Shrink the table if there are sufficient blocked cells (here
-or in delete).
+@ Increase the size of a hashtable to fit |nlength| items, or double
+its size if |nlength| is -1. This works by allocating a new hashtable
+of the required size and copying the old hashtable's contents into
+it, then swapping the contents of the newly allocated atom with the
+original |o|, which has the effect that the new atom refers to the
+old hashtable (and will be collected by the garbage collector) and
+the old atom refers to the new hashtable.
 
 @.TODO@>
 @c
@@ -2171,7 +2967,7 @@ hashtable_resize_m (cell     o,
         if (!hashtable_p(o))
                 return LERR_INCOMPATIBLE;
 
-        if (nlength == -1) { /* Increment to the next size. */
+        if (nlength == -1) { /* Increment to the next $n^2$ size. */
                 if (hashtable_length(o) == 0)
                         nlength = HASHTABLE_TINY;
                 else if (hashtable_length(o) >= HALF_MAX >> 1)
@@ -2189,7 +2985,20 @@ hashtable_resize_m (cell     o,
         return LERR_NONE;
 }
 
-@ @c
+@ Insertion, deletion and searching all begin by scanning the
+hashtable for a slot: the first slot counting down from the default
+index which matches the item sought or is |NIL|. The common routine
+to all of these is |hashtable_scan| --- this returns the index of
+the slot with the sought item, or where it should be saved if it's
+not present. If the item isn't present and there's no room to insert
+it |FAIL|, a negative number which is not \CEE/'s |EOF|, is returned
+instead.
+
+The |match| function is passed each potential matching item in turn
+along with |ctx| to determine whether an item already in the hashtable
+matches the item etc.~described in |ctx|.
+
+@c
 intmax_t
 hashtable_scan (cell      o,
                 hash      key,
@@ -2202,8 +3011,8 @@ hashtable_scan (cell      o,
         assert(hashtable_p(o));
         if (hashtable_length(o) == 0)
                 return FAIL;
-        i = key % hashtable_length(o);
-        while (1) {
+        i = key % hashtable_length(o); /* Default index value. */
+        while (1) { /* At least one |NIL| is guaranteed to be present. */
                 pos = hashtable_ref(o, i);
                 if (null_p(pos) || (defined_p(pos) && match(pos, ctx)))
                         break;
@@ -2213,11 +3022,18 @@ hashtable_scan (cell      o,
                         i--;
         }
         if (null_p(pos) && !hashtable_free_p(o))
-                return FAIL;
+                return FAIL; /* Full. */
         return i;
 }
 
-@ @c
+@ To search a hashtable for an item to return is a simple wrapper
+around |hashtable_scan| which returns |UNDEFINED| if an item is not
+present, regardless of whether it would fit, or the item itself.
+Recall that storing |UNDEFINED| in the hashtable represents a slot
+from which an item has been removed and thus will never be in a
+slot returned from |hashtable_scan|.
+
+@c
 error_code
 hashtable_search (cell      o,
                   hash      key,
@@ -2231,12 +3047,14 @@ hashtable_search (cell      o,
         if (!hashtable_p(o))
                 return LERR_INCOMPATIBLE;
         idx = hashtable_scan(o, key, match, ctx);
-        if (idx == FAIL) {
+        if (idx == FAIL) { /* Not an error, |FAIL| means not present. */
                 *ret = UNDEFINED;
                 return LERR_NONE;
         }
         value = hashtable_ref(o, idx);
-        if (null_p(value)) {
+        if (null_p(value)) { /* Empty slot where this item would
+                    be\footnote{$^1$}{But maybe not, next time
+                    |hashtable_scan| is called}. */
                 *ret = UNDEFINED;
                 return LERR_NONE;
         }
@@ -2244,7 +3062,11 @@ hashtable_search (cell      o,
         return LERR_NONE;
 }
 
-@ @c
+@ To simplify the common case where a missing value should be treated
+an error |hashtable_fetch| turns the |UNDEFINED| from |hashtable_search|
+into |LERR_MISSING|.
+
+@c
 error_code
 hashtable_fetch (cell      o,
                  hash      key,
@@ -2262,13 +3084,26 @@ hashtable_fetch (cell      o,
         return LERR_NONE;
 }
 
-@ @c
+@ When inserting or replacing an item in a hashtable, in addition
+to scanning the hashtable may need to be rescanned if it's going
+to be enlarged. The cell |datum| is what is placed into the hashtable
+while |ctx| is what existing items are compared to in |match|. This
+is because most items in a hashtable will be associating the key
+with which an item is matched with some other data.
+
+If the search for |datum|'s slot turns up empty and the hashtable
+is full then it's resized (if |enlarge| is true) and the scan is
+repeated, which will succeed this time. If |replace| is true the
+item must already exist in the hashtable, if it's false it {\it
+must\/} not. There's no middle ground.
+
+@c
 error_code
 hashtable_save_m (cell      o,
                   hash      key,
                   cell      datum,
                   hash_fn   hashfn,
-                  match_fn  match,
+                  match_fn  match,@|
                   void     *ctx,
                   bool      replace,
                   bool      enlarge)
@@ -2278,7 +3113,6 @@ hashtable_save_m (cell      o,
 
         if (!hashtable_p(o))
                 return LERR_INCOMPATIBLE;
-                printf("save ");psym((cell)ctx);printf(" in %p at %u\n",o,key);
 again:
         idx = hashtable_scan(o, key, match, ctx);
         if (idx == FAIL) {
@@ -2296,13 +3130,19 @@ again:
         return LERR_NONE;
 }
 
-@ @c
+@ Removing an item from a hashtable is always possible, if it's
+present, by replacing its slot with |UNDEFINED|. The hashtable is
+reduced in size (freeing the blocked slots) if it would fit in a
+hashtable the next power-of-two size down {\it and\/} |reduce| is
+true.
+
+@c
 error_code
 hashtable_erase_m (cell     o,
                    hash     key,
                    cell     label,
                    hash_fn  hashfn,
-                   match_fn match,
+                   match_fn match,@|
                    bool     reduce)
 {
         intmax_t idx, nlength, nused;
@@ -2326,7 +3166,11 @@ hashtable_erase_m (cell     o,
         return LERR_NONE;
 }
 
-@ @c
+@ The final hashtable routine returns an unordered list of all the
+active items in the hashtable, optionally filtering every one through
+|filter|.
+
+@c
 error_code
 hashtable_pairs (cell       o,
                  filter_fn  filter,
@@ -2354,19 +3198,23 @@ hashtable_pairs (cell       o,
         return LERR_NONE;
 }
 
-@* Symbols.
+@* Symbols. A symbol is a unique named object which represents
+itself. The name (called the {\it label\/}) is any opaque buffer
+of any length (including zero) but usually consists of printable
+characters. In practice the length of a symbol is limited to
+|HALF_MAX| bytes which is impractically high. Note that symbol
+labels are not aware of any sort of text encoding --- their textual
+appearance is a coincidence.
 
-@d SYMBOL_MAX          HALF_MAX
-@d Symbol_Table_ref(I) (hashtable_ref(Symbol_Table, (I)))
+If a symbol's label is short enough it's interned and stored in the
+allocated symbol atom, otherwise a segment is allocated to hold the
+label. This does mean that the key of a short symbol is recalculated
+every time it's used rather than being cached but these symbols are
+short enough that the extra computation time should be insignificant.
+
+@d SYMBOL_MAX HALF_MAX /* 2GiB ought to be enough for anyone. */
 @#
-@<Global...@>=
-shared cell Symbol_Table = NIL;
-
-@ @<Initialise heap...@>=
-orabort(new_hashtable(0, &Symbol_Table));
-
-@
-@d symint_object(O) ((symbol *) NULL)
+@d symint_object(O) ((symbol *) NULL) /* Safety valve. */
 @d symint_key(O)    (hash_buffer(symbol_label(O), symbol_length(O)))
 @d symint_label(O)  (((atom *) (O))->buffer)
 @#
@@ -2379,26 +3227,48 @@ orabort(new_hashtable(0, &Symbol_Table));
 @d symbol_length(O) (segment_length(O))
 @<Type def...@>=
 typedef struct {
-        hash key;
-        byte label[];
+        hash key; /* Remember the hashed key of long symbols. */
+        byte label[]; /* Note that this is {\it bytes\/} not characters. */
 } symbol;
 
-typedef struct {
+typedef struct { /* Used to compare a buffer prior to initialising a symbol. */
         byte     *buf;
         intmax_t  length;
 } symbol_compare;
 
-@ Some symbols are used by this implementation. To avoid constantly
-searching for them they are given numeric constants.
+@ In order to ensure that each symbol is unique --- which is to say
+that two symbols with the same label are the same symbol and two
+different symbols have distinct labels --- every symbol is stored
+in a hashtable known as the symbol table.
+
+@<Global...@>=
+shared cell Symbol_Table = NIL;
+
+@ Some symbols are used internally by \Ls/. In order to allow \CEE/
+code to refer to them with numerical identifiers they are added to
+|Label| during initialisation.
 
 @ @<Type def...@>=
 typedef enum {
-        @<Constant Symbol Labels@>
+        @<Constant Symbol Labels@>@;
         LSL_LENGTH
 } symbol_const;
 
 @ @<Global...@>=
-shared cell Label[LSL_LENGTH + 42];
+@.TODO@>
+shared cell Label[LSL_LENGTH + 42]; /* TODO: What is the question here? */
+
+@ @<Extern...@>=
+extern shared cell Symbol_Table, Label[];
+
+@ It will be more efficient to initialise |Symbol_Table| to the
+correct size here. TODO that when it's known (it may vary if some
+parts of \Ls/ are left out in small builds).
+
+@.TODO@>
+@<Initialise heap...@>=
+orabort(new_hashtable(0, &Symbol_Table)); /* Very early in the
+                                        initialisation process. */
 
 @ @<Fun...@>=
 error_code new_symbol_buffer (byte *, intmax_t, bool *, cell *);
@@ -2407,7 +3277,9 @@ void symbol_remember (symbol_const, cell);
 hash symbol_table_hash (cell);
 bool symbol_table_match (cell, void *);
 
-@ @d init_identifier(S,L,V) do {
+@ Record a symbol in |Label| during initialisation for quick access.
+
+@d init_identifier(S,L,V) do {
         orabort(new_symbol_const((L), &(V)));
         symbol_remember((S), (V));
 } while (0)
@@ -2419,7 +3291,11 @@ symbol_remember (symbol_const constant,
         Label[constant] = sym;
 }
 
-@ Is the existing symbol |o| the same as the proto-symbol described by |ctx|?
+@ When a symbol is being built out of what would become its label
+\Ls/ needs to be able to compare that buffer with symbols that are
+already stored in the symbol table to see if it has already been
+instantiated. The same function is also used to compare two symbols
+that already exist.
 
 @c
 bool
@@ -2438,7 +3314,11 @@ symbol_table_match (cell  o,
         return true;
 }
 
-@ @c
+@ When the symbol table needs to be enlarged the hashtable
+implementation needs this real function to return the hashed key
+of a symbol and |symbol_key| is defined as a \CEE/ macro.
+
+@c
 hash
 symbol_table_hash (cell o)
 {
@@ -2446,7 +3326,16 @@ symbol_table_hash (cell o)
         return symbol_key(o);
 }
 
-@ @d new_symbol_c(O,R) (new_symbol_buffer((O), -1, NULL, (R)))
+@ New symbols are initialised from a memoty buffer that comes from
+different sources, represented by the macros here: a \CEE/ string
+(delimited by zero), the same but a constant string in the \CEE/
+source\footnote{$^1$}{TODO: this is used incorrectly; the |O| in
+|new_symbol_const| should be a {\it constant\/} \CEE/ string so
+that |strlen| is calculated at \CEE/ compile-time} or a miscellaneous
+buffer of a known length.
+
+@.TODO@>
+@d new_symbol_c(O,R) (new_symbol_buffer((O), -1, NULL, (R)))
 @d new_symbol_const(O,R) (new_symbol_buffer((byte *) (O), strlen(O), NULL, (R)))
 @c
 error_code
@@ -2467,7 +3356,19 @@ new_symbol_buffer (byte     *buf,
         return new_symbol_imp(key, buf, length, fresh, ret);
 }
 
-@ @c
+@ When the bounds of a potential symbol and it's hashed key are
+known |new_symbol_imp| creates a new symbol or returns the one which
+already exists.
+
+First the symbol table is scanned by |hashtable_search| using
+|symbol_table_match| as a comparator and if that fails a new symbol
+is allocated, saved into the symbol table and returned.
+
+The object stored in the symbol table doesn't need to refer to
+anything else so |symbol_table_hash| is also passed to |hashtable_save_m|
+in case the symbol table needs to be enlarged.
+
+@c
 error_code
 new_symbol_imp (hash      key,
                 byte     *buf,
@@ -2496,18 +3397,35 @@ new_symbol_imp (hash      key,
         for (i = 0; i < length; i++)
                 symbol_label(sym)[i] = buf[i];
         orreturn(hashtable_save_m(Symbol_Table, key, sym,
-                symbol_table_hash, symbol_table_match, (void *) sym,
+                symbol_table_hash, symbol_table_match,@| (void *) sym,
                 false, true));
         *ret = sym;
+        printf("built ");psym(sym);printf(" as %d.\n", TAG(sym));
         return LERR_NONE;
 }
 
-@* Environment. Combine symbols and hash tables.
+@* Environment. Symbols are bound to values in an {\it environment\/}
+represented by a hashtable and a pointer to another environment
+forming a list. Looking up a binding \Ls/ proceeds along the list
+until an environment {\it layer\/} with the desired binding is
+found. An environment layer without a link to another is a root
+environment.  Usually but not always this will be {\it the\/} root
+environment --- the real root environment is always in |Root|. An
+environment is created empty or by extending an existing environment.
 
 @d env_layer(O)    (ldex(O))
 @d env_previous(O) (lsin(O))
 @d env_root_p(O)   (environment_p(O) && null_p(env_previous(O)))
-@<Fun...@>=
+@<Global...@>=
+shared cell Root = NIL;
+
+@ @<Extern...@>=
+extern shared cell Root;
+
+@ @<Finish init...@>=
+orabort(new_empty_env(&Root));
+
+@ @<Fun...@>=
 error_code new_env (cell, cell *);
 cell env_get_root (cell);
 bool env_match (cell, void *);
@@ -2516,7 +3434,12 @@ error_code env_root_init (void);
 error_code env_save_m (cell, cell, cell, bool);
 error_code env_search (cell, cell, cell *);
 
-@ @c
+@ Populating the root environment is kept separate from the main
+memory initialisation routines. It seemed like a good idea at the
+time, TODO: it probably isn't.
+
+@.TODO@>
+@c
 error_code
 env_root_init (void)
 {
@@ -2524,11 +3447,14 @@ env_root_init (void)
         int i;
         error_code reason;
 
-        @<Populate the |Root| environment@>
+        @<Populate the |Root| environment@>@;
         return LERR_NONE;
 }
 
-@ @d new_empty_env(F)   (new_env(NIL, (F)))
+@ A new environment is an empty hashtable with a link to another
+or |NIL|.
+
+@d new_empty_env(F) (new_env(NIL, (F)))
 @c
 error_code
 new_env (cell  o,
@@ -2544,7 +3470,32 @@ new_env (cell  o,
         return LERR_NONE;
 }
 
-@ @c
+@ To bind a symbol to a value they are saved in a pair and saved
+into the environment layer hashtable. Searching for a binding will
+return this pair not only the value.
+
+@c
+error_code
+env_save_m (cell o,
+            cell label,
+            cell value,
+            bool replace)
+{
+        cell tmp;
+        error_code reason;
+
+        if (!environment_p(o) || !symbol_p(label) || undefined_p(value))
+                return LERR_INCOMPATIBLE;
+        orreturn(cons(label, value, &tmp));
+        return hashtable_save_m(env_layer(o), symbol_key(label), tmp,
+                env_rehash, env_match, (void *) label, replace, true);
+}
+
+@ Environments use the following functions with a hashtable to match
+symbols against existing bindings and obtain the binding's label's
+key.
+
+@c
 bool
 env_match (cell  o,
            void *ctx)
@@ -2556,7 +3507,6 @@ env_match (cell  o,
         return lsin(o) == want;
 }
 
-@ @c
 hash
 env_rehash (cell o)
 {
@@ -2565,7 +3515,13 @@ env_rehash (cell o)
         return symbol_key(lsin(o));
 }
 
-@ @c
+@ The \Ls/ operator \.{root-environment} doesn't return the environment
+in |Root| but follows a list of environments until it finds ``a''
+root environment, without a link to another. The separate meanings
+of root environment allow the run-time \Ls/ to be fully dynamic
+without compromising its own integrity.
+
+@c
 cell
 env_get_root (cell o)
 {
@@ -2575,7 +3531,19 @@ env_get_root (cell o)
         return o;
 }
 
-@ @d root_search(L,R) (env_search(Root, (L), (R)))
+@ Searching for a binding proceeds along an environment's list of
+ascendents. If |hashtable_search| finds a bound pair then the whole
+binding is returned. If there was no binding, or if a binding was
+found but its value is |UNDEFINED|, then a bare |UNDEFINED| ({\it
+not\/} the pair) is returned --- this is not considered a failure
+here.
+
+TODO: |error_search| etc. should be removed in favour of |root_search|
+but one part of the assembler takes |error_search| as an (optional)
+argument.
+
+@.TODO@>
+@d root_search(L,R) (env_search(Root, (L), (R)))
 @c
 error_code
 env_search (cell  o,
@@ -2601,37 +3569,15 @@ env_search (cell  o,
         return LERR_NONE;
 }
 
-@ @c
-error_code
-env_save_m (cell o,
-            cell label,
-            cell value,
-            bool replace)
-{
-        cell tmp;
-        error_code reason;
+@* Run-time \AM\ Primitives. A {\it primitive\/} is a reference to
+a \CEE/ function with a name and a description of its arguments
+that can be called at run-time. The primitive object is substantially
+similar to the error object with the addition of a function pointer
+and its \Ls/ signature, embedded in the label.
 
-        if (!environment_p(o) || !symbol_p(label) || undefined_p(value))
-                return LERR_INCOMPATIBLE;
-        orreturn(cons(label, value, &tmp));
-        return hashtable_save_m(env_layer(o), symbol_key(label), tmp,
-                env_rehash, env_match, (void *) label, replace, true);
-}
-
-@* Run-time \AM\ Primitives.
-
-An instruction address is simply a disguised pointer. TODO: account
-for different word sizes.
+TODO: Match the error API more closely (|primitive_label|, not fixed).
 
 @.TODO@>
-@d PROGRAM_INVALID     UINTPTR_MAX /* Yes, it's yet another |NULL|. */
-@<Type def...@>=
-typedef uintptr_t address; /* |void *| would also be acceptable but for
-                                arithmetic. */
-@#
-typedef int32_t instruction;
-
-@
 @d primitive(O)               (fixed_value(lsin(O)))
 @d primitive_label(O)         (ldex(O))
 @d primitive_object(O)        (&Primitive[primitive(O)])
@@ -2646,9 +3592,11 @@ typedef enum {
         PRIMITIVE_LENGTH
 } primitive_code;
 
+typedef error_code @[@] (*primitive_fn)(cell, cell *);
+
 typedef struct {
         cell  owner; /* Heap storage. */
-        error_code (*action)(cell, cell *);
+        primitive_fn action;
         char *schema; /* \Ls/ binding \AM\ signature. */
 } primitive_table;
 
@@ -2679,11 +3627,16 @@ primitive_search (cell  o,
         global_search(o, primitive_p, ret)@;
 }
 
-@ @<Primitive...@>=
+@ There are only two primitives at the moment.
+
+@<Primitive...@>=
 [PRIMITIVE_PAIR_P]   = { NIL, primitive_predicate, "11__pair?" },@/
 [PRIMITIVE_SYMBOL_P] = { NIL, primitive_predicate, "11__symbol?" },@/
 
-@ @d primitive_call(O,R) primitive_object(O)->action((O), (R))
+@ Object predicate primitives use the same function which performs
+the test and converts the result to a \Ls/ value.
+
+@d primitive_call(O,R) primitive_object(O)->action((O), (R))
 @c
 error_code
 primitive_predicate (cell  o,
@@ -2705,12 +3658,18 @@ primitive_predicate (cell  o,
         return LERR_NONE;
 }
 
-@* Segmented \CEE/ Object Wrapper.
+@* Segmented \CEE/ Object Wrapper. A \CEE/ struct in a segment, or
+an array of them. Every \CEE/ struct definition is registered an
+entry in the global \CEE/-array |SCOW_Attributes| which records its
+length and required base alignment. A scow object is a segment with
+the |SCOW_Attributes| ID in its spare datum cell.
 
-TODO: Should be build on record for so cells can be associated with
-\CEE/ objects. The main point of SCOW is registering the shape of
-an object type in a global namespace; segment/larry/record provide
-the storage layout.
+It is not expected that |SCOW_Attributes| will grow particularly
+large and no attempt is made to remove unused entries.
+
+The first scow registration is hard-coded to the osthread object.
+
+This algorithm is very much subject to change.
 
 @d LSCOW_PTHREAD_T 0
 @<Type def...@>=
@@ -2732,14 +3691,13 @@ shared int SCOW_Length = 1;
 extern shared scow *SCOW_Attributes;
 extern shared int SCOW_Length;
 
-@ @<Finish init...@>=
-orabort(mem_alloc(NULL, SCOW_Length * sizeof (scow), 0,
-        (void **) &SCOW_Attributes));
-SCOW_Attributes[LSCOW_PTHREAD_T].length = sizeof (osthread); /* Wrapper around
-                                                                |pthread_t|. */
-SCOW_Attributes[LSCOW_PTHREAD_T].align = sizeof (void *);
+@ The scow attribute array will never shrink or be released so it's
+fine for it to be a segmentless memory allocation.
 
-@ @c
+TODO: Add a mutex around this.
+
+@.TODO@>
+@c
 error_code
 register_scow (int  length,
                int  align,
@@ -2750,7 +3708,7 @@ register_scow (int  length,
         if (SCOW_Length == INT_MAX)
                 return LERR_LIMIT;
         orreturn(mem_alloc(SCOW_Attributes, (SCOW_Length + 1) * sizeof (scow),
-                sizeof (void *), (void **) &SCOW_Attributes));
+                sizeof (void *),@| (void **) &SCOW_Attributes));
         *ret = SCOW_Length++;
         SCOW_Attributes[*ret].length = length;
         SCOW_Attributes[*ret].align = align;
@@ -2758,7 +3716,11 @@ register_scow (int  length,
 
 }
 
-@ TODO: Adapt interned segments so length is |scow_id|?
+@ After registration of its size an object for an array of structs
+can be allocated with the registration ID.
+
+A possible optimisation could adapt interned segments so their
+length is |scow_id|.
 
 @.TODO@>
 @d scow_object(O)       (segment_base(O))
@@ -2783,7 +3745,9 @@ new_scow (int       scid,
         return LERR_NONE;
 }
 
-@ @c
+@ A scow matches if its tag is correct {\it and\/} if the ID matches.
+
+@c
 bool
 scow_id_p (cell o,
            int  scid)
@@ -2798,7 +3762,9 @@ scow_id_p (cell o,
         return iscid == scid;
 }
 
-@ @c
+@ Return the length of an array of scow objects.
+
+@c
 half
 scow_length (cell o)
 {
@@ -2811,14 +3777,12 @@ scow_length (cell o)
         return segment_length(o) / SCOW_Attributes[iscid].length;
 }
 
-@** I/O.
+@** I/O. Almost no I/O routines are implemented. The only thing
+known at this stage is that there needs to be a file descriptor
+object --- on unix an integer or an opaque HANDLE on Windows.
 
-@* File Descriptors. File descriptors do not need a SCOW. On unix
-they're a (non-negative) |int|, on Windows an opaque |HANDLE| object,
-and also on anything else, something which will most likely fit
-within an atom.
-
-However they are a global resource which needs to be tracked.
+A global database of file descriptors is kept but it's not clear
+that it's useful.
 
 @d FILE_HANDLE_BUFFER_LENGTH 512
 @<Global...@>=
@@ -3048,217 +4012,8 @@ file_handle_read_word (cell  o,
         }
 }
 
-@** Threads.
-
-@<Fun...@>=
-error_code init_osthread_mutex (pthread_mutex_t *, bool, bool);
-error_code new_osthread (cell, address, heap_access *, cell *);
-void * osthread_main (void *);
-error_code osthread_wait (cell, cell *);
-
-@ @<Global...@>=
-shared cell *Thread_DB = NULL;
-shared int Thread_DB_Length = 0;
-shared pthread_mutex_t Thread_DB_Lock;
-shared pthread_barrier_t Thready;
-
-@ @<Extern...@>=
-extern shared cell *Thread_DB;
-extern shared int Thread_DB_Length;
-extern shared pthread_mutex_t Thread_DB_Lock;
-extern shared pthread_barrier_t Thready;
-
-@ @<Finish init...@>=
-orabort(init_osthread_mutex(&Thread_DB_Lock, false, true));
-if (pthread_barrier_init(&Thready, NULL, 2))
-        just_abort(LERR_INTERNAL, "failed to intialise Thread Ready barrier");
-orabort(mem_alloc(NULL, Thread_DB_Length * sizeof (cell), 0,
-        (void **) &Thread_DB));
-
-@ @<Type def...@>=
-struct osthread {
- struct osthread  *next, *prev;
-        heap_pun  *root;
-        cell       ret;
-        cell       owner; /* A segment (scow). */
-        pthread_t  tobj;
-        address    ip;
-        bool       pending;
-};
-typedef struct osthread osthread;
-
-@ @<Global...@>=
-shared osthread *Threads = NULL;
-
-@ @<Extern...@>=
-extern shared osthread *Threads;
-
-@ Errors: |EINVAL|, attributes are invalid, or |ENOMEM|.
-
-@c
-error_code
-init_osthread_mutex (pthread_mutex_t *mx,
-                     bool             recursive,
-                     bool             robust @[unused@])
-{
-        pthread_mutexattr_t mutex_attr;
-
-        pthread_mutexattr_init(&mutex_attr);
-        pthread_mutexattr_settype(&mutex_attr, recursive
-                ? PTHREAD_MUTEX_RECURSIVE : PTHREAD_MUTEX_ERRORCHECK);
-#ifdef pthread_mutexattr_setrobust
-        if (robust)
-                pthread_mutexattr_setrobust(&mutex_attr, PTHREAD_MUTEX_ROBUST);
-#endif /* |pthread_mutexattr_setrobust| */
-        if (pthread_mutex_init(mx, &mutex_attr) != 0)
-                return LERR_OOM;
-        return LERR_NONE;
-}
-
-@ Also function pointers for GC and more; collect into a struct
-pointer/object?
-
-@c
-error_code
-new_osthread (cell         thread_attr,
-              address      new_ip,
-              heap_access *heap_attr,
-              cell        *ret)
-{
-        cell thread_box;
-        int rv;
-        intmax_t start_address;
-        osthread *new_thread;
-        segment *heap_segment;
-        error_code reason;
-
-        if (!null_p(thread_attr)) /* | && !thread_attributes_p(thread_attr)| */
-                return LERR_INCOMPATIBLE;
-@#
-        orreturn(new_scow(LSCOW_PTHREAD_T, -1, &thread_box));
-        new_thread = (osthread *) scow_object(thread_box);
-        new_thread->owner = thread_box;
-        new_thread->pending = false;
-@#
-        orreturn(alloc_segment(-HEAP_CHUNK, 1, HEAP_CHUNK, &heap_segment));
-        new_thread->root = (heap_pun *) SEGMENT_TO_HEAP(heap_segment);
-        orreturn(heap_attr->init((heap *) new_thread->root, NULL, NULL, NULL));
-        orreturn(mem_alloc(NULL, sizeof (heap_access),
-                sizeof (void *),@| (void **) &new_thread->root->fun));
-        new_thread->root->fun = heap_attr;
-@#
-        orreturn(int_value(new_ip, &start_address));
-        if (start_address < 0 || start_address >= (intmax_t) PROGRAM_INVALID)
-                new_thread->ip = PROGRAM_INVALID;
-        else
-                new_thread->ip = start_address;
-@#
-        rv = pthread_mutex_lock(&Thread_DB_Lock);
-        switch (rv) {
-#ifdef pthread_mutexattr_setrobust
-        case EOWNERDEAD:
-                return LERR_INTERNAL;
-                /* What do? Impossible? */
-#endif /* |pthread_mutexattr_setrobust| */
-        case EDEADLK:
-                return LERR_INTERNAL;
-        default:
-                return LERR_INTERNAL;
-        case 0:
-                break;
-        }
-        if (Threads == NULL)
-                Threads = new_thread->next = new_thread->prev = new_thread;
-        else {
-                new_thread->next = Threads;
-                new_thread->prev = Threads->prev;
-                Threads->prev->next = new_thread;
-                Threads->prev = new_thread;
-        }
-        rv = pthread_create(&new_thread->tobj, NULL, osthread_main,
-                (void *) thread_box);
-        switch (rv) {
-        case 0:
-                new_thread->pending = true;
-                pthread_barrier_wait(&Thready);
-                *ret = thread_box;
-                reason = LERR_NONE;
-        case EAGAIN:
-                reason = LERR_LIMIT;
-        case EINVAL:
-                reason = LERR_INCOMPATIBLE;
-        default:
-                reason = LERR_INTERNAL;
-        }
-        pthread_mutex_unlock(&Thread_DB_Lock);
-        return reason;
-}
-
-@ @c
-void *
-osthread_main (void *carg)
-{
-        osthread *thread_box;
-        error_code reason;
-
-        thread_box = (osthread *) scow_object((cell) carg);
-        ortrap(mem_init_thread());
-        if (!special_p(Accumulator))
-                ; // |Accumulator| Needs copying to |Heap_Shared|.
-        Control_Link = NIL;
-        ; // |Environment|?
-        VM_Arg1 = VM_Arg2 = VM_Result = NIL;
-        Trap_Arg1 = Trap_Arg2 = Trap_Result = NIL;
-        Ip = thread_box->ip;
-        Trap_Ip = PROGRAM_INVALID;
-        Trapped = false;
-        ; // |Trap_Handler|?
-        Heap_Thread = (heap *) thread_box->root;
-        Heap_Trap = NULL;
-        pthread_barrier_wait(&Thready);
-        interpret();
-        pthread_exit((void *) (intptr_t) LERR_NONE);
-
-Trap:
-        pthread_barrier_wait(&Thready);
-        pthread_exit((void *) (intptr_t) reason);
-}
-
-@ @c
-error_code
-osthread_wait (cell  o,
-               cell *ret)
-{
-        osthread *thread_box;
-        void *prv;
-        error_code reason;
-
-        if (!scow_id_p(o, LSCOW_PTHREAD_T))
-                return LERR_INCOMPATIBLE;
-        thread_box = (osthread *) scow_object(o);
-        if (!thread_box->pending)
-                return LERR_FINISHED;
-        switch (pthread_join(thread_box->tobj, &prv)) {
-                case 0:
-                        thread_box->pending = false;
-                        *ret = thread_box->ret;
-                        reason = (error_code) (intptr_t) prv;
-                        break;
-                case EDEADLK:
-                        *ret = UNDEFINED;
-                        reason = LERR_SELF;
-                        break;
-                case EINVAL:
-                case ESRCH:
-                        *ret = UNDEFINED;
-                        reason = LERR_INTERNAL;
-                        break;
-        }
-        return reason;
-}
-
-@** Virtual Machine. There are 40-something general registers. I
-don't know what to do with them all.
+@** Virtual Machine. There are 40-something general registers. This
+is certainly too many and this VM is mostly stack-based anyway.
 
 @d LR_r0             0
 @d LR_r1             1
@@ -3307,7 +4062,7 @@ don't know what to do with them all.
 @d LR_r44           44
 @d LR_GENERAL       44
 
-@ 17 registers are used by the virtual machine including 4 which
+@ 19 registers are used by the virtual machine including 4 which
 aren't a normal cell; these are defined later.
 
 Of the 13 cell registers 4 have been introduced already: the symbol
@@ -3349,7 +4104,6 @@ unique cell Argument_List = NIL;
 unique cell Control_Link = NIL;
 unique cell Environment = NIL;
 unique cell Expression = NIL;
-shared cell Root = NIL;
 unique cell Trap_Arg1 = NIL;
 unique cell Trap_Arg2 = NIL;
 unique cell Trap_Result = NIL;
@@ -3362,7 +4116,6 @@ extern unique cell *Register[];
 extern unique cell Accumulator, Argument_List, Control_Link, Environment,
         Expression, Trap_Arg1, Trap_Arg2, Trap_Result, VM_Arg1, VM_Arg2,
         VM_Result;
-extern shared cell Root;
 
 @ @<Type def...@>=
 typedef int vm_register; /* |register| is a \CEE/ reserved word. */
@@ -3459,7 +4212,6 @@ Register[LR_Trap_Arg2] = &Trap_Arg2;
 Register[LR_Trap_Result] = &Trap_Result;
 
 @ @<Finish init...@>=
-orabort(new_empty_env(&Root));
 Environment = Root;
 
 @
@@ -3638,6 +4390,17 @@ opcode_search (cell  o,
 {
         global_search(o, opcode_p, ret)@;
 }
+
+@ An instruction address is simply a disguised pointer. TODO: account
+for different word sizes.
+
+@.TODO@>
+@d PROGRAM_INVALID     UINTPTR_MAX /* Yes, it's yet another |NULL|. */
+@<Type def...@>=
+typedef uintptr_t address; /* |void *| would also be acceptable but for
+                                arithmetic. */
+@#
+typedef int32_t instruction;
 
 @ Instructions are encoded in 32 bits or 4 bytes. The opcode
 categorises the arguments three ways (four if you include |OP_HALT|):
@@ -6385,6 +7148,222 @@ assembly_encode_integer (int       width,
         return LERR_NONE;
 }
 
+@** Threads.
+
+@<Fun...@>=
+error_code init_osthread_mutex (pthread_mutex_t *, bool, bool);
+error_code new_osthread (cell, address, heap_access *, cell *);
+void * osthread_main (void *);
+error_code osthread_wait (cell, cell *);
+
+@ @<Global...@>=
+shared cell *Thread_DB = NULL;
+shared int Thread_DB_Length = 0;
+shared pthread_mutex_t Thread_DB_Lock;
+shared pthread_barrier_t Thready;
+
+@ @<Extern...@>=
+extern shared cell *Thread_DB;
+extern shared int Thread_DB_Length;
+extern shared pthread_mutex_t Thread_DB_Lock;
+extern shared pthread_barrier_t Thready;
+
+@ @<Finish init...@>=
+orabort(init_osthread_mutex(&Thread_DB_Lock, false, true));
+if (pthread_barrier_init(&Thready, NULL, 2))
+        just_abort(LERR_INTERNAL, "failed to intialise Thread Ready barrier");
+orabort(mem_alloc(NULL, Thread_DB_Length * sizeof (cell), 0,
+        (void **) &Thread_DB));
+
+@ @<Type def...@>=
+struct osthread {
+ struct osthread  *next, *prev;
+        heap_pun  *root;
+        cell       ret;
+        cell       owner; /* A segment (scow). */
+        pthread_t  tobj;
+        address    ip;
+        bool       pending;
+};
+typedef struct osthread osthread;
+
+@ @<Global...@>=
+shared osthread *Threads = NULL;
+
+@ @<Extern...@>=
+extern shared osthread *Threads;
+
+@ @<Finish init...@>=
+orabort(mem_alloc(NULL, SCOW_Length * sizeof (scow), 0,
+        (void **) &SCOW_Attributes));
+SCOW_Attributes[LSCOW_PTHREAD_T].length = sizeof (osthread); /* Wrapper around
+                                                                |pthread_t|. */
+SCOW_Attributes[LSCOW_PTHREAD_T].align = sizeof (void *);
+
+@ Errors: |EINVAL|, attributes are invalid, or |ENOMEM|.
+
+@c
+error_code
+init_osthread_mutex (pthread_mutex_t *mx,
+                     bool             recursive,
+                     bool             robust @[unused@])
+{
+        pthread_mutexattr_t mutex_attr;
+
+        pthread_mutexattr_init(&mutex_attr);
+        pthread_mutexattr_settype(&mutex_attr, recursive
+                ? PTHREAD_MUTEX_RECURSIVE : PTHREAD_MUTEX_ERRORCHECK);
+#ifdef pthread_mutexattr_setrobust
+        if (robust)
+                pthread_mutexattr_setrobust(&mutex_attr, PTHREAD_MUTEX_ROBUST);
+#endif /* |pthread_mutexattr_setrobust| */
+        if (pthread_mutex_init(mx, &mutex_attr) != 0)
+                return LERR_OOM;
+        return LERR_NONE;
+}
+
+@ Also function pointers for GC and more; collect into a struct
+pointer/object?
+
+@c
+error_code
+new_osthread (cell         thread_attr,
+              address      new_ip,
+              heap_access *heap_attr,
+              cell        *ret)
+{
+        cell thread_box;
+        int rv;
+        intmax_t start_address;
+        osthread *new_thread;
+        segment *heap_segment;
+        error_code reason;
+
+        if (!null_p(thread_attr)) /* | && !thread_attributes_p(thread_attr)| */
+                return LERR_INCOMPATIBLE;
+@#
+        orreturn(new_scow(LSCOW_PTHREAD_T, -1, &thread_box));
+        new_thread = (osthread *) scow_object(thread_box);
+        new_thread->owner = thread_box;
+        new_thread->pending = false;
+@#
+        orreturn(alloc_segment(-HEAP_CHUNK, 1, HEAP_CHUNK, &heap_segment));
+        new_thread->root = (heap_pun *) SEGMENT_TO_HEAP(heap_segment);
+        orreturn(heap_attr->init((heap *) new_thread->root, NULL, NULL, NULL));
+        orreturn(mem_alloc(NULL, sizeof (heap_access),
+                sizeof (void *),@| (void **) &new_thread->root->fun));
+        new_thread->root->fun = heap_attr;
+@#
+        orreturn(int_value(new_ip, &start_address));
+        if (start_address < 0 || start_address >= (intmax_t) PROGRAM_INVALID)
+                new_thread->ip = PROGRAM_INVALID;
+        else
+                new_thread->ip = start_address;
+@#
+        rv = pthread_mutex_lock(&Thread_DB_Lock);
+        switch (rv) {
+#ifdef pthread_mutexattr_setrobust
+        case EOWNERDEAD:
+                return LERR_INTERNAL;
+                /* What do? Impossible? */
+#endif /* |pthread_mutexattr_setrobust| */
+        case EDEADLK:
+                return LERR_INTERNAL;
+        default:
+                return LERR_INTERNAL;
+        case 0:
+                break;
+        }
+        if (Threads == NULL)
+                Threads = new_thread->next = new_thread->prev = new_thread;
+        else {
+                new_thread->next = Threads;
+                new_thread->prev = Threads->prev;
+                Threads->prev->next = new_thread;
+                Threads->prev = new_thread;
+        }
+        rv = pthread_create(&new_thread->tobj, NULL, osthread_main,
+                (void *) thread_box);
+        switch (rv) {
+        case 0:
+                new_thread->pending = true;
+                pthread_barrier_wait(&Thready);
+                *ret = thread_box;
+                reason = LERR_NONE;
+        case EAGAIN:
+                reason = LERR_LIMIT;
+        case EINVAL:
+                reason = LERR_INCOMPATIBLE;
+        default:
+                reason = LERR_INTERNAL;
+        }
+        pthread_mutex_unlock(&Thread_DB_Lock);
+        return reason;
+}
+
+@ @c
+void *
+osthread_main (void *carg)
+{
+        osthread *thread_box;
+        error_code reason;
+
+        thread_box = (osthread *) scow_object((cell) carg);
+        ortrap(mem_init_thread());
+        if (!special_p(Accumulator))
+                ; // |Accumulator| Needs copying to |Heap_Shared|.
+        Control_Link = NIL;
+        ; // |Environment|?
+        VM_Arg1 = VM_Arg2 = VM_Result = NIL;
+        Trap_Arg1 = Trap_Arg2 = Trap_Result = NIL;
+        Ip = thread_box->ip;
+        Trap_Ip = PROGRAM_INVALID;
+        Trapped = false;
+        ; // |Trap_Handler|?
+        Heap_Thread = (heap *) thread_box->root;
+        Heap_Trap = NULL;
+        pthread_barrier_wait(&Thready);
+        interpret();
+        pthread_exit((void *) (intptr_t) LERR_NONE);
+
+Trap:
+        pthread_barrier_wait(&Thready);
+        pthread_exit((void *) (intptr_t) reason);
+}
+
+@ @c
+error_code
+osthread_wait (cell  o,
+               cell *ret)
+{
+        osthread *thread_box;
+        void *prv;
+        error_code reason;
+
+        if (!scow_id_p(o, LSCOW_PTHREAD_T))
+                return LERR_INCOMPATIBLE;
+        thread_box = (osthread *) scow_object(o);
+        if (!thread_box->pending)
+                return LERR_FINISHED;
+        switch (pthread_join(thread_box->tobj, &prv)) {
+                case 0:
+                        thread_box->pending = false;
+                        *ret = thread_box->ret;
+                        reason = (error_code) (intptr_t) prv;
+                        break;
+                case EDEADLK:
+                        *ret = UNDEFINED;
+                        reason = LERR_SELF;
+                        break;
+                case EINVAL:
+                case ESRCH:
+                        *ret = UNDEFINED;
+                        reason = LERR_INTERNAL;
+                        break;
+        }
+        return reason;
+}
+
 @** Testing.
 
 Each unit test consists of five phases:
@@ -7238,12 +8217,6 @@ high_bit (digit o)
 #       else
 #               define Lnoreturn /* noisy compiler */
 #       endif
-#endif
-@#
-#ifdef LDEBUG
-#       define LDEBUG_P true
-#else
-#       define LDEBUG_P false
 #endif
 @#
 #if EOF == -1
