@@ -41,7 +41,6 @@
 @s intptr_t int
 @s uint16_t int
 @s uint32_t int
-@s uint_fast32_t int
 @s uint64_t int
 @s uintptr_t int
 @s uintmax_t int
@@ -54,8 +53,7 @@
 %
 @s line normal
 @s new normal
-@s orabort normal
-@s orassert normal
+@s or_int_value_bounds return
 @s orreturn return
 @s ortrap return
 @s shared static
@@ -63,38 +61,34 @@
 @s unused static
 %
 @s address int
-@s array int
-@s assembly_complete int
-@s assembly_working int
 @s atom int
+@s byte int
 @s cell int
 @s cell_tag int
-@s code_page int
-@s digit int
 @s error_code int
 @s half int
-@s hash_fn int
+@s hash int
+@s hashtable_raw int
 @s heap int
-@s heap_access int
 @s heap_alloc_fn int
 @s heap_enlarge_fn int
 @s heap_enlarge_p_fn int
-@s heap_init_fn int
 @s heap_pun int
-@s instruction int
-@s larry int
-@s match_fn int
+@s init_heap_fn int
 @s opcode int
+@s opcode_table int
+@s osthread int
+@s primitive int
 @s primitive_code int
-@s primitive_fn int
 @s primitive_table int
 @s scow int
 @s segment int
+@s statement_parser int
 @s symbol int
-@s vm_register int
 @s word int
 %
 @s llt_allocation int
+@s llt_fixture int
 @s llt_forward int
 @s llt_header int
 @s llt_initialise int
@@ -107,8 +101,8 @@ form it should have been accompanied with sources and a \.{README}
 file describing how to build and test \Ls/ on various platforms.
 If you received this document as a hard copy I would be very
 interested to know how and why, as it's woefully incomplete and I
-have not printed any hard copies, even for proofreading, but you'll
-have to type in the code yourself.
+have not printed any hard copies, even for proofreading, but in
+that case you'll have to type in the code yourself.
 
 Alternatively \Ls/ exists primarily as a package of source distributed
 through the web. The primary home for the source code is at
@@ -187,16 +181,14 @@ which is huge, semi-optional and also has minimal dependencies).
 \.{README.deploy}&Packing the source\cr
 \.{lossless.w}&The \CEE/ parts of \Ls/ (including {\it primitives\/})\cr
 \.{barbaroi.ll}&The \Ls/ parts of \Ls/ (not primitive)\cr
-\.{boot.w}&Bootstrapping the virtual machine\cr
 \.{evaluate.la}&Assembly source of the \Ls/ interpreter\cr
-\.{repl.w}&A crude REPL linked with libedit\cr
 \.{man/man{\it n\/}l/*}&Neglected unix manual page documentation\cr
 \.{man/man{\it n\/}l/intro.{\it n\/}l}&A description of each section's
         contents\cr
 \.{man/man9l/TEMPLATE.9l}&Manual page source template\cr
 \.{perl/*}&Neglected proof-of-concept library wrapper\cr
 \.{Makefile}&Build Plumbing\cr
-\.{bin/lloader}&\ditto\cr
+\.{bin/bin2c}&\ditto\cr
 \.{bin/reindex}&\ditto\cr
 \.{.gitignore}&Administrivia \AM\ Notes\cr
 \.{LICENSE}&\ditto\cr
@@ -226,6 +218,7 @@ following files are also created:
 
 \yskip\hskip3em\vbox{\halign{\quad#\hfil&\quad#\hfil&\quad#\hfil\cr
 \.{lossless}&\Ls/\cr
+\.{initialise.o}&The contents of \.{barbaroi.ll} and \.{evaluate.la}\cr
 \.{memless.o}&\.{lossless.o} for tests of the memory allocator\cr
 \.{liblossless.so}&Shared library for linking to \Ls/ dynamically\cr
 }}\footnote{$^1$}{Windows support is practically non-existent, but is
@@ -235,10 +228,10 @@ As well as \.{clean} and the default \.{all} there are other
 interesting \.{make} targets:
 
 \yskip\hskip3em\vbox{\halign{\quad#\hfil&\quad#\hfil&\quad#\hfil\cr
+\.{dist}&Build a distributable release\cr
 \.{test}&Build and lauch the comprehensive test suite\cr
-\.{lossless}&\Ls/ with a REPL by linking with libedit\cr
-\.{bootless}&Sandbox for experimenting with the virtual machine\cr
-\.{man/mandoc.db}&\Ls/\cr
+\.{lossless.pdf}&This document\cr
+\.{man/mandoc.db}&\Ls/' manual database\cr
 }}
 
 @ The bulk of \Ls/' source is in \.{lossless.w}. This \.{CWEB}
@@ -254,16 +247,6 @@ there's a variant which has hooks in the memory allocator named
 which is linked into each test script alongside \.{memless.o} and
 contains the functions shared by \Ls/' test suite.
 
-\.{repl.w} and \.{boot.w} follow a similar approach but producing
-only a single library each. They are used primarily to develop \Ls/
-and their existence and purpose is subject to change.
-
-The \Ls/ shared library needs only \.{lossless.o}. The repl
-additionally includes \.{repl.o} and \.{libedit}, and links in
-\.{barbaroi.ll} to initialise the \Ls/ run-time environment. The
-bootstrap utility includes \.{boot.o} and compiles the assembly in
-\.{evaluate.la}.
-
 All of this is taken care of in the \.{Makefile}, compatible with
 BSD and GNU make simultaneously.
 
@@ -274,23 +257,23 @@ reasons it contains many more definitions than library users require
 (that is: all of them).
 
 The contents of \.{lossless.h} are described by the code block
-attached to this section. Such code blocks may be named with a
-filename presented in a monospace font (\.{@@(filename@@>=} in
-\.{CWEB} source) and cause \.{CWEB} to concatenate all such sections
-and produce the file so named. In fact \.{lossless.h} is generated
-by just this one section however it includes references to other
-sections by name (such as the next one, |@<System head...@>|) which
-are themselves concatenated and inserted in place.
+attached to this section. Code blocks may be named such as this one
+with a filename presented in a monospace font (\.{@@(filename@@>=}
+in \.{CWEB} source) and cause \.{CWEB} to concatenate all such
+sections to produce the file named. In fact \.{lossless.h} is
+generated by just this one section however it includes references
+to other sections by name (such as the next one, |@<System head...@>|)
+which are themselves concatenated and inserted in place.
 
 The special section name ``Preprocessor definitions'' consists of
 all the \#|define| lines (\.{@@d} in \.{CWEB}) that preceed code
 sections.
 
 Finally there are sections that do have a block of code but one
-without a name. These become \.{lossless.c} (or \.{repl.c} or
-\.{boot.c}) and begin \.{@@c} in \.{CWEB}.
+without a name. These become \.{lossless.c} and begin \.{@@c} in
+\.{CWEB}.
 
-@(lossless.h@>=
+@ @(lossless.h@>=
 #ifndef LL_LOSSLESS_H
 #define LL_LOSSLESS_H
 @<System headers@>@;
@@ -299,48 +282,66 @@ without a name. These become \.{lossless.c} (or \.{repl.c} or
 @<Type definitions@>@;
 @<Function declarations@>@;
 @<External \CEE/ symbols@>@;
+@<Hacks and warts@>@;
 #endif
 
-@ These headers are included by \.{lossless.h}, used for type
-definitions and \CEE/ macros. Some particularly ugly \CEE/ macros
-finish off the system headers but they are relegated to the back
-of this document for reasons of taste.
-
-Not all of these headers are or should be required and some future
-work will remove the fat and explain or excuse the rest.
+@ These system headers are required globally and included in the
+main header \.{lossless.h}. Perhaps they shouldn't be.
 
 @<System headers@>=
 #include <err.h>
 #include <errno.h>
-#include <limits.h>
 #include <pthread.h>
-#include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdlib.h>
-#include <sys/mman.h>
-#include <sys/types.h>
 #include <unistd.h>
-@<Portability hacks@>@; /* These are listed at the back. */
 
-@ This is the first of many sections which will become \.{lossless.c}.
-It includes the \.{lossless.h} just described bringing in the headers
-above and includes a handful more which which will not be needed
-after \Ls/ is built.
+@ This is the start of \.{lossless.c} --- system header files which
+are not required by the definitions in \.{lossless.h} followed by
+\Ls/' global variables (and then every other un-named section of
+code).
 
 @c
-#include "lossless.h"
 #include <assert.h> /* Definitely not for library code. */
 #include <stdio.h> /* To be removed when \Ls/ I/O is usable. */
+#include <stdlib.h>
 #include <ctype.h> /* Some ASCII macros. */
 #include <string.h> /* Bulk memory transfers, and |strlen|. */
+#include "lossless.h"
 @<Global variables@>@;
 
+@ Non-\CEE/ source code which is compiled by \Ls/ as it starts up
+is baked into the binary through \.{initialise.c}, where it is kept
+separate from the compiled \CEE/ in order to ease future plans for
+growth.
+
+@(initialise.c@>=
+#include <assert.h>
+#include <string.h>
+#include <stdio.h> /* To be removed when \Ls/ I/O is usable. */
+#include "lossless.h"
+@<Data for initialisation@>@;
+
+@ This is the first of the warts which don't have a sensible place
+to live. The definition of \.{unused} silences compiler warnings
+when function arguments are unused. \.{shared} \AM\ \.{unique}
+distinguish between global variables which are accessible to all
+and private to each individual thread. TODO: They should not be here.
+
+@.TODO@>
+@d shared /* Global variable visible to all threads. */
+@d unique __thread /* Global variable private to each thread. */
+@<Hacks...@>=
+#ifdef __GNUC__ /* \AM\ clang */
+#define unused __attribute__ ((__unused__))
+#else
+#define unused /* noisy compiler */
+#endif
+
 @* Errors. All code comes with errors and before going any further
-than the system header files previously listed, the errors that can
-occur in \Ls/ are defined here. The simplest of mechanisms is used
-for functions which could fail, which is nearly all of them: a
-success status code, or one representing what went wrong, is returned.
+the errors that can occur in \Ls/ are defined. The simplest of
+mechanisms is used for functions which could fail, which is nearly
+all of them: a status code representing what went wrong is returned.
 The actual value being returned is saved to an address pointed to
 by the last argument.
 
@@ -354,15 +355,17 @@ ortrap\/} are used --- mostly the latter two.
 @d just_abort(E,M) err((E), "%s: %u", (M), (E))
 @d do_or_abort(R,I) do@+ {@+ if (failure_p(((R) = (I))))
         just_abort((R), #I);@+ }@+ while (0)
-@d do_or_return(R,I) do@+{@+ if (failure_p((R) = (I))) return (R);@+ }@+ while (0)
-@d do_or_trap(R,I) do@+{@+ if (failure_p((R) = (I))) goto Trap;@+ }@+ while (0)
+@d do_or_return(R,I) do@+{@+ if (failure_p((R) = (I)))
+        return (R);@+ }@+ while (0)
+@d do_or_trap(R,I) do@+{@+ if (failure_p((R) = (I)))
+        goto Trap;@+ }@+ while (0)
 @d orabort(I) do_or_abort(reason, I)
 @d orreturn(I) do_or_return(reason, I)
 @d ortrap(I) do_or_trap(reason, I)
 @#
-@d do_or_assert(R,I) do@+ {@+ if (failure_p(((R) = (I))))
+@d do_or_assert(R,I) do@+ {@+ (R) = (I);@+
         assert(#I && !failure_p(R));@+ }@+ while (0)
-@d orassert(I) do@+ {@+ if (failure_p((reason = (I))))
+@d orassert(I) do@+ {@+ reason = (I);@+
         assert(#I && !failure_p(reason));@+ }@+ while (0)
 
 @ These are all the ways that an \Ls/ internal function can fail.
@@ -413,155 +416,80 @@ typedef enum {
         LERR_LENGTH
 } error_code;
 
-@ Every error condition is represented by an object at run-time
-which associates a human-readable name with the numeric identifier
-from above. To do this a symbol is generated for each error with
-an atom to hold the symbol and the identifier. This is actually
-slightly wasteful --- the string here is {\it copied\/} into a new
-symbol object then ignored but remains in memory. This could be
-remedied with trickery to convert the buffer to a `real' symbol
-object.
+@ This is the same list with the run-time label each will be bound
+to.
 
-TODO: Trickery. Sections like this which include \.{@@.TODO@@>}
-in \.{CWEB} are listed together in the index.
-
-@.TODO@>
-@q Bring the next list onto the current page while the TODO note is here@>
-@<Type def...@>=
-typedef struct {
-        cell  owner;@+
-        char *label;
-} error_table;
-
-@ This is the same list with the run-time label and object it will
-be bound to.
-
-@<Global...@>=
-shared error_table Error[LERR_LENGTH] = {@|
-        [LERR_FINISHED]       = { NIL, "already-finished" },@|
-        [LERR_AMBIGUOUS]      = { NIL, "ambiguous-syntax" },@|
-        [LERR_THREAD]         = { NIL, "bad-join" },@|
-        [LERR_EXISTS]         = { NIL, "conflicted-binding" },@|
-        [LERR_DOUBLE_TAIL]    = { NIL, "double-tail" },@|
-        [LERR_EOF]            = { NIL, "end-of-file" },@|
-        [LERR_IMMUTABLE]      = { NIL, "immutable" },@|
-        [LERR_IMPROPER]       = { NIL, "improper-list" },@|
-        [LERR_ADDRESS]        = { NIL, "invalid-address" },@|
-        [LERR_INSTRUCTION]    = { NIL, "invalid-instruction" },@|
-        [LERR_INCOMPATIBLE]   = { NIL, "incompatible-operand" },@|
-        [LERR_INTERRUPT]      = { NIL, "interrupted" },@|
-        [LERR_IO]             = { NIL, "io" }, /* Helpful. */@t\iII@>
-        [LERR_INTERNAL]       = { NIL, "lossless-error" },@|
-        [LERR_MISMATCH]       = { NIL, "mismatched-brackets" },@|
-        [LERR_MISSING]        = { NIL, "missing" },@|
-        [LERR_NONCHARACTER]   = { NIL, "noncharacter" },@|
-        [LERR_NONE]           = { NIL, "no-error" },@|
-        [LERR_LISTLESS_TAIL]  = { NIL, "non-list-tail" },@|
-        [LERR_OUT_OF_BOUNDS]  = { NIL, "out-of-bounds" },@|
-        [LERR_OOM]            = { NIL, "out-of-memory" },@|
-        [LERR_OVERFLOW]       = { NIL, "overflow" },@|
-        [LERR_USER]           = { NIL, "pebdac" }, /* Problem Exists
+@<Data...@>=
+shared char *Error_Label[LERR_LENGTH] = {@|
+        [LERR_FINISHED]       = "already-finished",@|
+        [LERR_AMBIGUOUS]      = "ambiguous-syntax",@|
+        [LERR_THREAD]         = "bad-join",@|
+        [LERR_EXISTS]         = "conflicted-binding",@|
+        [LERR_DOUBLE_TAIL]    = "double-tail",@|
+        [LERR_EOF]            = "end-of-file",@|
+        [LERR_IMMUTABLE]      = "immutable",@|
+        [LERR_IMPROPER]       = "improper-list",@|
+        [LERR_ADDRESS]        = "invalid-address",@|
+        [LERR_INSTRUCTION]    = "invalid-instruction",@|
+        [LERR_INCOMPATIBLE]   = "incompatible-operand",@|
+        [LERR_INTERRUPT]      = "interrupted",@|
+        [LERR_IO]             = "io", /* Helpful. */@t\iII@>
+        [LERR_INTERNAL]       = "lossless-error",@|
+        [LERR_MISMATCH]       = "mismatched-brackets",@|
+        [LERR_MISSING]        = "missing",@|
+        [LERR_NONCHARACTER]   = "noncharacter",@|
+        [LERR_NONE]           = "no-error",@|
+        [LERR_LISTLESS_TAIL]  = "non-list-tail",@|
+        [LERR_OUT_OF_BOUNDS]  = "out-of-bounds",@|
+        [LERR_OOM]            = "out-of-memory",@|
+        [LERR_OVERFLOW]       = "overflow",@|
+        [LERR_USER]           = "pebdac", /* Problem Exists
                                 Between Developer And Compiler. */@t\iII@>
-        [LERR_BUSY]           = { NIL, "resource-busy" },@|
-        [LERR_LEAK]           = { NIL, "resource-leak" },@|
-        [LERR_LIMIT]          = { NIL, "software-limit" },@|
-        [LERR_SYNTAX]         = { NIL, "syntax-error" },@|
-        [LERR_SYSTEM]         = { NIL, "system-error" },@|
-        [LERR_HEAVY_TAIL]     = { NIL, "tail-mid-list" },@|
-        [LERR_UNCLOSED_OPEN]  = { NIL, "unclosed-brackets" },@|
-        [LERR_UNCOMBINABLE]   = { NIL, "uncombinable" },@|
-        [LERR_UNDERFLOW]      = { NIL, "underflow" },@|
-        [LERR_UNIMPLEMENTED]  = { NIL, "unimplemented" },@|
-        [LERR_UNLOCKED]       = { NIL, "unlocked-resource" },@|
-        [LERR_UNOPENED_CLOSE] = { NIL, "unopened-brackets" },@|
-        [LERR_UNPRINTABLE]    = { NIL, "unprintable" },@|
-        [LERR_UNSCANNABLE]    = { NIL, "unscannable-lexeme" },@|
-        [LERR_EMPTY_TAIL]     = { NIL, "unterminated-tail" },@|
-        [LERR_SELF]           = { NIL, "wait-for-self" },@/
+        [LERR_BUSY]           = "resource-busy",@|
+        [LERR_LEAK]           = "resource-leak",@|
+        [LERR_LIMIT]          = "software-limit",@|
+        [LERR_SYNTAX]         = "syntax-error",@|
+        [LERR_SYSTEM]         = "system-error",@|
+        [LERR_HEAVY_TAIL]     = "tail-mid-list",@|
+        [LERR_UNCLOSED_OPEN]  = "unclosed-list",@|
+        [LERR_UNCOMBINABLE]   = "uncombinable",@|
+        [LERR_UNDERFLOW]      = "underflow",@|
+        [LERR_UNIMPLEMENTED]  = "unimplemented",@|
+        [LERR_UNLOCKED]       = "unlocked-resource",@|
+        [LERR_UNOPENED_CLOSE] = "unopened-list",@|
+        [LERR_UNPRINTABLE]    = "unprintable",@|
+        [LERR_UNSCANNABLE]    = "unscannable-lexeme",@|
+        [LERR_EMPTY_TAIL]     = "unterminated-tail",@|
+        [LERR_SELF]           = "wait-for-self",@/
 };
 
-@ The \Ls/ header file declares every function and global variable
-that's defined, even those which should arguably be kept private,
-and |Error| is no exception.
+@ Each type of error has a unique object created to represent it
+at run-time. These objects are saved in the |Error| array as they
+are initialised.
 
-@<Extern...@>=
-shared extern error_table Error[];
+Run-time objects will be described in greater detail after the
+memory layout has been defined.
 
-@ Run-time error objects have just two attributes: the numeric ID
-and the \Ls/ symbol which represents it. How these work (|lsin|
-\AM\ |ldex|) is described below. The label returned by |error_label|
-is the {\it symbol\/} created during initialisation not the |char
-*| pointer above.
+@d error_id_c(O)    (A(O)->sin)
+@d error_label_c(O) (A(O)->dex)
+@d error_object(O)  (&Error[fixed_value(error_id_c(O))])
+@<Global...@>=
+shared cell Error[LERR_LENGTH];
 
-@d error_id(O)     (lsin(O))
-@d error_label(O)  (ldex(O))
-@d error_object(O) (&Error[error_id(O)])
-@<Fun...@>=
-error_code error_search (cell, cell *);
+@ @<Extern...@>=
+extern shared cell Error[];
 
-@ The initialisation process is a somewhat messy affair which had
-grown as \Ls/ components have been written. It will be described
-more fully in the section later on memory but broadly speaking
-there's the carefully orchestrated memory initialisation routines
-and then everything else, which starts here: generating a new symbol
-for each error's label followed by a |FORM_ERROR| wrapper object
-to tie that label to the error code.
+@ An error object is a tagged pair with the index into |Error| in
+one half and a symbol created from the above label in the other.
 
-@<Finish init...@>=
+@<Initialise error...@>=
 for (i = 0; i < LERR_LENGTH; i++) {
-        orabort(new_symbol_const(Error[i].label, &ltmp));
-        orabort(new_atom(i, ltmp, FORM_ERROR, &Error[i].owner));
+        orreturn(new_symbol_cstr(Error_Label[i], &ltmp)); /* New symbol. */
+        orreturn(new_atom(fix(i), ltmp, FORM_ERROR, &Error[i])); /* Error
+                                                object; ID \AM\ label. */
+        orreturn(env_save_m(Root, error_label_c(Error[i]), Error[i],
+                false)); /* Run-time inding. */
 }
-
-@ An error object holds the numeric and readable representations
-of an error. To find the error object from its symbolic name a
-binding is created in the root environment from the label to the
-object. These concepts are explained in the Environment chapter.
-
-This should probably be done at the same time as the previous
-initialisation step (TODO).
-
-@.TODO@>
-@<Populate the |Root| environment@>=
-for (i = 0; i < LERR_LENGTH; i++)
-        orreturn(env_save_m(Root, error_label(Error[i].owner),
-                Error[i].owner, false));
-
-@ The bindings in the root environment can be overshadowed at
-run-time by another environment layer. To ensure that internal
-routines can always obtain the real error object |error_search|
-will look for an error binding directly in the root environment.
-
-This same critical symbol lookup method is use later when other
-global identifiers are created so the body of the function is a
-macro substituting the object to search for (|O|), a predicate
-function or macro to validate the search result with (|P|) and the
-pointer to return the result to (|R|).  The signature for these
-functions is identifed by the |search_fn| type definition.
-
-@d global_search(O,P,R) { /* O, Predicate, R */
-        cell rval; /* Used so that |R| is unchanged if the result is invalid. */
-        error_code reason;
-
-        orreturn(env_search(Root, (O), &rval));
-        if (!P(rval))
-                return LERR_INCOMPATIBLE; /* No parentheses around |P|! */
-        *(R) = rval;
-        return LERR_NONE;
-}
-@c
-error_code
-error_search (cell  o,
-              cell *ret)
-{
-        global_search(o, error_p, ret)@;
-}
-
-@ A function pointer representing the above function (or another
-with the same signature).
-
-@<Type def...@>=
-typedef error_code @[@] (*search_fn) (cell, cell *);
 
 @* Naming things. Harder than the halting problem, this has also
 not been solved. Much improvement could be made to the names currently
@@ -610,8 +538,8 @@ Suffix \.{\_m}: Mutates some state, usually the object |o|.
 
 Suffix \.{\_imp}: The real implementation of some routine.
 
-Suffix \.{\_c}: A variant of a function taking \CEE/-formatted
-(eg.~integer) data.
+Suffix \.{\_c}: An internal variant of a function accepting or
+returning \CEE/-formatted data.
 
 Suffix \.{\_ref}: Lookup by index in an array-like object.
 
@@ -626,7 +554,7 @@ Multiple suffixes are appended in an unspecified but --- I think
 Other conventions.
 
 Many objects are based on a memory allocation (known as a {\it
-segment}) and consist of a header followed by an arbitrary number
+segment\/}) and consist of a header followed by an arbitrary number
 of bytes. The macro to evaluate the \CEE/ struct representing the
 object is named {\it object\/}\.{\_pointer}; the base of the data
 is named {\it object\/}\.{\_base}.
@@ -635,91 +563,51 @@ is named {\it object\/}\.{\_base}.
 not bytes. If the number of bytes needs to be tracked too it is the
 ``width''.
 
-@** Memory. Now that \Ls/ has errors there is enough in place to
-turn to the lowest-level memory allocation routines. This API is
-little more than a wrapper around the system allocator (|malloc|)
-with some error handling.
+@** Memory. \Ls/ arranges memory allocations in a hierarchy. The
+lowest level wraps the system allocation routines with error
+detection. At this level there is no automatic memory management
+and each allocation must be tracked and released explicitly.
+
+The next layer organises allocations as a {\it segment\/} with a
+header including a (doubly\footnote{$^1$}{TODO: Why?}) linked list
+of segments along with other metadata. Segments are managed
+automatically and freed by the garbage collector when no longer in
+use.
+
+The final layer classifies one or more segments as {\it heap\/}.
+These heap areas hold the {\it atoms\/} which make up individual
+objects and the necessary metadata to allocate them.
 
 It's not clear that the \.{*\_Ready} variables serve any practical
-purpose. TODO: review while breaking apart memory initialisation.
+purpose. TODO: review.
 
 @.TODO@>
-@d SYSTEM_PAGE_LENGTH sysconf(_SC_PAGESIZE) /* An Operating
-                                                System page length. */
 @<Global...@>=
 char *malloc_options = "S"; /* Enable |malloc| security features. */
 shared bool Memory_Ready = false; /* Main memory routines are ready. */
 unique bool Thread_Ready = false; /* Thread initialisation if finished. */
-shared bool Lossless_Ready = false; /* \Ls/ is ready. */
+shared bool Runtime_Ready = false; /* \Ls/' run-time is ready. */
+shared bool VM_Ready = false; /* Environment populated \AM\ evaluator linked. */
 
 @ @<Extern...@>=
-extern shared bool Memory_Ready, Lossless_Ready;
+extern shared bool Memory_Ready, Runtime_Ready, VM_Ready;
 extern unique bool Thread_Ready;
 
-@ The API is simple: initialise, then allocate and free at will.
-Initialisation is divided into global initialisation and thread-specific
-initialisation (including for the first `thread').
+@ @<Fun...@>=
+error_code init_mem (void);
+error_code alloc_mem (void *, size_t, size_t, void **);
+error_code free_mem (void *);
 
-@<Fun...@>=
-error_code mem_init (void);
-error_code mem_init_thread (void);
-error_code mem_alloc (void *, size_t, size_t, void **);
-error_code mem_free (void *);
+@ The allocation routine simply checks the return value of |realloc|
+(or |aligned_alloc| if an aligned allocation was requested) and
+returns an appropriate error status.
 
-@ This routine has become a bit of a mess to keep the initialisation
-process in the correct order and should be rewritten (TODO). It's
-called once prior to anything else then never again.
-
-@.TODO@>
-@c
-error_code
-mem_init (void)
-{
-        cell ltmp;
-        segment *stmp;
-        int i;
-        error_code reason;
-
-        @<Initialise memory allocator@>@; /* Prepare global lock. */
-        @<Initialise heap \AM\ symbol table@>@; /* Prepare main memory area. */
-        Memory_Ready = true;
-        orreturn(mem_init_thread()); /* Finish initialisation for the
-                                                first thread. */
-        @<Finish initialisation after memory is ready@>@; /* Everything else. */
-        Lossless_Ready = true;
-        return LERR_NONE;
-}
-
-@ Some of the global variables are shared between all threads in a
-process but some are unique to each thread such as those used by
-the virtual machine. These thread-local variables are initialised
-the first time \Ls/ loads and reinitialised (that is to say, the
-new thread's private copy is initialised) after a new thread is
-started.
+|LLTEST| can be defined to replace the system allocator with one
+suitable for use in the test suite.
 
 @c
 error_code
-mem_init_thread (void)
-{
-        Thread_Ready = false;
-        @<(Re-)Initialise per thread@>@;
-        Thread_Ready = true;
-        return LERR_NONE;
-}
-
-@ Memory is allocated with this straightforward wrapper around
-|malloc|. In order to test the resiliance of this and other allocation
-routines the test suite defined (much) later may need to insert
-hooks into the memory allocator.
-
-Of course these hooks shouldn't even be available in a regular build
-so they're included only if |LLTEST| is defined by the \CEE/ compiler.
-The normal \Ls/ build process produces \.{memless.o}, with the hooks
-enabled, alongside the otherwise identical \.{lossless.o}.
-
-@c
-error_code
-mem_alloc (void    *old,
+alloc_mem (void    *old,
            size_t   length,
            size_t   align,
            void   **ret)
@@ -733,7 +621,9 @@ mem_alloc (void    *old,
                 r = realloc(old, length);
         else {
                 assert(old == NULL);
-                if (length % align)
+                if (length < align)
+                        length = align;
+                else if (length % align)
                         return LERR_INCOMPATIBLE;
                 r = aligned_alloc(align, length);
         }
@@ -750,12 +640,9 @@ mem_alloc (void    *old,
         return LERR_NONE;
 }
 
-@ It's not clear what could go wrong here or what the caller is
-expected to do about it. The API is nicely symmetrical though.
-
-@c
+@ @c
 error_code
-mem_free (void *o)
+free_mem (void *o)
 {
 #ifdef LLTEST
         @<Testing memory deallocator@>@;
@@ -764,35 +651,61 @@ mem_free (void *o)
         return LERR_NONE;
 }
 
-@* Portability. Not all the world's a VAX. In fact this code has never
-been near a VAX.
+@ \Ls/ begins here. |init_mem| must be called exactly once and
+before accessing using any other part of \Ls/. For the most part
+this allocates the primary heap and other areas of memory used at
+run-time, and initialises the mutexes which keep threads out of
+each others' memory.
 
-The most common object in \Ls/ is the {\it cell\/}, which is a
-normal \CEE/ pointer disguised as an integer. Ignoring for a moment
-some special values this pointer is to an {\it atom\/} --- two
-cells\footnote{$^1$}{As indivisible as a real atom.}. Every atom
-has an 8 bit `tag' associated with it.
+@(initialise.c@>=
+error_code
+init_mem (void)
+{
+        cell ltmp;
+        segment *stmp;
+        int i;
+        error_code reason;
 
-The macros defined here should make this work seamlessly whether
-\Ls/ is built on a 16, 32 or 64 bit architecture however only a 64
-bit environment has seen any testing.
+        assert(!Memory_Ready && !Runtime_Ready);
+        @<Initialise memory allocator@>@;
+        @<Initialise heap@>@;
+        @<Initialise symbol table@>@;
+        @<Initialise program linkage@>@;
+        @<Initialise foreign linkage@>@;
+        Memory_Ready = true;
+        orreturn(init_osthread()); /* Finish memory initialisation for
+                                                the first thread. */
+        @<Initialise threading@>@;
+        @<Initialise run-time environment@>@;
+        Runtime_Ready = true;
+        return LERR_NONE;
+}
 
-Some data (eg.~lengths of things) will never need all the range
-available in a cell so {\it half\/} is defined to use its space
-more efficiently.
+@* Portability. Not all the world's a VAX. 32-bit machines are
+already long in the tooth as \Ls/ is being written so it's only
+natural to also include support for 16-bit machines. These sections
+set various \CEE/ constants and types so that a \Ls/ atom is exactly
+the size of two (data) pointers, regardless of how big such a pointer
+is.
+
+Unfortunately it will be seen later that 16-bit support is lacking
+in the bytecode/interpreter which has not been improved to take
+such small machines into account.
 
 @d TAG_BITS     8
 @d TAG_BYTES    1
 @#
-@d DIGIT_MAX    UINTPTR_MAX
-@d INTERN_BYTES (ATOM_BYTES - 1)
-@d FIXED_MIN    (asr(INTPTR_MIN, 4))
-@d FIXED_MAX    (asr(INTPTR_MAX, 4))
+@d WORD_MAX     INTPTR_MAX
+@d WORD_MIN     INTPTR_MIN
+@d INTERN_MAX   (ATOM_BYTES - 1)
 @d FIXED_SHIFT  4
+@d FIXED_MIN    (ASR(INTPTR_MIN, FIXED_SHIFT))
+@d FIXED_MAX    (ASR(INTPTR_MAX, FIXED_SHIFT))
+@d FIXED_BITS   (CELL_BITS - FIXED_SHIFT)
 @<Essential...@>=
 typedef int8_t byte;
 typedef intptr_t cell;
-typedef uintptr_t digit;
+typedef intptr_t word;
 @#
 #if UINTPTR_MAX >= 0xfffffffffffffffful
 @<Define a 64-bit addressing environment@>@;
@@ -825,7 +738,7 @@ typedef int32_t half; /* Records the size of memory objects. */
 typedef int16_t half;
 
 @ It's unclear how useful this could be given that it's already
-2022 but it costs nothing to include it.
+2022 but it costs little to include it.
 
 @<Define a 16-bit addressing environment@>=
 #define CELL_BITS  16
@@ -837,16 +750,25 @@ typedef int16_t half;
 #define HALF_MAX   INT8_MAX
 typedef int8_t half;
 
-@* Atoms. A \Ls/ atom is two cells so their size is an even number
-of bytes and with the right care they will never exist at an
-odd-valued address. Conversely an odd number can never be a pointer
-to an atom, odd numbers are therefore used to represent constant
-values which don't require any storage.
+@* Atoms. \Ls/ objects are referred to by pointers called {\it
+cells\/}, which point directly to an atom in its heap. Because each
+atom is exactly 4, 8 or 16 bytes wide (depending on machine size)
+each one has an address which is a multiple of 4, 8 or 16 and so
+any cell which points to an atom must have an even address. This
+means that if a cell value is {\it odd\/} then it can't possibly
+be a valid pointer to an atom; it won't point to a valid, allocated
+address.
 
-0 is the odd one out as it's not odd but will never be a pointer
-to a valid atom. Instead zero is used for the constant |NIL|/\.{()}.
-Note that in most {\it but not all\/} cases \CEE/'s \.{NULL} (|NULL|)
-has the same value 0.
+The following values (including zero, which isn't actually odd)
+define constants which can be placed in a cell without the need to
+perform a heap allocation. The |FIXED| constant is a little different:
+instead of representing `a fixed' if a cell's value is exactly 15
+(1111 in binary), as with the other constants, if the bottom 4 bits
+of a cell are set then the rest of the cell encodes as much of a
+signed integer as will fit.
+
+|UNDEFINED| is a sentinel marker which should never be realised as
+a run-time object.
 
 @d NIL            ((cell)  0) /* Nothing, the empty list, \.{()}. */
 @d LFALSE         ((cell)  1) /* Boolean false, \.{\#f} or \.{\#F}. */
@@ -860,8 +782,8 @@ has the same value 0.
 @d UNDEFINED      ((cell) 13) /* The value of a variable that isn't there. */
 @d FIXED          ((cell) 15) /* A small fixed-width integer. */
 @#
-@d null_p(O)      ((intptr_t) (O) == NIL) /* Might {\it not\/} be |NULL|. */
-@d special_p(O)   (null_p(O) || ((intptr_t) (O)) & 1)
+@d null_p(O)      ((O) == NIL) /* Might {\it not\/} be |NULL|. */
+@d special_p(O)   (null_p(O) || ((O)) & 1)
 @d boolean_p(O)   ((O) == LFALSE || (O) == LTRUE)
 @d false_p(O)     ((O) == LFALSE)
 @d true_p(O)      ((O) == LTRUE)
@@ -875,23 +797,30 @@ has the same value 0.
 @#
 @d predicate(O)   ((O) ? LTRUE : LFALSE)
 
-@ Every atom has an 8 bit tag located nearby (precisely where will
-be made clear shortly). The first two of the 8 bits are reserved
-for the garbage collector leaving an enormous 6 bits to identify
-the object held in the atom. Of these the next two have the double
-purpose of identifying whether either half of an atom is a pointer
-to another object or not.
+@ As already indicated an atom (from Greek {\it atomos\/}
+``indivisible'') is the size of two pointers. Depending on what the
+atom represents these may represent pointers to other atoms (or
+constants) or opaque data.
 
-The atom's two halves are referred to with the archaic Latin terms
-{\it sinister\/} and {\it dexter\/}, sortened to {\it sin\/} and
-{\it dex\/}. This emphasises (except to Latin speakers) that the
-two halves have no particular relation or meaning and keeps them
-distinct from the established Lisp terms \.{car} \AM\ \.{cdr} which
-are almost identical.
+Associated with each atom is a tag. Each tag is 8 bits wide. Two
+bits (|LTAG_LIVE| and |LTAG_TODO|) are used by the garbage collector.
+The remaining bits define the atom (it's atomic number, if you will)
+and the first two of these --- of interest to the garbage collector
+in particular --- indicate whether or not each half is a pointer
+to another atom (|LTAG_PSIN| and |LTAN_PDEX|). The lower 6 bits are
+known as the atoms {\it format\/}.
 
-The atom union defined here isn't used as such except to access the
-|sin| and |dex| attributes, although it has proven helpful while
-debugging \Ls/.
+The macros below examine and update an atom's tag after locating
+it (see below for the definition of |ATOM_TO_TAG| which does the
+locating), the |A|, |C| and |T| macros are for typing convenience
+and |A| in particular is used extensively to access the atom via
+the union |atom|.
+
+To make it clear that atoms are used to implement more than just
+``cons cells'' the traditional names {\it car\/} and {\it cdr\/}
+are not used internally, instead the Latin terms sinister and dexter
+(shortened sin and dex) are used. These terms were deliberately
+chosen to be unfamiliar and evoke no sense of priority or order.
 
 @d LTAG_LIVE 0x80 /* Atom has been reached from a register. */
 @d LTAG_TODO 0x40 /* Atom has been partially scanned. */
@@ -913,6 +842,10 @@ debugging \Ls/.
 @d ATOM_FORM(O)             (TAG(O) & LTAG_FORM)
 @d ATOM_SIN_DATUM_P(O)      (TAG(O) & LTAG_PSIN)
 @d ATOM_DEX_DATUM_P(O)      (TAG(O) & LTAG_PDEX)
+@#
+@d A(O) ((atom *) (O))
+@d C(O) ((cell) (O))
+@d T(O) (ATOM_FORM(O))
 @<Type def...@>=
 typedef uint8_t cell_tag;
 typedef union {
@@ -923,117 +856,146 @@ typedef union {
                 void *yin, *yang;
         };
         struct {
-                digit value;
-                cell  tail;
+                void *number; /* a |segment|, not defined yet. */
+                word  value;
         };
         struct {
                 int8_t length; /* Only 4 bits needed */
-                byte   buffer[INTERN_BYTES];
+                byte   buffer[INTERN_MAX];
         };
 } atom;
 
-@ All of the objects known to \Ls/ are declared here (and also
-|FORM_NONE|). Some are placeholders for functionality which has
-been removed during \Ls/' development but are expected to make a
-comeback.
+@ All of the atom formats that \Ls/ recognises.
 
 @d FORM_NONE           (LTAG_NONE | 0x00) /* Unallocated. */
-@d FORM_ARRAY          (LTAG_NONE | 0x01) /* Zero or more sequential cells. */
-@d FORM_ASSEMBLY       (LTAG_NONE | 0x02) /* (Partially) assembled bytecode. */
-@d FORM_COLLECTED      (LTAG_NONE | 0x03) /* Garbage collector tombstone. */
-@d FORM_HASHTABLE      (LTAG_NONE | 0x04) /* Key:value store. */
-@d FORM_HEAP           (LTAG_NONE | 0x05) /* Preallocated storage for atoms. */
-@d FORM_RUNE           (LTAG_NONE | 0x06) /* Unicode code point. */
+@d FORM_COLLECTED      (LTAG_NONE | 0x01) /* Garbage collector tombstone. */
+@d FORM_HASHTABLE      (LTAG_NONE | 0x02) /* Key:value (or just key) store. */
+@d FORM_HEAP           (LTAG_NONE | 0x03) /* Preallocated storage for atoms. */
+@d FORM_INTEGER        (LTAG_NONE | 0x04) /* Large integer. */
+@d FORM_RUNE           (LTAG_NONE | 0x05) /* Unicode code point. */
+@d FORM_SEGMENT        (LTAG_NONE | 0x06) /* Large memory allocation. */
 @d FORM_SEGMENT_INTERN (LTAG_NONE | 0x07) /* Tiny memory allocation. */
 @d FORM_SYMBOL         (LTAG_NONE | 0x08) /* Symbol. */
 @d FORM_SYMBOL_INTERN  (LTAG_NONE | 0x09) /* Tiny symbol. */
-@d FORM_WORD           (LTAG_NONE | 0x0a) /* Arbitrary bytes. */
 @#
-@d FORM_CSTRUCT        (LTAG_PDEX | 0x00) /* A \CEE/ struct. */
-@d FORM_CONTINUATION   (LTAG_PDEX | 0x01) /* Continuation delimiter. */
-@d FORM_ERROR          (LTAG_PDEX | 0x02) /* An error (above). */
+@d FORM_ARRAY          (LTAG_PDEX | 0x00) /* Zero or more sequential cells. */
+@d FORM_ASSEMBLY       (LTAG_PDEX | 0x01) /* (Partially) assembled bytecode. */
+@d FORM_CSTRUCT        (LTAG_PDEX | 0x02) /* A \CEE/ struct. */
 @d FORM_FILE_HANDLE    (LTAG_PDEX | 0x03) /* File descriptor or equivalent. */
-@d FORM_LEXEME         (LTAG_PDEX | 0x04) /* A lexeme in source code. */
-@d FORM_NEGATIVE       (LTAG_PDEX | 0x05) /* Large negative integer. */
-@d FORM_OPCODE         (LTAG_PDEX | 0x06) /* A virtual machine's operator. */
-@d FORM_PENDING        (LTAG_PDEX | 0x07) /* Stack marker? */
-@d FORM_POSITIVE       (LTAG_PDEX | 0x08) /* Large positive integer. */
-@d FORM_PRIMITIVE      (LTAG_PDEX | 0x09) /* A \Ls/ operator. */
-@d FORM_PROGRAM        (LTAG_PDEX | 0x0a) /* Legacy bytecode importer? */
-@d FORM_REGISTER       (LTAG_PDEX | 0x0b) /* A virtual machine register. */
-@d FORM_SEGMENT        (LTAG_PDEX | 0x0c) /* Large memory allocation. */
+@d FORM_STATEMENT      (LTAG_PDEX | 0x04) /* A single assembled statement. */
 @#
-@d FORM_PAIR           (LTAG_BOTH | 0x00) /* A pair of cells. */
+@d FORM_PAIR           (LTAG_BOTH | 0x00) /* Two pointers (a ``cons cell''). */
 @d FORM_APPLICATIVE    (LTAG_BOTH | 0x01) /* Applicative closure. */
-@d FORM_ENVIRONMENT    (LTAG_BOTH | 0x02) /* Run-time environment. */
-@d FORM_OPERATIVE      (LTAG_BOTH | 0x03) /* Operative closure. */
-@d FORM_STATEMENT      (LTAG_BOTH | 0x04) /* A single assembled statement. */
+@d FORM_ARGUMENT       (LTAG_BOTH | 0x02) /* An assembly statement argument. */
+@d FORM_ENVIRONMENT    (LTAG_BOTH | 0x03) /* Run-time environment. */
+@d FORM_ERROR          (LTAG_BOTH | 0x04) /* An error (above). */
+@d FORM_OPCODE         (LTAG_BOTH | 0x05) /* A virtual machine's operator. */
+@d FORM_OPERATIVE      (LTAG_BOTH | 0x06) /* Operative closure. */
+@d FORM_PRIMITIVE      (LTAG_BOTH | 0x07) /* A \Ls/ operator. */
+@d FORM_REGISTER       (LTAG_BOTH | 0x08) /* A virtual machine register. */
 
-@ \CEE/ predicates to test whether an atom represents a particular
-object. Some objects use a segment or an array as a backing store
-or otherwise have more than a simple |form| predicate. These will
-be described as the objects are introduced.
+@ Each format has a corresponding test. Some also share
+implementation or are otherwise related.
 
-@d form(O)             (TAG(O) & LTAG_FORM)
+@d form(O)             (ATOM_FORM(O))
 @d form_p(O,F)         (!special_p(O) && form(O) == FORM_##F)
 @d pair_p(O)           (form_p((O), PAIR))
+@d argument_p(O)       (form_p((O), ARGUMENT))
 @d array_p(O)          (form_p((O), ARRAY))
 @d assembly_p(O)       (form_p((O), ASSEMBLY))
 @d collected_p(O)      (form_p((O), COLLECTED))
-@d continuation_p(O)   (form_p((O), CONTINUATION))
+@d cstruct_p(O)        (form_p((O), CSTRUCT))
 @d environment_p(O)    (form_p((O), ENVIRONMENT))
 @d error_p(O)          (form_p((O), ERROR))
 @d file_handle_p(O)    (form_p((O), FILE_HANDLE))
 @d hashtable_p(O)      (form_p((O), HASHTABLE))
 @d heap_p(O)           (form_p((O), HEAP))
-@d lexeme_p(O)         (form_p((O), LEXEME))
 @d opcode_p(O)         (form_p((O), OPCODE))
-@d pending_p(O)        (form_p((O), PENDING))
 @d register_p(O)       (form_p((O), REGISTER))
 @d rune_p(O)           (form_p((O), RUNE))
 @d statement_p(O)      (form_p((O), STATEMENT))
-@d word_p(O)           (form_p((O), WORD))
 @#
-@d cstruct_p(O)        (form_p((O), CSTRUCT))
 @d segment_intern_p(O) (form_p((O), SEGMENT_INTERN))
 @d segment_stored_p(O) (form_p((O), SEGMENT))
 @d segment_p(O)        (segment_intern_p(O) || segment_stored_p(O))
 @d symbol_intern_p(O)  (form_p((O), SYMBOL_INTERN))
 @d symbol_stored_p(O)  (form_p((O), SYMBOL))
 @d symbol_p(O)         (symbol_intern_p(O) || symbol_stored_p(O))
+@d intern_p(O)         (symbol_intern_p(O) || segment_intern_p(O))
 @#
-@d negative_p(O)       (form_p((O), NEGATIVE))
-@d positive_p(O)       (form_p((O), POSITIVE))
-@d digit_p(O)          (positive_p(O) || negative_p(O))
-@d integer_p(O)        (fixed_p(O) || positive_p(O) || negative_p(O))
+@d integer_heap_p(O)   (form_p((O), INTEGER))
+@d integer_p(O)        (fixed_p(O) || integer_heap_p(O))
 @#
-@d larry_p(O)          (array_p(O) || hashtable_p(O) || assembly_p(O)
+@d arraylike_p(O)      (array_p(O) || hashtable_p(O) || assembly_p(O)
         || statement_p(O))
 @d pointer_p(O)        (segment_stored_p(O) || symbol_stored_p(O)
-        || larry_p(O) || heap_p(O))
+        || arraylike_p(O) || heap_p(O))
 @#
+@d applicative_p(O)    (form_p((O), APPLICATIVE))
+@d operative_p(O)      (form_p((O), OPERATIVE))
 @d primitive_p(O)      (form_p((O), PRIMITIVE))
-@d closure_p(O)        (form_p((O), APPLICATIVE) || form_p((O), OPERATIVE))
-@d program_p(O)        (closure_p(O) || primitive_p(O) || continuation_p(O))
-@d applicative_p(O)    (form_p((O), APPLICATIVE) || primitive_applicative_p(O))
-@d operative_p(O)      (form_p((O), OPERATIVE) || primitive_operative_p(O))
+@d closure_p(O)        (applicative_p(O) || operative_p(O))
+@d program_p(O)        (closure_p(O) || primitive_p(O))
 
-@* Heap. Atoms are always allocated from a {\it heap\/}. A heap is
-a list of power-of-two-sized memory allocations known as a {\it
-page\/} aligned to a page-sized boundary eg.~4KiB (4096 or |0x1000|
-bytes). The first page allocated for a heap is called the root heap
-page or simply root heap.
+@ @<Fun...@>=
+error_code new_atom_imp (heap *, cell, cell, cell_tag, cell *);
 
-A heap page begins with a header followed immediately by the tags
-of the atoms it contains. After the header is (according to the atom
-and page sizes) a gap so that the first atom which follows it is
-correctly aligned. The rest of the page is dedicated to atoms.
-Like any other segment the heap page header is preceeded by a
-short segment header. Unlike regular segments though the segment
-header is {\it within\/} the heap page area.
+@ New atoms are allocated and with their constituent parts set
+``atomically''. Pairs are by far the most common atom created and
+get their own macro.
 
-The macros here locate these from an atom or heap page's address.
+@d cons(A,D,R)       (new_atom((A), (D), FORM_PAIR, (R))) /* cAr, cDr, R */
+@d new_atom(S,D,T,R) /* Sinister, Dexter, Tag, R */ (new_atom_imp(Heap_Thread,
+        (cell) (S), (cell) (D), (T), (R)))
+@c
+error_code
+new_atom_imp (heap     *where,
+              cell      nsin,
+              cell      ndex,
+              cell_tag  ntag,
+              cell     *ret)
+{
+        error_code reason;
 
+        assert(heap_mine_p(where) || heap_shared_p(where));
+        orreturn(heap_root(where)->fun->alloc(where, ret));
+        TAG_SET_M(*ret, ntag);
+        A(*ret)->sin = nsin;
+        A(*ret)->dex = ndex;
+        return LERR_NONE;
+}
+
+@* Heap. An atom is allocated within a heap object, each of which
+is the size of an operating system {\it page\/}. A single heap
+consists of one or more heap objects linked together. Hereafter the
+term ``heap'' generally refers to an individual heap object to avoid
+saying ``heap object'' all the time.
+
+Like every other allocation a heap is a segment and care is taken
+to ensure that the segment's header is not {\it added\/} to the
+allocation as it normally would be because each heap must be precisely
+aligned in memory.
+
+The segment header is still present though at the bottom of the
+allocated range, followed immediately by the heap's own header.
+
+The first set of macros here calculate the inner-header sizes, the
+amount of space left for atoms (|HEAP_LEFTOVER|) and thus the total
+size of the header proper (|HEAP_BOOKEND|) and padding (added
+together in |HEAP_HEADER|). |HEAP_LENGTH| is how many atoms are
+available in a heap.
+
+The remaining macros mask off the high or low bits of an atom's
+address to find the heap an atom is within, or its index within
+that heap, respectively, and other aspects of the atom/heap as per
+the macro's name.
+
+|HEAP_TO_LAST| evaluates to the address of an atom {\it past\/} the
+boundary of the heap.
+
+@d SYSTEM_PAGE_LENGTH sysconf(_SC_PAGESIZE) /* An Operating
+                                                System page length. */
+@#
 @d HEAP_CHUNK         (SYSTEM_PAGE_LENGTH) /* Size of a heap page (bytes). */
 @d HEAP_MASK          (HEAP_CHUNK - 1) /* Bits which will always be 0. */
 @d HEAP_BOOKEND       (sizeof (segment) + sizeof (heap)) /* Full header size. */
@@ -1057,18 +1019,21 @@ The macros here locate these from an atom or heap page's address.
 @d ATOM_TO_TAG(O)     (ATOM_TO_HEAP(O)->tag[ATOM_TO_INDEX(O)]) /* The
                                                                 atom's tag. */
 
-@ A heap page's header has a pointer to the next free atom in the
-page, to the next page in the list, to an optional twin, and
-a pointer to the root heap.
+@ A heap is one or more heap objects linked together. The first
+such object in the chain is called the {\it root heap\/} and each
+subsequent heap points back to this root heap.
 
-The root heap page's \.{root} pointer differs from other pages.
-Where a regular heap page's \.{root} pointer points to another page,
-ie.~the root page, the root heap's \.{root} pointer is really to a
-|heap_access| struct. The first member of a real heap page is its
-\.{free} pointer but the first member of a |heap_access| struct is
-a pointer-sized |HEAP_PUN_FLAG|.
+In place of the pointer to the root heap in an ordinary heap object,
+the root heap points to a |heap_pun| object. Like a regular heap
+object this punned object begins with a pointer. Unlike a regular
+heap object where this is a pointer is to the next free atom (or
+past the end of the heap) in the punned object pointed to by the
+root heap it holds the value |HEAP_PUN_FLAG| (-1).
 
-This sort of pointer trickery is not repeated anywhere else in \Ls/.
+This sort of dirty hack is not repeated again.
+
+After the fake free pointer the punned object has pointers to
+the heap's allocator and other functions.
 
 @<Type def...@>=
 struct heap {
@@ -1087,35 +1052,31 @@ struct heap_pun {
 };
 typedef struct heap_pun heap_pun;
 @#
-typedef error_code (*heap_init_fn)(heap *, heap *, heap *, heap *);
+typedef error_code (*init_heap_fn)(heap *, heap *, heap *, heap *);
 typedef error_code (*heap_enlarge_fn)(heap *, heap **);
 typedef bool (*heap_enlarge_p_fn)(heap_pun *, heap *);
 typedef error_code (*heap_alloc_fn)(heap *, cell *);
 @#
 struct heap_access { /* TODO: This can be a thread local variable. */
         void              *free; /* Named free to look like a |heap| object. */
-        heap_init_fn       init;
+        init_heap_fn       init;
         heap_enlarge_fn    enlarge;
         heap_enlarge_p_fn  enlarge_p;
         heap_alloc_fn      alloc;
 };
 typedef struct heap_access heap_access;
 
-@ \Ls/ has three heaps. |Heap_Thread| is unique to each thread and
-is where most allocations will be performed, it's sometimes referred
-to simply as ``the'' heap. |Heap_Shared| is shared between all
-threads and is used for, no surprises here, sharing data between
-them. The third is |Heap_Trap| which can be allocated in advance
-for handling out-of-memory and other difficult or constrained
-run-time conditions. Only |Heap_Thread| is initialised automatically.
+@ There may be several heaps active in \Ls/. One heap is created
+initially and is where allocations usually happen. This heap is
+saved in |Heap_Thread|, is a ``thread-local'' variable which means
+that each thread has its own |Heap_Thread|, and thus its own heap.
 
-All global \CEE/ variables are declared |shared| or |unique| (even
-though |shared| is empty) to be make each variable's thread scope
-highly visible.
+The other heaps are initialised at run-time.
+
+Note that almost none of this is actually implemented and only
+|Heap_Thread| is used.
 
 @d HEAP_PUN_FLAG -1 /* Fake `free pointer' sentinel to identify the root heap. */
-@d shared /* Global variable visible to all threads. */
-@d unique __thread /* Global variable private to each thread. */
 @d heap_root_p(O) ((O)->root->free == (void *) HEAP_PUN_FLAG)
 @d heap_root(O) (heap_root_p(O) ? (heap_pun *) (O) : (O)->root)
 @<Global...@>=
@@ -1127,60 +1088,51 @@ unique heap *Heap_Trap = NULL; /* Per-thread heap for trap handler. */
 extern shared heap *Heap_Shared;
 extern unique heap *Heap_Thread, *Heap_Trap;
 
-@ A heap page like all allocated memory except atoms is represented
-by a segment (description imminent) however all objects with a
-backing store including segment and heap objects are descended from
-an atom and atoms are allocated on a heap. To solve this apparent
-dilemma the first free atom in a new heap page is allocated to the
-backing segment representing the page.
-
-An ordinary segment increases the requested size of the allocation
-to fit its own header but heap pages must be exactly the requested
-size, which is indicated by passing the desired allocation size
-negated.
-
-The |heap_alloc| struct shouldn't be allocated with |mem_alloc| but
-the idea was put together hastily and the leak is small (TODO: fix
-this abomination).
-
-@.TODO@>
-@<Initialise heap...@>=
-orabort(alloc_segment(-HEAP_CHUNK, 1, HEAP_CHUNK, &stmp));
-Heap_Thread = SEGMENT_TO_HEAP(stmp);
-orabort(heap_init_sweeping(Heap_Thread, NULL, NULL, NULL));
-orabort(mem_alloc(NULL, sizeof (heap_access), sizeof (void *),@|
-        (void **) &((heap_pun *) Heap_Thread)->fun)); /* This is nasty... */
-((heap_pun *) Heap_Thread)->fun->free = (void *) HEAP_PUN_FLAG;
-((heap_pun *) Heap_Thread)->fun->init = heap_init_sweeping;
-((heap_pun *) Heap_Thread)->fun->enlarge = heap_enlarge;
-((heap_pun *) Heap_Thread)->fun->enlarge_p = heap_enlarge_p;
-((heap_pun *) Heap_Thread)->fun->alloc = heap_alloc;
-orabort(new_atom(NIL, NIL, FORM_HEAP, &ltmp));
-orabort(segment_init(HEAP_TO_SEGMENT(Heap_Thread), ltmp));
-Heap_Shared = Heap_Trap = NULL;
-
 @ @<Fun...@>=
 bool heap_mine_p (heap *);
 bool heap_shared_p (heap *);
 bool heap_trapped_p (heap *);
 bool heap_other_p (heap *);
-@#
-error_code heap_init_sweeping (heap *, heap *, heap *, heap *);
-error_code heap_init_compacting (heap *, heap *, heap *, heap *);
-error_code heap_alloc (heap *, cell *);
-error_code heap_enlarge (heap *, heap **);
-bool heap_enlarge_p (heap_pun *, heap *);
-@#
-error_code new_atom_imp (heap *, cell, cell, cell_tag, cell *);
-cell lsin (cell);
-error_code lsinx (cell, cell *);
-cell ldex (cell);
-error_code ldexx (cell, cell *);
-cell_tag ltag (cell);
-error_code lsin_set_m (cell, cell);
-error_code ldex_set_m (cell, cell);
+error_code init_heap_compacting (heap *, heap *, heap *, heap *);
+error_code init_heap_sweeping (heap *, heap *, heap *, heap *);
+bool heap_enlarge_p (heap_pun *, heap     *);
+error_code heap_enlarge (heap  *, heap **);
+error_code heap_alloc_freelist (heap *, cell *);
+error_code heap_alloc_pointer (heap *, cell *);
 
-@ These predicates query which of the three heaps a heap page belongs to.
+@ This is the first allocation that \Ls/ will make and the only
+time the list of allocations will ever be empty. By setting its
+\.{next} and \.{prev} pointers to itself |claim_segment| can safely
+`insert' this into what looks like a list of segment allocations.
+
+The negative allocation length of |-HEAP_CHUNK| indicates to
+|alloc_segment| that the segment header should not increase the
+length of the allocation.
+
+There is no need to lock |Allocations_Lock|.
+
+Allocating the |heap_access| object here like this is an awful hack
+which will go away eventually.
+
+@<Initialise heap@>=
+orabort(alloc_segment(-HEAP_CHUNK, HEAP_CHUNK, &stmp));
+Heap_Thread = SEGMENT_TO_HEAP(stmp);
+orabort(init_heap_sweeping(Heap_Thread, NULL, NULL, NULL));
+orabort(alloc_mem(NULL, sizeof (heap_access), sizeof (void *),@|
+        (void **) &((heap_pun *) Heap_Thread)->fun)); /* This is nasty... */
+((heap_pun *) Heap_Thread)->fun->free = (void *) HEAP_PUN_FLAG;
+((heap_pun *) Heap_Thread)->fun->init = init_heap_sweeping;
+((heap_pun *) Heap_Thread)->fun->enlarge = heap_enlarge;
+((heap_pun *) Heap_Thread)->fun->enlarge_p = heap_enlarge_p;
+((heap_pun *) Heap_Thread)->fun->alloc = heap_alloc_freelist;
+orabort(new_atom(NIL, NIL, FORM_NONE, &ltmp));
+Allocations = HEAP_TO_SEGMENT(Heap_Thread);
+Allocations->next = Allocations->prev = Allocations;
+orabort(claim_segment(HEAP_TO_SEGMENT(Heap_Thread), ltmp, FORM_HEAP));
+Heap_Shared = Heap_Trap = NULL;
+
+@ Tests to query whether the current thread can access a heap (and
+thus, after using |ATOM_TO_HEAP| on its pointer, an atom).
 
 @c
 bool
@@ -1208,23 +1160,23 @@ heap_other_p (heap *o)
                 && (heap *) heap_root(o) != Heap_Shared;
 }
 
-@ The |heap_alloc| struct allows new memory allocation routines
-(including garbage collection) to be added to \Ls/ dynamically.
-There are two allocators built in which differ primarily in how
-their gargbage collector works.
+@ The heap pun trick allows the allocation and garbage collection
+algorithms to be chosen dynamically. There are two algorithms built
+in to \Ls/ named after the type of garbage collection each uses:
+sweeping and compacting.
 
-The heap assigned to |Heap_Thread| during initialisation is a {\it
-sweeping heap\/} which maintains a linked list of free atoms and
-cleans up garbage by returning unused atoms to it. Alternatively
-there is a {\it collecting heap\/} who's |free| pointer is incremented
-to allocate an atom and cleans up garbage by twinning each page
-with an empty page and moving all used atoms in a page into that.
+After scanning for atoms which are in use, the garbage collector
+``sweeps'' through a sweeping heap collecting the remaining unused
+atoms into a ``free list''. Alternatively the atoms in a compacting
+heap are {\it moved\/} by the garbage collector into a new heap
+from which atoms are allocated by incrementing a pointer until it
+overflows past the top of the heap.
 
-Note that the garbage collectors have been removed from this work
-in progress.
+The garbage collector algorithms have been removed from \Ls/ for
+now for being a suspect whenever memory corruption bugs were being
+hunted down.
 
-@d initialise_atom(H,F) do { /* Heap, Free; a clever-enough compiler is
-                        expected to eliminate the un{\it Free\/} branch. */
+@d initialise_atom(H,F) do@+ { /* Heap, Free */
         (H)->free--; /* Move to the previous atom. */
         ATOM_TO_TAG((H)->free) = FORM_NONE; /* Free the atom. */
         (H)->free->sin = NIL; /* Cleanse the atom of sin. */
@@ -1233,10 +1185,10 @@ in progress.
                                                         to the free list. */
         else
                 (H)->free->dex = NIL; /* Scrub up the rest of the atom. */
-} while (0)
+}@+ while (0)
 @c
 error_code
-heap_init_sweeping (heap *new,
+init_heap_sweeping (heap *new,
                     heap *prev,
                     heap *other,
                     heap *root)
@@ -1251,10 +1203,9 @@ heap_init_sweeping (heap *new,
                                                 {\it after\/} the last atom. */
         initialise_atom(new, false); /* The last atom in the free list
                                         points to |NIL|. */
-        for (i = 1; i < HEAP_LENGTH; i++) /* The remaining atoms are linked
-                                                together. */
-                initialise_atom(new, true);
-@#
+        for (i = 1; i < HEAP_LENGTH; i++)@/
+                initialise_atom(new, true); /* The remaining atoms are
+                                                linked together. */
         new->root = (heap_pun *) root;
         new->other = other;
         if (prev == NULL)
@@ -1266,12 +1217,15 @@ heap_init_sweeping (heap *new,
         return LERR_NONE;
 }
 
-@ TODO: This (and its missing GC etc.) remains untested.
+@ Each heap object in a compacting heap is allocated alongside its
+twin, to which atoms will be moved by the garbage collector.
+
+TODO: This (and its missing GC etc.) remains untested.
 
 @.TODO@>
 @c
 error_code
-heap_init_compacting (heap *new,
+init_heap_compacting (heap *new,
                       heap *prev,
                       heap *other,
                       heap *root)
@@ -1304,9 +1258,10 @@ heap_init_compacting (heap *new,
         return LERR_NONE;
 }
 
-@ Garbage collection is not automatic. If no atom is free this
-|heap_alloc| function determines whether to try to enlarge the heap
-with a new page or give up immediately with |LERR_OOM|.
+@ Garbage collection is not automatic. One of the functions associated
+with each heap is this function or one like it which reports whether
+to try and allocate a new heap object rather than resorting to
+garbage collection.
 
 @c
 bool
@@ -1316,10 +1271,12 @@ heap_enlarge_p (heap_pun *root @[unused@],
         return true;
 }
 
-@ If none of the allocated heap pages available to the current
-thread has an atom free then the heap can be enlarged by allocating
-a new page and linking it into the heap page list.
+@ If no part of a heap has any atoms free then the heap is enlarged
+by allocating a new page (or two) and linking it into the heap list.
 
+TODO: Split this in two like the rest.
+
+@.TODO@>
 @c
 error_code
 heap_enlarge (heap  *old,
@@ -1328,47 +1285,48 @@ heap_enlarge (heap  *old,
         heap *new, *other;
         heap_pun *root;
         segment *snew, *sother;
-        cell tmp;
+        cell hnew, hother;
         error_code reason;
 
         assert(heap_mine_p(old) || heap_shared_p(old));
         root = heap_root(old);
         if (old->other == NULL) {
-                orreturn(alloc_segment(-HEAP_CHUNK, 1, HEAP_CHUNK, &snew));
+                orreturn(alloc_segment(-HEAP_CHUNK, HEAP_CHUNK, &snew));
                 new = SEGMENT_TO_HEAP(snew);
                 orreturn(root->fun->init(new, old, NULL, (heap *) root));
-                orreturn(root->fun->alloc(new, &tmp));
-                orreturn(segment_init(snew, tmp));
+                orreturn(root->fun->alloc(new, &hnew));
+                pthread_mutex_lock(&Allocations_Lock);
+                orreturn(claim_segment(snew, hnew, FORM_HEAP));
+                pthread_mutex_unlock(&Allocations_Lock);
         } else {
-                orreturn(alloc_segment(-HEAP_CHUNK, 1, HEAP_CHUNK, &snew));
-                orreturn(alloc_segment(-HEAP_CHUNK, 1, HEAP_CHUNK, &sother));
+                orreturn(alloc_segment(-HEAP_CHUNK, HEAP_CHUNK, &snew));
+                orreturn(alloc_segment(-HEAP_CHUNK, HEAP_CHUNK, &sother));
                 new = SEGMENT_TO_HEAP(snew);
                 other = SEGMENT_TO_HEAP(sother);
                 orreturn(root->fun->init(new, old, other, (heap *) root));
 @#
-                orreturn(root->fun->alloc(new, &tmp));
-                orreturn(segment_init(snew, tmp));
-                orreturn(root->fun->alloc(new, &tmp));
-                orreturn(segment_init(sother, tmp));
+                orreturn(root->fun->alloc(new, &hnew));
+                orreturn(root->fun->alloc(new, &hother));
+                pthread_mutex_lock(&Allocations_Lock);
+                reason = claim_segment(snew, hnew, FORM_HEAP);
+                if (!failure_p(reason))
+                        reason = claim_segment(sother, hother, FORM_HEAP);
+                pthread_mutex_unlock(&Allocations_Lock);
+                if (failure_p(reason))
+                        return reason;
         }
         *ret = new;
         return LERR_NONE;
 }
 
-@ Each heap page points (with a \CEE/ pointer) to the next heap
-page in the list, or to to |NULL| at the end. When allocating a new
-atom each page in the list is considered in turn until a free atom
-is found and returned.
-
-If the end of the chain of heap pages is reached without finding a
-free atom then enlargment may be attempted according to that heap's
-\.{enlarge\_p} member (and then an allocation is guaranteed to
-succeed), otherwise give up with |LERR_OOM|.
+@ A sweeping heap points to the next available atom or |NIL|.
+Allocation is a matter of removing it from the list and cleaning
+it up.
 
 @c
 error_code
-heap_alloc (heap *where,
-            cell *ret)
+heap_alloc_freelist (heap *where,
+                     cell *ret)
 {
         bool tried;
         heap *h, *next;
@@ -1377,10 +1335,16 @@ heap_alloc (heap *where,
         assert(heap_mine_p(where) || heap_shared_p(where));
         tried = false;
 again:
-        if (where->other == NULL) {
-                @<Find an atom in a sweeping heap@>
-        } else {
-                @<Find an atom in a compacting heap@>
+        next = where;
+        while (next != NULL) {
+                h = next;
+                if (!null_p(h->free)) {
+                        *ret = (cell) h->free;
+                        h->free = (atom *) (h->free->dex);
+                        ((atom *) *ret)->dex = NIL;
+                        return LERR_NONE;
+                }
+                next = h->next;
         }
         if (tried || !heap_root(where)->fun->enlarge_p(heap_root(where), h))
                 return LERR_OOM;
@@ -1389,183 +1353,37 @@ again:
         goto again;
 }
 
-@ A sweeping heap's free pointer is to the first unallocated atom
-forming a linked list --- the dex cell points to the next atom or
-to |NIL|. To allocate the atom the free pointer is updated to the
-next atom in the list (in the taken atom's dex help) and the atom
-is returned.
+@ Allocation from a compacting heap is done by incrementing a pointer
+if it's not already past the end of the heap. There is no need to
+clean the atom and this algorithm is fractionally faster than using
+the free list.
 
-A small optimisation could possibly be achieved by noting the page
-which contained a free atom prior to returning it.
-
-@<Find an atom in a sweeping heap@>=
-next = where;
-while (next != NULL) {
-        h = next;
-        if (!null_p(h->free)) {
-                *ret = (cell) h->free;
-                h->free = (atom *) (h->free->dex);
-                ((atom *) *ret)->dex = NIL;
-                return LERR_NONE;
-        }
-        next = h->next;
-}
-
-@ A compacting heap's free pointer also points to the next atom but
-rather than forming a linked list the free pointer is incremented
-and the atom it was previously pointing to (which is already prepared)
-is returned.
-
-@<Find an atom in a compacting heap@>=
-next = where;
-while (next != NULL) {
-        h = next;
-        if (ATOM_TO_HEAP(h->free) == where) {
-                *ret = (cell) h->free++;
-                return LERR_NONE;
-        }
-        next = h->next;
-}
-
-@ ``An atom'' isn't any kind of object that \Ls/ knows how to handle
-but every object constructor in the \Ls/ implementation is ultimately
-a wrapper around |new_atom|. Except for |cons| to create a
-{\it pair\/}, which literally is |new_atom|.
-
-@d cons(A,D,R)       (new_atom((A), (D), FORM_PAIR, (R))) /* cAr, cDr, R */
-@d new_atom(S,D,T,R) /* Sinister, Dexter, Tag, R */ (new_atom_imp(Heap_Thread,
-        (cell) (S), (cell) (D), (T), (R)))
 @c
 error_code
-new_atom_imp (heap     *where,
-              cell      nsin,
-              cell      ndex,
-              cell_tag  ntag,
-              cell     *ret)
+heap_alloc_pointer (heap *where,
+                    cell *ret)
 {
+        bool tried;
+        heap *h, *next;
         error_code reason;
 
         assert(heap_mine_p(where) || heap_shared_p(where));
-        assert(ntag != FORM_NONE);
-        orreturn(heap_root(where)->fun->alloc(where, ret));
-        TAG_SET_M(*ret, ntag);
-        ((atom *) *ret)->sin = nsin;
-        ((atom *) *ret)->dex = ndex;
-        return LERR_NONE;
-}
-
-@ The contents and tag of an atom are always reached through these
-accessor functions except by the garbage collector which needs to
-perform deeper magic. When threading support is added these accessors
-will trap attempts to read and write from another thread's heap and
-trigger moving the objects into the shared heap with the necessary
-locks.
-
-@c
-cell_tag
-ltag (cell o)
-{
-        assert(!special_p(o));
-        assert(!heap_other_p(ATOM_TO_HEAP(o)));
-        return TAG(o);
-}
-
-@ The sinister half of the atom as a return value (|lsin|), a regular
-erroring function (|lsinx|) and a pair accessor (|lcar|).
-
-@c
-cell
-lsin (cell o)
-{
-        assert(!special_p(o));
-        assert(!heap_other_p(ATOM_TO_HEAP(o)));
-        return ((atom *) o)->sin;
-}
-
-error_code
-lsinx (cell  o,
-       cell *ret)
-{
-        *ret = lsin(o);
-        return LERR_NONE;
-}
-
-error_code
-lcar (cell  o,
-      cell *ret)
-{
-        if (!pair_p(o))
-                return LERR_INCOMPATIBLE;
-        return lsinx(o, ret);
-}
-
-@ Likewise the dexter half.
-
-@c
-cell
-ldex (cell o)
-{
-        assert(!special_p(o));
-        assert(!heap_other_p(ATOM_TO_HEAP(o)));
-        return ((atom *) o)->dex;
-}
-
-error_code
-ldexx (cell  o,
-       cell *ret)
-{
-        *ret = ldex(o);
-        return LERR_NONE;
-}
-
-error_code
-lcdr (cell  o,
-      cell *ret)
-{
-        if (!pair_p(o))
-                return LERR_INCOMPATIBLE;
-        return ldexx(o, ret);
-}
-
-@ And mutators, for any kind of atom (sin/dex) or pairs (car/cdr).
-
-@c
-error_code
-lsin_set_m (cell o,
-            cell datum)
-{
-        assert(!special_p(o));
-        assert(!ATOM_SIN_DATUM_P(o) || defined_p(datum));
-        ((atom *) o)->sin = datum;
-        return LERR_NONE;
-}
-
-error_code
-lcar_set_m (cell o,
-            cell datum)
-{
-        if (!pair_p(o))
-                return LERR_INCOMPATIBLE;
-        return lsin_set_m(o, datum);
-}
-
-error_code
-ldex_set_m (cell o,
-            cell datum)
-{
-        assert(!special_p(o));
-        assert(!ATOM_DEX_DATUM_P(o) || defined_p(datum));
-        ((atom *) o)->dex = datum;
-        return LERR_NONE;
-}
-
-error_code
-lcdr_set_m (cell o,
-            cell datum)
-{
-        if (!pair_p(o))
-                return LERR_INCOMPATIBLE;
-        return ldex_set_m(o, datum);
+        tried = false;
+again:
+        next = where;
+        while (next != NULL) {
+                h = next;
+                if (ATOM_TO_HEAP(h->free) == where) {
+                        *ret = (cell) h->free++;
+                        return LERR_NONE;
+                }
+                next = h->next;
+        }
+        if (tried || !heap_root(where)->fun->enlarge_p(heap_root(where), h))
+                return LERR_OOM;
+        orreturn(heap_root(where)->fun->enlarge(h, &where));
+        tried = true;
+        goto again;
 }
 
 @* Segments. Every allocation in \Ls/ is a segment or is within a
@@ -1573,71 +1391,44 @@ segment: an arbitrary-size memory allocation. Three objects are
 used internally to define segments:
 
 A {\it pointer\/} is anything with a \CEE/ pointer in its sinister
-half (and an ignored cell in its dexter half).
+half and an ignored cell in its dexter half.
 
-A {\it segment\/} is a pointer which points to an allocation.
+A {\it segment\/} is such a pointer which points to an allocation.
 
-An {\it interned\/} segment is an allocation that's small enough
+An {\it interned segment\/} is an allocation that's small enough
 to fit within the atom that would otherwise be a pointer. This can
 only be achieved for objects which don't need the segment header
 data of which there are two: plain segments and symbols.
 
-The owner of a segment is the pointer atom, allocated on the heap.
-
 Every segment (except interned segments) is included in a global
 list via its \.{next} and \.{prev} pointers.
 
-@d pointer(O)          ((void *) lsin(O))
-@d pointer_set_m(O,D)  (lsin_set_m((O), (cell) (D)))
-@d pointer_erase_m(O)  (pointer_set_m((O), NULL))
+Note that \.{NULL} (|NULL|) and |NIL| are different, although they
+will likely both have the numeric value zero.
+
+@d pointer(O)               (A(O)->yin)
+@d pointer_datum(O)         (A(O)->dex)
+@d pointer_set_m(O,V)       (A(O)->yin = (V))
+@d pointer_set_datum_m(O,V) (A(O)->dex = (V))
+@d null_pointer_p(O)        (pointer(O) == NULL)
 @#
-@d pointer_datum(O)    (ldex(O))
-@d pointer_set_datum_m(O,D)
-                       (ldex_set_m((O), (cell) (D)))
+@d segment_object(O)   ((segment *) pointer(O))
+@d segment_base(O)     (intern_p(O) ? A(O)->buffer : segment_object(O)->base)
+@d segment_length_c(O) (intern_p(O) ? A(O)->length : segment_object(O)->length)
 @#
-@d segbuf_pointer(O)   ((segment *) pointer(O)) /* The true allocation. */
-@d segbuf_base(O)      (segbuf_pointer(O)->base) /* After the segment header. */
-@d segbuf_length(O)    (segbuf_pointer(O)->length)
-@d segbuf_next(O)      (segbuf_pointer(O)->next)
-@d segbuf_owner(O)     (segbuf_pointer(O)->owner) /* |O|, but mutatable. */
-@d segbuf_prev(O)      (segbuf_pointer(O)->prev)
-@d segbuf_stride(O)    (segbuf_pointer(O)->stride ? segbuf_pointer(O)->stride : 1)
-@#
-@d segint_p(O)         (segment_intern_p(O) || symbol_intern_p(O))
-@d segint_base(O)      (segint_pointer(O)->buffer)
-@d segint_pointer(O)   ((atom *) (O))
-@d segint_length(O)    ((half) segint_pointer(O)->length)
-@d segint_set_length_m(O,V)
-                       (segint_pointer(O)->length = (V))
-@d segint_owner(O)     (O)
-@d segint_stride(O)    ((half) 1)
-@#
-@d segment_base(O)     (segint_p(O) ? segint_base(O)    : segbuf_base(O))
-@d segment_pointer(O)  (segint_p(O) ? segint_pointer(O) : segbuf_pointer(O))
-@d segment_length(O)   (segint_p(O) ? segint_length(O)  : segbuf_length(O))
-@d segment_owner(O)    (segint_p(O) ? segint_owner(O)   : segbuf_owner(O))
-@d segment_stride(O)   (segint_p(O) ? segint_stride(O)  : segbuf_stride(O))
-@d segment_can_intern_p(O) (segint_p(O) || segbuf_pointer(O)->stride == 0)
-@#
-@d segment_set_owner_m(O,N) do { /* O, New */
-        assert(!segint_p(O));
-        segbuf_owner(O) = (N);
-} while (0)
+@d SEGMENT_MAX HALF_MAX
 @<Type def...@>=
 struct segment {
- struct segment *next, *prev; /* List of all allocated segments. */
-        cell owner; /* The referencing atom; cleared during
-                        garbage collection if not live. */
-        half length, stride; /* Notably absent: alignment. */
-        byte base[]; /* Address of the usable space. */
+ struct segment *next, *prev;
+        cell owner;
+        half length, scan;
+        byte base[];
 };
 typedef struct segment segment;
 
-@ The list of segment allocations is reached through the global
-variable |Allocations|. The garbage collector sweeps this looking
-for segments which aren't pointed to by a live atom so that they
-can be released. The list's integrity is maintained between threads
-by a mutex to lock other threads out of the list modification code.
+@ Any thread can allocate a segment (or clean them up during garbage
+collection). |Allocations_Lock| is a mutex which ensure that no two
+threads attempt to do so at the same time.
 
 @<Global...@>=
 shared segment *Allocations = NULL;
@@ -1648,303 +1439,168 @@ extern shared segment *Allocations;
 extern shared pthread_mutex_t Allocations_Lock;
 
 @ @<Fun...@>=
-error_code alloc_segment_imp (segment *, long, long, long, segment **);
-error_code new_segment_imp (heap *, long, long, long, cell_tag,
+error_code alloc_segment (half, intptr_t, segment  **);
+error_code claim_segment (segment *, cell, cell_tag);
+error_code new_segment_imp (heap *, half, intptr_t, cell_tag,
         cell_tag, cell *);
-error_code new_segment_copy (char *, long, long, long, cell_tag,
-        cell_tag, cell *);
-error_code segment_init (segment *, cell);
-error_code segment_release_imp (segment *, bool);
-error_code segment_release_m (cell, bool);
-error_code segment_resize_m (cell, long);
+error_code segment_peek (cell, half, int, bool, cell *);
+error_code segment_poke (cell, half, int, bool, cell);
 
-@ Before \Ls/ can do anything else the allocation lock is initialised.
-
-@<Initialise memory...@>=
+@ @<Initialise memory...@>=
 orabort(init_osthread_mutex(&Allocations_Lock, false, false));
 
-@ Segment allocation is a two step process: the allocation itself
-with |mem_alloc| and allocating a pointer atom on a heap. The segment
-imp here obtains and returns the allocation.
+@ The main stage of allocating a segment is to obtain the memory
+from the operating system and fill in the header absent links to
+other segments.
 
-TODO: These arguments should be |size_t|? |intmax_t|?
-
-TODO: |segment_base|, not |segment_pointer|, should be correctly aligned.
-
-@.TODO@>
-@d alloc_segment(L,S,A,R) alloc_segment_imp(NULL, (L), (S), (A), (R))
 @c
 error_code
-alloc_segment_imp (segment  *old,
-                   long      length,
-                   long      stride,@|
-                   long      align,
-                   segment **ret)
+alloc_segment (half       length,
+               intptr_t   align,
+               segment  **ret)
 {
-        long clength, cstride;
+        word rlength;
         segment *new;
-        size_t size;
         error_code reason;
 
-        if (stride < 0)
-                return LERR_INCOMPATIBLE;
-        @<Calculate the full size of a segment allocation@>@;
-        @<Allocate and initialise a segment@>@;
-        if (pthread_mutex_lock(&Allocations_Lock) != 0) {
-                mem_free(new); /* Let it fail, we're screwed already. */
-                return LERR_INTERNAL;
-        }
-        @<Insert a new segment into |Allocations|@>@;
+        assert(length == -HEAP_CHUNK || (length >= 0 && length <= SEGMENT_MAX));
+        if (length < 0)
+                rlength = HEAP_CHUNK;
+        else
+                rlength = length + sizeof (segment);
+        orreturn(alloc_mem(NULL, rlength, align, (void **) &new));
+        if (length < 0)
+                new->length = HEAP_LENGTH;
+        else
+                new->length = length;
         *ret = new;
-        pthread_mutex_unlock(&Allocations_Lock);
         return LERR_NONE;
 }
 
-@ To indicate that the segment should not add it own header |length|
-is passed as a negative value and the total allocation exactly
-$\vert length\vert \times stride$ bytes, otherwise the user and
-segment headers are added to |length| to find the total size.
+@ Saving the allocation in the global list is done here after the
+caller has locked the |Allocations_Lock| mutex. The atom and its
+tag are updated here after the list has been updated but while the
+lock is still held to ensure that nothing tries to follow pointers
+that aren't there yet.
 
-If |stride| is 0 then it really means 1 but the segment can be
-interned if it's small enough.
-
-@<Calculate the full size of a segment allocation@>=
-cstride = stride ? stride : 1;
-clength = (length >= 0) ? length : -length;
-if (ckd_mul(&size, clength, cstride))
-        return LERR_OOM;
-if (length >= 0 && ckd_add(&size, size, sizeof (segment)))
-        return LERR_OOM;
-if (size > HALF_MAX)
-        return LERR_LIMIT;
-
-@ @<Allocate and initialise a segment@>=
-orreturn(mem_alloc(old, size, align, (void **) &new));
-new->length = length;
-new->stride = stride;
-if (old == NULL)
-        new->owner = NIL; /* This is a new allocation. */
-
-@ The |Allocations| list is already locked by |alloc_segment_imp|.
-The first allocation sets the global list to itself, otherwise the
-new segment is inserted into the list. It was once imagined that
-this might happen occasionaly but the test is just a waste (TODO).
-
-@.TODO@>
-@<Insert a new segment into |Allocations|@>=
-if (Allocations == NULL)
-        Allocations = new->next = new->prev = new;
-else {
-        new->next = Allocations;
-        new->prev = Allocations->prev;
-        Allocations->prev->next = new;
-        Allocations->prev = new;
+@c
+error_code
+claim_segment (segment *area,
+               cell     owner,
+               cell_tag ntag)
+{
+        assert(Allocations != NULL);
+        area->next = Allocations;
+        area->prev = Allocations->prev;
+        Allocations->prev->next = area;
+        Allocations->prev = area;
+        area->owner = owner;
+        A(owner)->yin = area;
+        A(owner)->dex = NIL;
+        TAG_SET_M(owner, ntag); /* Do this last so the atom remains opaque
+                                        until ready. */
+        return LERR_NONE;
 }
 
-@ An allocation can be interned if the caller says it can be and
-the space needed without the usual segment header fits entirely
-within the atom's space on the heap. In this case the only piece
-of header data necessary is the length of the allocation, the rest
-can be inferred.
+@ To create the new segment first the length and proposed tag are
+checked to see if a full allocation is needed. If so the allocations
+are all performed and claiming the lock is left until the last
+possible moment.
 
-The caller indicates the segment could be interned with a |stride|
-and |align| value of zero and a valid |itag|. The only object to
-which this applies apart from a segment is symbols.
-
-@d new_segment(L,S,A,R) new_segment_imp(Heap_Thread, (L), (S), (A),@|
-        FORM_SEGMENT, FORM_SEGMENT_INTERN, (R))
+@d new_segment(L,A,R) /* Length, Align, R */ new_segment_imp(Heap_Thread,
+        (L), (A), FORM_SEGMENT, FORM_SEGMENT_INTERN, (R))
 @c
 error_code
 new_segment_imp (heap     *where,
-                 long      length,
-                 long      stride,
-                 long      align,
-                 cell_tag  ntag,@|
+                 half      length,
+                 intptr_t  align,
+                 cell_tag  ntag,
                  cell_tag  itag,
                  cell     *ret)
 {
-        segment *s;
+        cell holder;
+        segment *area;
         error_code reason;
 
-        if (stride == 0 && align == 0 && length >= 0 && length <= INTERN_BYTES) {
-                @<``Allocate'' an interned segment and |return|@>
+        if (itag != FORM_NONE) {
+                if (length > INTERN_MAX)
+                        goto new_allocation;
+                orreturn(new_atom_imp(where, NIL, NIL, itag, ret));
+                A(*ret)->length = length;
         } else {
-                @<Allocate a full-size segment@>
+new_allocation:
+                orreturn(new_atom_imp(where, NIL, NIL, FORM_NONE, &holder));
+                orreturn(alloc_segment(length, align, &area));
+                pthread_mutex_lock(&Allocations_Lock);
+                reason = claim_segment(area, holder, ntag);
+                pthread_mutex_unlock(&Allocations_Lock);
+                if (failure_p(reason))
+                        return reason;
+                *ret = holder;
         }
-}
-
-@ If the segment can be interned then a new atom can be returned directly.
-
-@<``Allocate'' an intern...@>=
-assert(itag != FORM_NONE);
-orreturn(new_atom_imp(where, NIL, NIL, itag, ret));
-segint_set_length_m(*ret, length);
-return LERR_NONE;
-
-@ A segment with a backing allocation first (cheaply) allocates the
-atom then completes its tag only if the main (expensive) allocation
-succeeds.
-
-@<Allocate a full-size segment@>=
-orreturn(new_atom_imp(where, NIL, NIL, FORM_PAIR, ret));
-orreturn(alloc_segment(length, stride, align, &s));
-TAG_SET_M(*ret, ntag);
-ATOM_TO_ATOM(*ret)->sin = (cell) s;
-s->owner = *ret;
-return LERR_NONE;
-
-@ This routine allocates a segment the same size as an existing
-one and copies its contents into it.
-
-@c
-error_code
-new_segment_copy (char     *buf,
-                  long      length,
-                  long      stride,
-                  long      align,@|
-                  cell_tag  ntag,
-                  cell_tag  itag,
-                  cell     *ret)
-{
-        error_code reason;
-
-        orreturn(new_segment_imp(Heap_Thread, length, stride, align, ntag,
-                itag, ret));
-        if (stride == 0)
-                stride = 1;
-        memmove(segment_base(*ret), buf, length * stride);
         return LERR_NONE;
 }
 
-@ Heap pages need to initialise an atom to point to an area of
-memory that has been allocated already as a segment.
-
-@c
-error_code
-segment_init (segment *seg,
-              cell     container)
-{
-        seg->owner = container;
-        TAG_SET_M(container, FORM_HEAP);
-        pointer_set_m(container, seg);
-        pointer_set_datum_m(container, NIL);
-        return LERR_NONE;
-}
-
-@ Segments do not need to be freed manually but they do need to be
-freed. The algorithm is in two parts to separete the time holding
-on to |Allocations_Lock| from the time spent handling the atom.
-
-@c
-error_code
-segment_release (cell o,
-                 bool reclaim)
-{
-        error_code reason;
-
-        if (!pointer_p(o))
-                return LERR_INCOMPATIBLE;
-        reason = segment_release_imp(pointer(o), reclaim);
-        pointer_erase_m(o); /* For safety. */
-        return reason;
-}
-
-error_code
-segment_release_imp (segment *o,
-                     bool     reclaim)
-{
-        if (pthread_mutex_lock(&Allocations_Lock) != 0)
-                return LERR_INTERNAL;
-        if (o == Allocations)
-                Allocations = o->next;
-        if (o->next == o)
-                Allocations = NULL;
-        else
-                o->prev->next = o->next,
-                o->next->prev = o->prev;
-        o->next = o->prev = o; /* For safety. */
-        if (pthread_mutex_unlock(&Allocations_Lock) != 0)
-                return LERR_INTERNAL;
-        if (reclaim)
-                return mem_free(o);
-        else
-                return LERR_NONE;
-}
-
-@ Segments can be resized although few of the objects based on
-segments support resizing in-place. This function does so while
-taking care of switching to and from and interned segment where
-feasible.
-
-The \.{\_m} suffix indicates that the function changes (mutates)
-the object passed in to it, however in this case as usual changes
-are left until the last possible moment in case an error is
-encountered.
+@ A segment can be resized ``in-place'' however this may mean
+converting to or from an interned segment if the allocation size
+crosses the |INTERN_MAX| boundary.
 
 @c
 error_code
 segment_resize_m (cell o,
-                  long nlength)
+                  half nlength)
 {
-        long i, olength;
-        segment *new, *old;
+        half i, olength;
+        word rlength;
+        byte *new, *old;
+        segment *embiggen;
         error_code reason;
 
-        if (!(segment_p(o) || larry_p(o)))
-                return LERR_INCOMPATIBLE;
-        if (nlength < 0)
-                return LERR_INCOMPATIBLE;
-        if (nlength == segment_length(o))
+        assert((segment_p(o) || arraylike_p(o)));
+        olength = segment_length_c(o);
+        if (nlength == olength)
                 return LERR_NONE; /* Not an error. */
-
-        if (segment_can_intern_p(o) && nlength <= INTERN_BYTES) {
-                if (segint_p(o)) {
-                        @<Resize an interned segment@>
-                } else {
+        if (!segment_p(o) || (nlength | olength) > INTERN_MAX) {
+                @<Resize an allocated segment@>
+        } else if (nlength <= INTERN_MAX) {
+                if (olength <= INTERN_MAX)
+                        A(o)->length = nlength;
+                else {
                         @<Intern a previously allocated segment@>
                 }
-        } else if (segint_p(o)) {
-                @<Allocate a segment for a previously interned segment@>
         } else {
-                @<Resize an allocated segment@>
+                @<Allocate a segment for a previously interned segment@>
         }
         return LERR_NONE;
 }
 
-@ An interned segment which remains interned has its length changed.
-
-@<Resize an interned segment@>=
-segint_set_length_m(o, nlength);
-
-@ If a segment is being reduced small enough and can be interned
-the tag of the atom is changed and the allocation is left without
-an owner (to be cleaned up by the garbage collector). The contents
-are copied as far as they will fit.
-
-Symbols are immutable and can't be resized so this only actually
-applies to plain segments.
+@ If a plain segment is being reduced enough the tag of the atom
+is changed and the allocation is left without an owner to be cleaned
+up by the garbage collector. The contents are copied as far as they
+will fit.
 
 @<Intern a previously allocated segment@>=
 TAG_SET_M(o, FORM_SEGMENT_INTERN); /* Do this first to turn the atom opaque. */
-old = segbuf_pointer(o);
-segint_set_length_m(o, nlength);
+old = segment_object(o)->base;
+new = A(o)->buffer;
 for (i = 0; i < nlength; i++)
-        segint_base(o)[i] = old->base[i];
-orreturn(segment_release_imp(old, true));
+        new[i] = old[i];
+A(o)->length = nlength;
 
-@ After allocating for a segment that has outgrown its internment
-the amount of space they shared is copied to the new address and
-the atom is modified to point to it.
+@ When a segment has outgrown its internment a new allocation is
+made and the amount of space they shared is copied into it before
+modifying the the atom's tag and contents to point to it.
 
 @<Allocate a segment for a previously interned segment@>=
-olength = segment_length(o);
-orreturn(alloc_segment(nlength, 0, 0, &new));
+olength = segment_length_c(o);
+old = segment_base(o);
+orreturn(alloc_segment(nlength, 0, &embiggen));
+new = embiggen->base;
 for (i = 0; i < olength; i++)
-        new->base[i] = segint_base(o)[i];
-pointer_set_m(o, new);
-pointer_set_datum_m(o, NIL);
-TAG_SET_M(o, FORM_SEGMENT); /* Do this last so the atom remains opaque
-                                until ready. */
+        new[i] = old[i];
+pthread_mutex_lock(&Allocations_Lock);
+orreturn(claim_segment(embiggen, o, FORM_SEGMENT));
+pthread_mutex_unlock(&Allocations_Lock);
 
 @ Resizing a segment which was not and will not be interned is
 performed by the backend memory allocator as far as the allocation
@@ -1953,410 +1609,535 @@ and its contents are concerned. The atom is changed to point to the
 is taken care of by the allocator --- except that the address may
 have changed.
 
-TODO: Check that this (ie.~|alloc_segment|) handles next/prev correctly.
+TODO: Check whether the lock should be held (or the allocation
+removed from the list while locked) for the duration of |alloc_mem|.
 
 @.TODO@>
 @<Resize an allocated segment@>=
-old = segbuf_pointer(o);
-orreturn(alloc_segment_imp(old, nlength, segment_stride(o), 0, &new));
-pointer_set_m(o, new); /* May have changed but it's still the ``same''
-                                allocation. */
-
-@* Integers. The {\it word\/} object is a bad idea that exists only
-for the use of the rudimentary I/O stub. In effect it's an
-always-interned segment (with one extra byte where the length would
-normally be). Its use will be replaced with a segment as soon as
-the current bout of editing is done with so no more will be said
-about it (TODO).
-
-There are three integer flavours in \Ls/: small numbers or {\it
-fixed integers\/} which fit within a cell and don't consume any
-heap storage, and {\it large integers\/} --- positive and negative
-separately --- which don't fit in a cell and do require storage.
-
-Fixed integers are identified by a cell value with the lowest four
-bits set (|0xf|) to indicate that the value is a constant and not
-a pointer to an atom. The {\it signed\/} numeric value stored in a
-fixed integer is shifted above these, thus fixed integers fit within
-60, 28 or 12 bits depending on the architecture.
-
-Large integers are stored as a linked list of pointer-sized ``digits''
-beginning with the largest-magnitude digit (ie.~the list is
-big-endian); the first such digit is either |FORM_NEGATIVE| or
-|FORM_POSITIVE|.
-
-No effort has been expended researching how to store or use large
-integers efficiently, on the other hand nothing in \Ls/' core {\it
-uses\/} them except where ``any'' integer is expected and that to
-perform some maths which should eventually fit in a \CEE/ variable,
-thus everything in the previous two paragraphs is subject to change.
-However it seems likely that fixed integers, and the API described
-below, are stable.
-
-@.TODO@>
-@d word(O)         ((char *) (O))
-@d word_high(O)    ((digit) lsin(O))
-@d word_low(O)     ((digit) ldex(O))
-@d word_value(O)   (word_low(O))
-@#
-@d fix(V)         (FIXED | asl((V), FIXED_SHIFT))
-@d fixed_value(V) (asr((V), FIXED_SHIFT))
-@d int_digit(O)   (((atom *) (O))->value)
-@d int_next(O)    (((atom *) (O))->tail)
-@d int_more_p(O)  (!null_p(int_next(O)))
-@<Fun...@>=
-intmax_t asl (intmax_t, int);
-intmax_t asr (intmax_t, int);
-error_code new_fixed (intmax_t, cell *);
-error_code new_digit (digit, cell, cell *);
-error_code new_int_c (intmax_t, bool, cell *);
-error_code new_word (digit, digit, cell *);
-error_code int_abs (cell, cell *);
-error_code int_add (cell, cell, cell *);
-error_code int_cmp (cell, cell, cell *);
-error_code int_div (cell, cell, cell *);
-error_code int_mul (cell, cell, cell *);
-error_code int_sub (cell, cell, cell *);
-error_code int_value (cell, intmax_t *);
-error_code uint_value (cell, uintmax_t *);
-bool cmpis_p (cell, cell);
-
-@ These two utility functions exist because \CEE/ is a pain in the neck.
-
-@c
-intmax_t
-asl (intmax_t value,
-     int      shift)
-{
-        return value << shift;
+rlength = nlength + sizeof (segment);
+old = (byte *) pointer(o);
+if (pthread_mutex_lock(&Allocations_Lock) != 0)
+        return LERR_INTERNAL;
+orreturn(alloc_mem(pointer(o), rlength, 0, (void **) &embiggen));
+if (embiggen != (segment *) old) {
+        embiggen->next->prev = embiggen;
+        embiggen->prev->next = embiggen;
 }
+pointer_set_m(o, embiggen);
+pthread_mutex_unlock(&Allocations_Lock);
+embiggen->length = nlength;
 
-intmax_t
-asr (intmax_t value,
-     int      shift)
-{
-        return value >= 0 ? value >> shift : ~(~value >> shift);
-}
+@ Data within a segment is read in words of 1, 2, 4 or 8 bytes. The
+address to read from need not be aligned to a multiple of the size
+of word being read, which may cause a bus fault on some architectures.
 
-@ @c
-error_code
-new_word (digit  high,
-          digit  low,
-          cell  *ret)
-{
-        return new_atom((cell) high, (cell) low, FORM_WORD, ret);
-}
-
-@ A fixed integer is a cell who's value is |FIXED| (15 or binary
-1111) with the value shifted above this. Obviously this means the
-upper four bits are unavailable so |value| must be between |FIXED_MIN|
-and |FIXED_MAX|, defined in the |@<Essential...@>| section.
+The word is interpreted as unsigned.
 
 @c
 error_code
-new_fixed (intmax_t  value,
-           cell     *ret)
+segment_peek (cell  o,
+              half  index, /* Always byte address? */
+              int   width, /* 1, 2, 4, 8 */
+              bool  lilliput,
+              cell *ret)
 {
-        if (value < FIXED_MIN || value > FIXED_MAX)
-                return LERR_LIMIT;
-        *ret = fix(value);
-        return LERR_NONE;
-}
-
-@ Large integers' storage is allocated one pointer-sized digit at
-a time. The sinister cell holds the digit's value and the dexter
-cell links to the next or |NIL|.
-
-@c
-error_code
-new_digit (digit  value,
-           cell   tail,
-           cell  *ret)
-{
-        return new_atom(value, tail, FORM_POSITIVE, ret);
-}
-
-@ This naive algorithm parses a base-10 integer encoded in an ASCII
-buffer who's contents have already been validated.
-
-Allocating a new integer is the only time that an integer's backing
-store is treated as mutable, when the sign is set at the end. See
-also |new_int_c| in the next section.
-
-@c
-error_code
-new_int_buffer (bool      minus,
-                char     *base,
-                intmax_t  length,
-                cell     *ret)
-{
-        cell work;
-        int i;
+        byte *s;
+        uintmax_t v;
         error_code reason;
 
-        work = fix(0);
-        for (i = 0; i < length; i++) {
-                orreturn(int_mul(work, fix(10), &work));
-                orreturn(int_add(work, fix(base[i] - '0'), &work));
-        }
-        if (minus)
-                TAG_SET_M(work, FORM_NEGATIVE);
-        *ret = work;
+        assert(!heap_other_p(ATOM_TO_HEAP(o)));
+        assert(segment_p(o));
+        assert(index >= 0 && index < segment_length_c(o));
+        assert(width == 1 || width == 2 || width == 4 || width == 8);
+        s = segment_base(o);
+        if (lilliput)
+                switch (width) {
+                case 1: v = ((uint8_t *) s)[index];@+ break;
+                case 2: v = le16toh(*((uint16_t *) (s + index)));@+ break;
+                case 4: v = le32toh(*((uint32_t *) (s + index)));@+ break;
+                case 8: v = le64toh(*((uint64_t *) (s + index)));@+ break;
+                }
+        else
+                switch (width) {
+                case 1: v = ((uint8_t *) s)[index];@+ break;
+                case 2: v = be16toh(*((uint16_t *) (s + index)));@+ break;
+                case 4: v = be32toh(*((uint32_t *) (s + index)));@+ break;
+                case 8: v = be64toh(*((uint64_t *) (s + index)));@+ break;
+                }
+        if (v > WORD_MAX) {
+                orreturn(new_int(2, false, ret));
+                int_buffer_c(*ret)[1] = *(word *) &v;
+                return LERR_NONE;
+        } else
+                return new_int_c(v, ret);
+}
+
+@ Writing to a segment is the same but backwards.
+
+@c
+error_code
+segment_poke_m (cell  o,
+                half  index, /* Always byte address? */
+                int   width, /* 1, 2, 4, 8 */
+                bool  lilliput,
+                cell  lvalue)
+{
+        byte *s;
+        uintmax_t cvalue;
+
+        assert(!heap_other_p(ATOM_TO_HEAP(o)));
+        assert(segment_p(o));
+        assert(index >= 0 && index < segment_length_c(o));
+        assert(width == 1 || width == 2 || width == 4 || width == 8);
+        assert(integer_p(lvalue));
+        assert(false);
+        cvalue = A(lvalue)->value & ((2 ^ (8 * width)) - 1);
+        s = segment_base(o);
+        if (lilliput)
+                switch (width) {
+                case 1: ((uint8_t *) s)[index] = cvalue;@+ break;
+                case 2: *((uint16_t *) (s + index)) = htole16(cvalue);@+ break;
+                case 4: *((uint32_t *) (s + index)) = htole32(cvalue);@+ break;
+                case 8: *((uint64_t *) (s + index)) = htole64(cvalue);@+ break;
+                }
+        else
+                switch (width) {
+                case 1: ((uint8_t *) s)[index] = cvalue;@+ break;
+                case 2: *((uint16_t *) (s + index)) = htobe16(cvalue);@+ break;
+                case 4: *((uint32_t *) (s + index)) = htobe32(cvalue);@+ break;
+                case 8: *((uint64_t *) (s + index)) = htobe64(cvalue);@+ break;
+                }
         return LERR_NONE;
 }
 
-@ Large integers are not used by the \Ls/ core but share an API
-with the fixed integers that are. Nearly all\footnote{$^1$}{Numbers
-known to fit can call |fix| directly.} integer allocation is done
-by |new_int_c| which returns a fixed, negative or positive integer
-representing |value|. The argument |fixable| is a relic from when
-\Ls/ had large integer maths routines in the core and can probably
-be removed.
+@** Objects.
+
+@* Integers. Few mathematical routines are required in the core of
+\Ls/, chiefly the ability to add and subtract small numbers, however
+thought must be given to how memory will be organised for large
+integers so that they're compatible with the subset implemented in
+here.
+
+To this end there are two integer formats used internally by \Ls/:
+{\it fixed width\/} integers which do not use any allocated storage
+and {\it variable width\/} integers which do.
+
+Fixed width integers are described briefly above in the introduction
+to atoms --- 4 bits of an address are reserved to indicate that a
+value is really a fixed width integer and the remaining bits (12,
+28 or 60) encode a signed integer value. Two macros |fix| and
+|fixed_value| store and access the value of a fixed width integer.
+
+Variable width integers are stored in multiples of {\it words\/},
+which are signed integers the same size as a cell. If a single word
+is enough then the space within the atom is used without the need
+for a segment allocation.
+
+This chapter also includes an assortment of numerical routines not
+directly related to integer objects.
+
+@d INT_LENGTH_MAX    (HALF_MAX / sizeof (cell))
+@d int_vcast(O)      ((word *) &A(O)->value)
+@d int_scast(O)      ((word *) segment_base(O))
+@d int_buffer_c(O)   (null_pointer_p(O) ? int_vcast(O) : int_scast(O))
+@d int_length_c(O)   (null_pointer_p(O) ? 1
+        : segment_length_c(O) / sizeof (word))
+@d int_negative_p(O) ((integer_heap_p(O) ? int_buffer_c(O)[0]
+        : fixed_value(O)) < 0)
+@#
+@d fix(V)          (FIXED | ASL((V), FIXED_SHIFT))
+@d fixed_value(V)  (ASR((V), FIXED_SHIFT))
+@<Fun...@>=
+error_code new_int_c (intmax_t, cell *);
+error_code new_int (intmax_t, bool, cell *);
+bool cmpis_p (cell, cell);
+bool int_eq_p (cell, cell);
+bool int_eq_p_imp (cell, cell);
+error_code int_length (cell, cell *);
+error_code int_to_symbol (cell, cell *);
+error_code int_value (cell, word *);
+error_code int_cmp (cell, cell, cell *);
+error_code int_normalise (cell, cell *);
+error_code int_add (cell, cell, cell *);
+error_code int_sub (cell, cell, cell *);
+error_code int_mul (cell, cell, cell *);
+@#
+int high_bit (uintmax_t);
+
+@ To ensure that the sign bits are maintained when shifting numbers
+left and right the macros |ASL| and |ASR| ensure that an arithmetic
+(sign-preserving) shift is used regardless of the architecture.
+
+@<Hacks...@>=
+#define ASL(V,I) ((V) << (I))
+#if ((-1) >> 1) == -1
+#define ASR(V,I) ((V) >> (I))
+#else
+#define ASR(V,I) ((V) >= 0) ? ((V) = (V) >> (I)) : ((V) = ~((~(V)) >> (I)))
+#endif
+
+@ Returns a value representing the highest bit set in a number.
+
+@c
+int
+high_bit (uintmax_t o)
+{
+        int i = CELL_BITS;
+
+        while (--i)@+
+                if (o & (1ull << i))
+                        return i;
+        assert(o == 0 || o == 1);
+        return o - 1;
+}
+
+@ If a \CEE/ integer is small enough to fit within the space of a
+fixed integer then |new_int_c| returns one without allocation,
+otherwise the integer is being created from a
+word\footnote{$^1$}{Technically |intmax_t| might not be the same
+as |intptr_t|; this should be looked into.} so of course it will
+fit within the single word available to an atom.
 
 @c
 error_code
 new_int_c (intmax_t  value,
-           bool      fixable,
            cell     *ret)
 {
-        bool minus;
-        cell tail, new;
-        digit next;
-        error_code reason;
-        uintmax_t work;
-
-        if (fixable && value >= FIXED_MIN && value <= FIXED_MAX)
-                return new_fixed(value, ret);
-        assert(value);
-        if ((minus = (value < 0)))
-                work = -value;
-        else
-                work = value;
-        tail = NIL;
-        while (work) {
-                next = work % DIGIT_MAX;
-                orreturn(new_digit(next, tail, &new));
-                work /= DIGIT_MAX;
-                tail = new;
+        if (value >= FIXED_MIN && value <= FIXED_MAX) {
+                *ret = fix(value);
+                return LERR_NONE;
         }
-        if (minus)
-                TAG_SET_M(new, FORM_NEGATIVE);
-        *ret = new;
-        return LERR_NONE;
+        return new_atom((cell) NULL, (cell) value, FORM_INTEGER, ret);
 }
 
-@ The converse of |new_int_c| is |int_value| (or |uint_value| if
-the caller expects an unsigned integer) which extracts the value
-from any integer into a \CEE/ variable, if it fits.
+@ Integers larger than a single word are created by initialising
+the storage with |new_int| and setting it to an initial value of 0
+or -1 (all bits set).
 
 @c
 error_code
-int_value (cell      value,
-           intmax_t *ret)
+new_int (intmax_t  length,
+         bool      negative,
+         cell     *ret)
 {
-        if (fixed_p(value)) {
-                *ret = fixed_value(value);
-                return LERR_NONE;
-        } else if (positive_p(value)) {
-                if (!int_more_p(value) && int_digit(value) <= INTMAX_MAX) {
-                        *ret = int_digit(value);
-                        return LERR_NONE;
-                } else
-                        return LERR_LIMIT;
-        } else if (negative_p(value)) {
-                if (!int_more_p(value) && int_digit(value) <= (digit) -INTMAX_MIN) {
-                        *ret = -int_digit(value);
-                        return LERR_NONE;
-                } else
-                        return LERR_LIMIT;
-        } else
-                return LERR_INCOMPATIBLE;
+        error_code reason;
+        assert(length > 1 && length < (intmax_t) INT_LENGTH_MAX);
+        orreturn(new_segment_imp(Heap_Thread, length * sizeof (cell),
+                sizeof (word), FORM_INTEGER, FORM_NONE, ret));
+        memset(segment_base(*ret), -negative, length);
+        return LERR_NONE;
 }
 
+@ The converse of |new_int_c| is |int_value| which extracts the
+value from any integer into a \CEE/ variable, if it fits. The macro
+|or_int_value_bounds| is used when the integer is about to be used
+to check that a value is within the boundaries of, eg.,~an array
+and the error |LERR_OUT_OF_BOUNDS| is more appropriate than the
+usual |LERR_LIMIT|.
+
+@d or_int_value_bounds(O,R) if ((reason = int_value((O), (R))) == LERR_LIMIT)
+        return LERR_OUT_OF_BOUNDS;
+else if (failure_p(reason))
+        return reason /* nb.~no semicolon. */
+@c
 error_code
-uint_value (cell       value,
-            uintmax_t *ret)
+int_value (cell  o,
+           word *ret)
 {
-        assert(UINTMAX_MAX == DIGIT_MAX);
-        if ((fixed_p(value) && fixed_value(value) < 0) || negative_p(value))
-                        return LERR_LIMIT;
-        else if (fixed_p(value)) {
-                *ret = fixed_value(value);
-                return LERR_NONE;
-        } else if (!positive_p(value))
-                return LERR_INCOMPATIBLE;
-        else if (int_more_p(value))
+        assert(integer_p(o));
+        if (fixed_p(o))
+                *ret = fixed_value(o);
+        else if (null_pointer_p(o))
+                *ret = A(o)->value;
+        else
                 return LERR_LIMIT;
-        else {
-                *ret = int_digit(value);
+        return LERR_NONE;
+}
+
+@ The length of an integer is the number of words of storage it
+uses.
+
+@c
+error_code
+int_length (cell  o,
+            cell *ret)
+{
+        assert(integer_p(o));
+        if (fixed_p(o))
+                *ret = 0;
+        else if (null_pointer_p(o))
+                *ret = 1;
+        else
+                return new_int_c(int_length_c(o), ret);
+        return LERR_NONE;
+}
+
+@ Normalising an integer removes excess leading zero/sign words.
+This is optional but can save  space.
+
+@c
+error_code
+int_normalise (cell  o,
+               cell *ret)
+{
+        half length;
+        word *pint;
+        error_code reason;
+
+        assert(integer_p(o));
+        if (fixed_p(o)) {
+                *ret = o;
                 return LERR_NONE;
+        }
+        length = int_length_c(o);
+        pint = int_buffer_c(o);
+        if (int_negative_p(o))
+                while (length > 1 && *pint == -1)
+                        length--, pint++;
+        else
+                while (length > 1 && !*pint)
+                        length--, pint++;
+        if (length > 1) {
+                orreturn(new_segment_imp(Heap_Thread, length * sizeof (cell),
+                        sizeof (word), FORM_INTEGER, FORM_NONE, ret));
+                memmove(int_buffer_c(*ret), pint, length);
+                return LERR_NONE;
+        } else
+                return new_int_c(*pint, ret);
+}
+
+@ Like symbols numbers are uniquely themselves but unlike symbols
+they're not symbols. When an integer needs to be used in a place
+where a symbol is expected (eg.~as the key to a hashtable entry)
+this function constructs a symbol from the integer's value. The
+binary representation of the number becomes the label of the symbol
+so in most cases the symbol will be unprintable.
+
+Leading zero/sign words are skipped, so unnormalised and normalised
+integers convert to the same symbol.
+
+@c
+error_code
+int_to_symbol (cell  o,
+               cell *ret)
+{
+        bool negative;
+        word *ib, *last, value;
+
+        assert(integer_p(o));
+        if (fixed_p(o)) {
+                value = fixed_value(o);@t\4@>
+small_integer:@;
+                return new_symbol_buffer((byte *) &value, sizeof (word),
+                        NULL, ret);
+        } else if (null_pointer_p(o)) {
+                value = A(o)->value;
+                goto small_integer;
+        } else {
+                ib = int_buffer_c(o);
+                last = ib + int_length_c(o);
+                negative = *ib < 0;
+                value = 0;
+                for (; *ib == -negative; ib++) {
+                        if (ib == last)
+                                goto small_integer;
+                        else if (*ib != -negative)
+                                break;
+                }
+                return new_symbol_buffer((byte *) ib,
+                        (last - ib) * sizeof (word), NULL, ret);
         }
 }
 
-@ This identity comparator function, known as \.{eq?} in Scheme,
-is here because integers are treated specially in \Ls/. For everything
-but an integer an object is the same as another only if their cell
-value is the same (ie.~they are a pointer to the same backing store).
-Integers on the other hand are compared for {\it numerical\/}
-identity.
-
-Runes (unicode code points) also get special treatment otherwise
-the underlying architecture \Ls/ is running on could determine
-whether two code points are the same (Unicode code points require
-21 bits, plus error flags, which only fit in an unallocated cell
-on 32 and 64 bit systems)
+@ The \Ls/ core needs integer support for some simple arithmetic
+(below) and these comparison routines. This first comparison routine
+implements \.{is?}, which is similar in spirit but not in scope to
+\.{eq?} in Scheme, the difference chiefly being that integers are
+compared {\it numerically\/} while all other objects' {\it identities\/}
+are compared.
 
 @c
 bool
 cmpis_p (cell yin,
          cell yang)
 {
-        cell answer;
-
-        if (yin == yang)
-                return true;
-        else if (rune_p(yin) && rune_p(yang))
-                return rune_codepoint(yin) == rune_codepoint(yang);
-        else if (failure_p(int_cmp(yin, yang, &answer)))
-                return false;
-        return fixed_value(answer) == 0;
+        if (integer_heap_p(yin) && integer_heap_p(yang))
+                return int_eq_p_imp(yin, yang);
+        else
+                return yin == yang;
 }
 
-@ Analogous to |memcmp|, compare integers against each other and
-return whether the difference from the first to the second is
-positive (1), negative (-1) or they're identical (0).
+@ On the other hand \Ls/' equality routine is {\it only\/} applicable
+to integers.
 
-That's the idea anyway. A casual glance suggests that the edge cases
-may be handled incorrectly. It's also apparent from the messy source
-code in \.{lossless.w} ({\it three\/} over-long lines! With sloppy
-punctuation!) that this function hasn't been thoroughly vetted yet,
-so mark it up TODO.
+@c
+bool
+int_eq_p (cell yin,
+          cell yang)
+{
+        assert(integer_p(yin));
+        assert(integer_p(yang));
+        if (fixed_p(yin) && fixed_p(yang))
+                return yin == yang;
+        else if (integer_heap_p(yin) && integer_heap_p(yang))
+                return int_eq_p_imp(yin, yang);
+        else
+                return false;
+}
 
-@.TODO@>
+@ Integers are compared for equality word-by-word starting with the
+least significant. To account for potentially unnormalised integers
+of different lengths the excess words of the longer integer are
+compared to 0, or -1 if the integers are negative.
+
+@c
+bool
+int_eq_p_imp (cell yin,
+              cell yang)
+{
+        bool negative;
+        word *pg, *pn;
+        half lg, ln;
+
+        assert(integer_heap_p(yin));
+        assert(integer_heap_p(yang));
+        if ((ln = int_length_c(yin)) == 1)
+                pn = &(A(yin)->value);
+        else
+                pn = ((word *) segment_base(yin)) + ln - 1;
+        if ((lg = int_length_c(yang)) == 1)
+                pg = &(A(yang)->value);
+        else
+                pg = ((word *) segment_base(yang)) + lg - 1;
+@#
+        while (1) {
+                negative = *pg < 0;
+                if (*pn-- != *pg--)
+                        return false;
+                ln--;
+                lg--;
+                if (ln == 0)
+                        goto finish_yin;
+                negative = *(pn + 1) < 0;
+                if (lg == 0)
+                        goto finish_yang;
+        }
+@#
+finish_yang:
+        lg = ln;@+
+        pg = pn;
+finish_yin:
+        if (negative) {
+                for (; lg > 0; lg--)
+                        if (*pg-- != -1)
+                                return false;
+        } else {
+                for (; lg > 0; lg--)
+                        if (*pg--)
+                                return false;
+        }
+        return true;
+}
+
+@ This routine returns -1, 0 or 1 respectively if |yin| is less
+than, equal to or greater than |yang|.
+
+@d int_cmp_hack(N) (((N) * 2) + 1) /* -1 becomes -1, 0 becomes 1 */
 @c
 error_code
 int_cmp (cell  yin,
          cell  yang,
          cell *ret)
 {
-        bool minus;
-        intmax_t vyin, vyang;
-        int maybe;
+        half lyin, lyang;
+        word negative, *pyin, *pyang, vyin, vyang;
 
-        if (!integer_p(yin) || !integer_p(yang))
-                return LERR_INCOMPATIBLE;
+        assert(integer_p(yin));
+        assert(integer_p(yang));
+
         if (fixed_p(yin)) {
                 vyin = fixed_value(yin);
-                if (fixed_p(yang)) {
-                        vyang = fixed_value(yang);
-                        if (vyin < vyang)
-                                return new_fixed(-1, ret);
-                        else if (vyin > vyang)
-                                return new_fixed(1, ret);
-                        else
-                                return new_fixed(0, ret);
-                } else if (negative_p(yang))
-                        return new_fixed(1, ret);
-                else if (positive_p(yang))
-                        return new_fixed(-1, ret);
-                else
-                        return LERR_INCOMPATIBLE;
-
-        } else if (negative_p(yin)) {
-                if (fixed_p(yang) || positive_p(yang))
-                        return new_fixed(-1, ret);
-                else if (!negative_p(yang))
-                        return LERR_INCOMPATIBLE;
-                else
-                        minus = true;
-
-        } else if (positive_p(yin)) {
-                if (fixed_p(yang) || negative_p(yang))
-                        return new_fixed(1, ret);
-                else if (!positive_p(yang))
-                        return LERR_INCOMPATIBLE;
-                else
-                        minus = false;
+                pyin = &vyin;
+                lyin = 1;
+        } else {
+                pyin = int_buffer_c(yin);
+                lyin = int_length_c(yin);
         }
 
-        maybe = 0;
-        while (1) {
-                if (null_p(yin)) {
-                        if (null_p(yang))
-                                return new_fixed(minus ? -maybe : maybe, ret); /* same length */
-                        else
-                                return new_fixed(minus ? 1 : -1, ret); /* yin has fewer digits */
-                } else if (null_p(yang))
-                        return new_fixed(minus ? -1 : 1, ret); /* yang has fewer digits */
-                else if (maybe == 0)
-                        maybe = (int_digit(yin) < int_digit(yang)) ? -1 :
-                                (int_digit(yin) > int_digit(yang));
-                yin = int_next(yin);
-                yang = int_next(yang);
+        if (fixed_p(yang)) {
+                vyang = fixed_value(yang);
+                pyang = &vyang;
+                lyang = 1;
+        } else {
+                pyang = int_buffer_c(yang);
+                lyang = int_length_c(yang);
         }
-}
 
-@ Return the positive value of an integer. A maximally negative
-fixed integer won't fit back into a fixed integer so |new_int_c|
-is used whenever the input is one. A negative number can be made
-positive by creating a new leading positive digit with whatever
-trailing digits the negative integer had.
-
-@c
-error_code
-int_abs (cell  o,
-         cell *ret)
-{
-        intmax_t value;
-        digit payload;
-        cell tail;
-
-        if (fixed_p(o)) {
-                value = fixed_value(o);
-                if (value < 0)
-                        value = -value;
-                return new_int_c(value, true, ret);
-        }
-        if (positive_p(o)) {
-                *ret = o;
+        negative = -(*pyin < 0);
+        if (negative && *pyang >= 0) { /* |yin < yang| */
+                *ret = fix(-1);
+                return LERR_NONE;
+        } else if (!negative && *pyang < 0) { /* |yin > yang| */
+                *ret = fix(1);
                 return LERR_NONE;
         }
-        if (!negative_p(o))
-                return LERR_INCOMPATIBLE;
-        payload = int_digit(o);
-        tail = int_next(o);
-        return new_digit(payload, tail, ret);
+
+        while (lyin > 1 && *pyin == negative)
+                pyin++, lyin--; /* Skip leading 0s. */
+        while (lyang > 1 && *pyang == negative)
+                pyang++, lyang--;
+
+        if (lyin < lyang) {
+                *ret = fix(-int_cmp_hack(negative));
+                return LERR_NONE;
+        } else if (lyin > lyang) {
+                *ret = fix(int_cmp_hack(negative));
+                return LERR_NONE;
+        }
+
+        while (lyin--) { /* Same length, same sign; first difference wins. */
+                vyin = *pyin++;
+                vyang = *pyang++;
+                if (vyin == vyang)
+                        continue;
+                if (vyin < vyang)
+                        *ret = fix(-int_cmp_hack(negative));
+                else
+                        *ret = fix(int_cmp_hack(negative));
+                return LERR_NONE;
+        }
+        *ret = fix(0);
+        return LERR_NONE;
 }
 
-@ Addition and subtraction are substantially similar because they're
-not implemented; maths which overflows native \CEE/ variables returns
-|LERR_UNIMPLEMENTED| to be caught and handled at run-time.
+@ Only the three basic algebraic routines of addition, subtraction
+and multiplication are necessary. Non-standard functions built in
+to GCC and Clang, among others, are used in place of the regular
+\CEE/ operators. These trap overflow using appropriate CPU instructions
+which is shorter and faster than relying on explicit checks of the
+operands and/or result.
 
-The first step is to attempt to extract the value of the integer
-into a \CEE/ variable, or give up.
-
-I don't know what I was thinking when I wrote the outer condition
-and it's clearly wrong. TODO ASAP (but no code changes in this edit
-iteration).
+TODO: These hacks should be actual hacks which check for the presence
+of the built-in routines and define substitutes if they are not.
 
 @.TODO@>
-@d int_extract(O,V,R) do { /* O, Value, R */
-        if (fixed_p(O))
-                (V) = (fixed_value(O) >= 0) ? fixed_value(O) : -fixed_value(O);
-        else {
-                (R) = int_value((O), &(V));
-                if ((R) == LERR_LIMIT)
-                        return LERR_UNIMPLEMENTED;
-                else if (failure_p(R))
-                        return (R);
-        }
-} while (0)
+@<Hacks...@>=
+#define ckd_add(r,x,y) @[__builtin_add_overflow((x), (y), (r))@]
+#define ckd_sub(r,x,y) @[__builtin_sub_overflow((x), (y), (r))@]
+#define ckd_mul(r,x,y) @[__builtin_mul_overflow((x), (y), (r))@]
 
-@ The only way large integers are handled by the maths routines
-here is when one of the operands is zero and the other operand is
-the result. Otherwise any use of large integers, or fixed integers
-where the operation overflows the \CEE/ variable it's carried out
-in, return |LERR_UNIMPLEMENTED|.
+@ The addition routine works with all integers. It creates a buffer
+one word longer than the longest of the two addends and then adds
+the two arguments into it one word at a time starting at the least
+significant word. The result is then normalised and returned.
+
+One integer is copied into the newly allocated space and then the
+other added to it rather than both being added together. I can't
+think of a good reason why, now.
+
+Because fixed-width integers always have four bits to spare they
+can be added together much more quickly than going through the full
+variable-width algorithm.
 
 @c
 error_code
@@ -2364,66 +2145,125 @@ int_add (cell  yin,
          cell  yang,
          cell *ret)
 {
-        intmax_t result, vyin, vyang;
+        cell result;
+        half lyin, lyang;
+        word carry, *next, *presult, *pyin, *pyang, vyin, vyang;
         error_code reason;
 
-        if (!integer_p(yin) || !integer_p(yang))
-                return LERR_INCOMPATIBLE;
-
-        if (yin == fix(0)) {
-                *ret = yang;
-                return LERR_NONE;
-        } else if (yang == fix(0)) {
-                *ret = yin;
-                return LERR_NONE;
+        assert(integer_p(yin));
+        assert(integer_p(yang));
+        if (fixed_p(yin)) {
+                vyin = fixed_value(yin);
+                if (fixed_p(yang))
+                        return new_int_c(vyin + fixed_value(yang), ret);
+                pyin = &vyin;
+                lyin = 1;
+        } else {
+                pyin = int_buffer_c(yin);
+                lyin = int_length_c(yin);
+        }
+        if (fixed_p(yang)) {
+                vyang = fixed_value(yang);
+                pyang = &vyang;
+                lyang = 1;
+        } else {
+                pyang = int_buffer_c(yang);
+                lyang = int_length_c(yang);
         }
 
-        int_extract(yin, vyin, reason);
-        int_extract(yang, vyang, reason);
-        if (ckd_add(&result, vyin, vyang))
-                return LERR_UNIMPLEMENTED;
-
-        return new_int_c(result, true, ret);
+        if (lyin > lyang)
+                orreturn(new_int(lyin + 1, int_negative_p(yin), &result));
+        else
+                orreturn(new_int(lyang + 1, int_negative_p(yin), &result));
+        presult = int_buffer_c(result);
+        next = presult + int_length_c(result);
+        memmove(next - lyin, pyin, lyin);
+        carry = 0;
+        for (; lyang; lyang--) {
+                next--;
+                carry = ckd_add(next, *next, carry);
+                carry |= ckd_add(next, *next, pyang[lyang - 1]);
+        }
+        if (carry)
+                *(--next) += carry;
+        return int_normalise(result, ret);
 }
 
+@ The subtraction routine is the same except for using subtraction
+instead of addition.
+
+@c
 error_code
 int_sub (cell  yin,
          cell  yang,
          cell *ret)
 {
-        intmax_t result, vyin, vyang;
+        cell result;
+        half lyin, lyang;
+        word carry, *next, *presult, *pyin, *pyang, vyin, vyang;
         error_code reason;
 
-        if (!integer_p(yin) || !integer_p(yang))
-                return LERR_INCOMPATIBLE;
-
-        if (yang == fix(0)) {
-                *ret = yin;
-                return LERR_NONE;
+        assert(integer_p(yin));
+        assert(integer_p(yang));
+        if (fixed_p(yin)) {
+                vyin = fixed_value(yin);
+                if (fixed_p(yang))
+                        return new_int_c(vyin - fixed_value(yang), ret);
+                pyin = &vyin;
+                lyin = 1;
+        } else {
+                pyin = int_buffer_c(yin);
+                lyin = int_length_c(yin);
+        }
+        if (fixed_p(yang)) {
+                vyang = fixed_value(yang);
+                pyang = &vyang;
+                lyang = 1;
+        } else {
+                pyang = int_buffer_c(yang);
+                lyang = int_length_c(yang);
         }
 
-        int_extract(yin, vyin, reason);
-        int_extract(yang, vyang, reason);
-        if (ckd_sub(&result, vyin, vyang))
-                return LERR_UNIMPLEMENTED;
-
-        return new_int_c(result, true, ret);
+        if (lyin > lyang)
+                orreturn(new_int(lyin + 1, int_negative_p(yin), &result));
+        else
+                orreturn(new_int(lyang + 1, int_negative_p(yin), &result));
+        presult = int_buffer_c(result);
+        next = presult + int_length_c(result);
+        memmove(next - lyin, pyin, lyin);
+        carry = 0;
+        for (; lyang; lyang--) {
+                next--;
+                carry = ckd_sub(next, *next, carry);
+                carry |= ckd_sub(next, *next, pyang[lyang - 1]);
+        }
+        if (carry)
+                *(--next) -= carry;
+        return int_normalise(result, ret);
 }
 
+@ Multiplication accepts any integer as an argument but large
+integers are not supported. If both multiplicands are fixed-width
+integers then normal multiplication is attempted and if the result
+still fits within a fixed width integer it's returned. Otherwise
+the error |LERR_UNSUPPORTED| is raised which is expected to be
+trapped and full multiplication implemented at a higher level.
+
+@c
 error_code
 int_mul (cell  yin,
          cell  yang,
          cell *ret)
 {
-        intmax_t result, vyin, vyang;
+        word result;
         error_code reason;
 
-        if (!integer_p(yin) || !integer_p(yang))
-                return LERR_INCOMPATIBLE;
-
-        if (yin == fix(0) || yang == fix(0))
-                return new_fixed(0, ret);
-        if (yin == fix(1)) {
+        assert(integer_p(yin));
+        assert(integer_p(yang));
+        if (yin == fix(0) || yang == fix(0)) {
+                *ret = fix(0);
+                return LERR_NONE;
+        } else if (yin == fix(1)) {
                 *ret = yang;
                 return LERR_NONE;
         } else if (yang == fix(1)) {
@@ -2431,344 +2271,121 @@ int_mul (cell  yin,
                 return LERR_NONE;
         }
 
-        int_extract(yin, vyin, reason);
-        int_extract(yang, vyang, reason);
-        if (ckd_mul(&result, vyin, vyang))
+        if (!fixed_p(yin) || !fixed_p(yang))
                 return LERR_UNIMPLEMENTED;
 
-        return new_int_c(result, true, ret);
+        if (ckd_mul(&result, fixed_value(yin), fixed_value(yang)))
+                return LERR_UNIMPLEMENTED;
+
+        return new_int_c(result, ret);
 }
 
-@ Integer division is not implemented in the core.
+@* Arrays. A sequence of zero or more cells is an {\it array\/}.
+It's assumed that callers accessing an array's elements have checked
+that their index value is within bounds.
 
-@c
-error_code
-int_div (cell  yin,
-         cell  yang,
-         cell *ret @[unused@])
-{
-        if (!integer_p(yin) || !integer_p(yang))
-                return LERR_INCOMPATIBLE;
-        return LERR_UNIMPLEMENTED;
-}
+Arrays in \Ls/ are segments and due to how segments are stored the
+atom pointing to the array data has a spare cell with no purpose.
+To make use of this spare space it's called the array's {\it offset\/}
+and holds an integer which can be subtracted from a normal array
+reference index to find the real offset in memory (ie.~from
+zero)\footnote{$^1$}{I don't anticipate this feature finding much
+use but the space is there.}. Nothing in \Ls/' core uses this feature
+except to expose the value for calculation with at a higher level.
 
-@* Arrays. The next most interesting object after the cell and atom
-is arbitrary length arrays of sequential cells. Arrays are a regular
-run-time object but also form the basis of other \Ls/ objects too
-complex for a single atom. All such objects are built on the hidden
-array-like object, called a {\it larry\/} due to its close similarity
-with the every-day array.
-
-A larry is a segment which begins with its own header followed by
-the desired number of cells (which can be zero). Objects which are
-based on a larry specify additional header space of their own {\it
-in cell-sized chunks\/} where necessary.
-
-The size of the two parts of the header is mostly of significance
-to the garbage collector: the amount of cell space in the outer
-larry which is reserved for header of the inner object is treated
-as {\it opaque\/} and skipped over by the garbage collector.
-
-The larry reference and mutation functions (|larry_ref| et al.)
-also increase the real index by the size of the object's header so
-that inner objects' indexes are zero-based. This gets slightly more
-confusing when run-time arrays are introduced which can offset their
-index by a user-specified amount.
-
-@d LARRY_HEADER_LENGTH  (sizeof (larry) / sizeof (cell))
-@#
-@d larry_object(O)          ((larry *) segment_base(O))
-@d larry_base(O)            (larry_object(O)->base)
-@d larry_header(O)          (larry_object(O)->header) /* Additional header size. */
-@d larry_set_header_m(O,V)  (larry_header(O) = (V))
-@d larry_scan_progress(O)   (larry_object(O)->scan_progress)
-@d larry_set_scan_progress_m(O,V)
-                            (larry_scan_progress(O) = (V))
-@d larry_length(O)          (segment_length(O) - (half) LARRY_HEADER_LENGTH)
-@# /* Reference {\it past\/} the additional header: */
-@d larry_ref_imp(O,I)       (larry_base(O)[larry_header(O) + (I)])
-@d larry_set_m_imp(O,I,V)   (larry_base(O)[larry_header(O) + (I)] = (V))
-
-@<Type def...@>=
-typedef struct {
-        half header, scan_progress;
-        cell base[];
-} larry;
-
-@ A larry on its own doesn't do anything but reference, mutate and
-resize.
-
+@d ARRAY_MAX HALF_MAX
+@d array_base(O) ((cell *) segment_base(O))
+@d array_length_c(O) (segment_length_c(O) / (half) sizeof (cell))
+@d array_offset_c(O) (pointer_datum(O))
 @<Fun...@>=
-error_code new_larry (intmax_t, intmax_t, cell, cell_tag, cell *);
-error_code larry_ref (cell, intmax_t, cell *);
-error_code larry_resize_m (cell, intmax_t, cell);
-error_code larry_set_m (cell, intmax_t, cell);
+error_code new_array_imp (half, cell, cell, cell_tag, cell *);
+error_code array_resize_m (cell, half, cell);
 
-@ A larry's length {\it includes\/} the inner object's additional
-(non-larry) header. The |length| argument to |new_larry| must be
-large enough to hold |header| and they are both measured in multiples
-of cells.
+@ Most arrays are normal arrays with --- at creation their slots
+are initialised to |NIL| and they're created with |new_array|.
 
+Some objects are defined in terms of underlying an array store and
+begin with their contents uninitialised.
+
+@d new_array(L,O,R) /* Length, Offset, R */
+        new_array_imp((L), (O), NIL, FORM_ARRAY, (R))
 @c
 error_code
-new_larry (intmax_t  length,
-           intmax_t  header,
-           cell      fill,
-           cell_tag  ntag,
-           cell     *ret)
+new_array_imp (half      length,
+               cell      offset,
+               cell      fill,
+               cell_tag  form,
+               cell     *ret)
 {
         error_code reason;
-        intmax_t i, rlength;
 
-        assert(LARRY_HEADER_LENGTH * sizeof (cell) == sizeof (larry));
-        if (header < 0 || length < header || header > HALF_MAX)
-                return LERR_LIMIT;
-        if (length > (intmax_t) (HALF_MAX - LARRY_HEADER_LENGTH))
-                return LERR_LIMIT;
-        rlength = length + LARRY_HEADER_LENGTH;
-        orreturn(new_segment_imp(Heap_Thread, rlength, sizeof (cell),
-                sizeof (cell), ntag, FORM_NONE, ret)); /* Larry cannot be
-                                                                interned. */
-        larry_set_header_m(*ret, header);
-        larry_set_scan_progress_m(*ret, 0);
+        assert(length >= 0 && length <= ARRAY_MAX);
+        assert(integer_p(offset));
+        orreturn(new_segment_imp(Heap_Thread, length * sizeof (cell),
+                sizeof (cell), form, FORM_NONE, ret));
+        pointer_set_datum_m(*ret, offset);
         if (defined_p(fill))
-                for (i = 0; i < length - header; i++)
-                        larry_set_m_imp(*ret, i, fill);
+                while (length > 0)
+                        array_base(*ret)[--length] = fill;
         return LERR_NONE;
 }
 
-@ Reference and mutate are a simple matter of argument validation.
+@ Arrays can be resized in-place. Ultimately this relies on the
+system memory allocator resizing an allocation without changing (or
+by copying) the shared data and then initialising any remaining new
+cells, usually to |NIL|.
 
 @c
 error_code
-larry_ref (cell      o,
-           intmax_t  index,
-           cell     *ret)
+array_resize_m (cell o,
+                half nlength,
+                cell fill)
 {
-        if (!larry_p(o))
-                return LERR_INCOMPATIBLE;
-        if (index < 0)
-                return LERR_OUT_OF_BOUNDS;
-        if (index > larry_length(o) - larry_header(o))
-                return LERR_OUT_OF_BOUNDS;
-        *ret = larry_ref_imp(o, index);
-        return LERR_NONE;
-}
-
-error_code
-larry_set_m (cell      o,
-             intmax_t  index,
-             cell      value)
-{
-        if (!larry_p(o))
-                return LERR_INCOMPATIBLE;
-        if (index < 0)
-                return LERR_OUT_OF_BOUNDS;
-        if (index > larry_length(o) - larry_header(o))
-                return LERR_OUT_OF_BOUNDS;
-        larry_set_m_imp(o, index, value);
-        return LERR_NONE;
-}
-
-@ Larries can be resized if the object based on it supports it.
-
-@c
-error_code
-larry_resize_m (cell     o,
-                intmax_t length,
-                cell     fill)
-{
-        intmax_t i, olength, rlength; /* Old length, Real length. */
+        half olength;
         error_code reason;
 
-        assert(larry_p(o));
-        if (length > (intmax_t) (HALF_MAX - LARRY_HEADER_LENGTH))
-                return LERR_LIMIT;
-        rlength = length + LARRY_HEADER_LENGTH;
-        olength = larry_length(o);
-        orreturn(segment_resize_m(o, rlength));
+        assert(arraylike_p(o));
+        assert(nlength >= 0 && nlength <= ARRAY_MAX);
+        olength = array_length_c(o);
+        orreturn(segment_resize_m(o, nlength * sizeof (cell)));
         if (defined_p(fill))
-                for (i = olength; i < length - larry_header(o); i++)
-                        larry_set_m_imp(o, i, fill);
+                while (nlength > olength)
+                        array_base(o)[--nlength] = fill;
         return LERR_NONE;
 }
 
-@ \Ls/ run-time {\it arrays\/} are a larry without declaring an
-inner header. It does have a one-cell header but its value is always
-a real cell so need not (indeed should not) be hidden from the
-garbage collector although it {\it does\/} need to be accounted for
-by the reference \AM\ mutation functions. The false header cell
-holds the integer offset of the array's base index which can be set
-and changed at run-time.
+@* Hashtables. A significant user of arrays is the {\it hashtable\/}
+for associating a value with a key. A hashtable works by calculating
+the {\it hash\/} value of the key to locate an initial array index
+and then decreasing\footnote{$^1$}{Or increasing or indeed any
+consistent algorithm.} the index until the correct key or an unused
+array slot is located.
 
-Run-time arrays stand alone and do not form the basis of any other
-\Ls/ object; other sequential objects are all based on the core
-larry.
+The hash value calculated for each key is an unsigned 32 bit integer.
+A similar function is used depending on whether the length of the
+buffer is known or is a zero terminated \CEE/-string.
 
-@.TODO@>
-@d ARRAY_HEADER_LENGTH     (sizeof (array) / sizeof (cell))
-@d array_object(O)         ((array *) larry_base(O))
-@d array_base(O)           (array_object(O)->base)
-@d array_offset(O)         (array_object(O)->offset)
-@d array_set_offset_m(O,V) (array_offset(O) = (V)) /* TODO: Should be an
-                                                imp macro post validation. */
-@d array_length(O)         (larry_length(O) - (half) ARRAY_HEADER_LENGTH)
-@#
-@d array_resize_m(O,L,F)   (larry_resize_m((O), (L) + ARRAY_HEADER_LENGTH, (F)))
-@<Type def...@>=
-typedef struct {
-        cell offset;
-        cell base[];
-} array;
-
-@ @<Fun...@>=
-error_code new_array_imp (intmax_t, cell, cell, cell *);
-error_code array_ref_c (cell, intmax_t, cell *);
-error_code array_set_m_c (cell, intmax_t, cell);
-error_code array_ref (cell, cell, cell *);
-error_code array_set_m (cell, cell, cell);
-cell get_array_ref_c (cell, intmax_t);
-
-@ Most arrays will have a base offset of zero, including all of
-those used by \Ls/' core. Compute the length including the header
-and return the filled in larry.
-
-@d new_array(L,F,R) new_array_imp((L), fix(0), (F), (R))
-@c
-error_code
-new_array_imp (intmax_t length,
-               cell     offset,
-               cell     fill,
-               cell    *ret)
-{
-        intmax_t rlength; /* Real length including header. */
-        error_code reason;
-
-        assert(ARRAY_HEADER_LENGTH * sizeof (cell) == sizeof (array));
-        if (!integer_p(offset))
-                return LERR_INCOMPATIBLE;
-        if (length < 0)
-                return LERR_LIMIT;
-        if (length > (intmax_t) (HALF_MAX - ARRAY_HEADER_LENGTH))
-                return LERR_LIMIT;
-        rlength = length + ARRAY_HEADER_LENGTH;
-        orreturn(new_larry(rlength, 0, fill, FORM_ARRAY, ret));
-        array_set_offset_m(*ret, offset);
-        return LERR_NONE;
-}
-
-@ There is no need to convert \CEE/ index values to \Ls/ integers
-and back when \Ls/ is using an array directly so these reference
-and mutation functions handle an index in a \CEE/ variables.
-
-@c
-error_code
-array_ref_c (cell      o,
-             intmax_t  index,
-             cell     *ret)
-{
-        if (!array_p(o))
-                return LERR_INCOMPATIBLE;
-        if (ckd_add(&index, index, ARRAY_HEADER_LENGTH))
-                return LERR_OUT_OF_BOUNDS;
-        return larry_ref(o, index, ret);
-}
-
-error_code
-array_set_m_c (cell     o,
-               intmax_t index,
-               cell     value)
-{
-        if (!array_p(o))
-                return LERR_INCOMPATIBLE;
-        if (ckd_add(&index, index, ARRAY_HEADER_LENGTH))
-                return LERR_OUT_OF_BOUNDS;
-        return larry_set_m(o, index, value);
-}
-
-@ In many cases referencing an array is guaranteed to succeed and
-the code is clearer with the cell being returned directly to the
-calling expression.
-
-@c
-cell
-get_array_ref_c (cell     o,
-                 intmax_t index)
-{
-        cell ret;
-        error_code reason;
-
-        orassert(array_ref_c(o, index, &ret));
-        return ret;
-}
-
-@ These placeholder functions for the run-time accessible reference
-and mutate have not yet been written (TODO).
-
-@.TODO@>
-@c
-error_code
-array_ref (cell  o @[unused@],
-           cell  index @[unused@],
-           cell *ret @[unused@])
-{
-        return LERR_UNIMPLEMENTED;
-}
-
-error_code
-array_set_m (cell o @[unused@],
-             cell index @[unused@],
-             cell value @[unused@])
-{
-        return LERR_UNIMPLEMENTED;
-}
-
-@* Hashtables. A hashtable is a store of values indexed by a
-nearly-unique key calculated from the value, it's underlying storage
-is a larry. The key is a 32 bit unsigned integer calculated with
-the hashing algorithm used by pdksh\footnote{$^1$}{From the base
-system of OpenBSD as of version 7.0; Is this Thompson's algorithm?
-TODO: citation.}.
-
-Hashtables are exposed directly to the run-time and are also used
-internally. Some of the internal uses store the value in subtly
-different ways so each accessor function is accompanied by the
-necessary function pointers to query the stored data.
-
-@.TODO@>
 @<Type def...@>=
 typedef uint32_t hash;
-typedef hash @[@] (*hash_fn) (cell); /* Return an item's key. */
-typedef bool @[@] (*match_fn) (cell, void *); /* Compare an item with a
-                                                        potential match. */
-typedef error_code @[@] (*filter_fn) (cell, cell *); /* Process each item
-                                                        during iteration. */
 
-@ @<Fun...@>=
-hash hash_cstr (byte *, intmax_t *);
-hash hash_buffer (byte *, intmax_t);
-
-@ These functions differ in how they determine the length of a piece
-of memory to calculate the hash value of. Calculating the hash of
-a \CEE/-string returns the string's length to the caller.
-
-@c
+@ @c
 hash
-hash_buffer (byte     *buf,
-             intmax_t  length)
+hash_buffer (byte *buf,
+             half  length)
 {
         hash r = 0;
-        intmax_t i;
+        half i;
 
         assert(length >= 0);
+        r = 0;
         for (i = 0; i < length; i++)
                 r = 33 * r + (unsigned char) (*buf++);
         return r;
 }
 
 hash
-hash_cstr (byte     *buf,
-           intmax_t *length)
+hash_cstr (byte *buf,
+           half *length)
 {
         hash r = 0;
         byte *p = buf;
@@ -2779,682 +2396,702 @@ hash_cstr (byte     *buf,
         return r;
 }
 
-@ A hash table is a larry where the real index of an item is its
-key modulo the length. Of course this means collisions if an item's
-real index matches that of another.
+@ The array underlying a hashtable is always created with a total
+of $2^n$ slots, plus a {\it footer\/}, so that hashtable entries
+are always based on an offset of zero, of two additional cells.
+When a new hashtable is created one of these cells is set to the
+number of slots in the array which can be used, set to 70\% of the
+total slots available (rounded down). The other is set to zero
+representing the number of entries which have been removed from the
+hashtable or {\it blocked\/}.
 
-Collisions are resolved on a first-come-first-served basis: when
-storing a new item if the calculated index is already occupied then
-the index is decremented until an empty slot is found (rolling
-around to the top when reaching 0). Searching for an existing item
-succeeds if the calculated slot is in use {\it and\/} the item in
-it matches the one sought, again counting down until reaching an
-empty slot or a successful match.
+A value of 70\% ensures that there will still be ``holes'' even
+when the hashtable is nearly full, limiting how much of the array
+needs to be scanned to find the correct slot. The smallest hashtable
+above zero which can be created has 16 slots and in this case 15
+slots are made available to leave a single one-slot hole, anticipating,
+with prejudice not benchmarks, that at such a small size a full
+array scan will not be expensive.
 
-In order to minimise the number of collisions and thus the number
-of potential checks while scanning, the larry is kept no more than
-70\% full, except in the case of exceptionally small hashtables
-where even a full scan is cheap.
-
-When an entry is removed from a hashtable its slot isn't made
-available immediately as that could require rescanning the entire
-hashtable. Instead slot from which an item is removed is replaced
-with |UNDEFINED| and the number of {\it blocked\/} slots is
-incremented.
-
-@d HASHTABLE_TINY               16 /* Full scan is cheap at this size. */
+@d HASHTABLE_TINY  16
+@d HASHTABLE_MAX   ((HALF_MAX >> 1) + 1)
 @#
-@d HASHTABLE_HEADER_LENGTH      (sizeof (hashtable) / sizeof (cell))
-@d hashtable_object(O)          ((hashtable *) larry_base(O))
-@d hashtable_blocked(O)         (hashtable_object(O)->blocked)
-@d hashtable_free(O)            (hashtable_object(O)->free)
-@d hashtable_free_p(O)          (hashtable_free(O) > 0)
-@d hashtable_length(O)          (larry_length(O) - (half) HASHTABLE_HEADER_LENGTH)
-@d hashtable_set_blocked_m(O,V) (hashtable_object(O)->blocked = (V))
-@d hashtable_set_free_m(O,V)    (hashtable_object(O)->free = (V))
-@d hashtable_ref(O,I)           (hashtable_object(O)->base[(I)])
-@d hashtable_set_m(O,I,V)       (hashtable_object(O)->base[(I)] = (V))
-@<Type def...@>=
-typedef struct {
-        half free, blocked;
-        cell base[];
-} hashtable;
-
-@ @<Fun...@>=
-error_code new_hashtable (intmax_t, cell *);
-error_code copy_hashtable (cell, hash_fn, cell *);
-void copy_hashtable_imp (cell, hash_fn, cell);
-cell hashtable_blocked_imp (cell);
-error_code hashtable_erase_m (cell, hash, cell, hash_fn, match_fn, bool);
-error_code hashtable_fetch (cell, hash, match_fn, void *, cell *);
-cell hashtable_free_imp (cell);
-error_code hashtable_pairs (cell, filter_fn, cell *);
-error_code hashtable_resize_m (cell, hash_fn, intmax_t);
-error_code hashtable_save_m (cell, hash, cell, hash_fn, match_fn, void *,
-        bool, bool);
-intmax_t hashtable_scan (cell, hash, match_fn, void *);
-error_code hashtable_search (cell, hash, match_fn, void *, cell *);
-
-@ The |length| argument to |new_hashtable| is how many items the
-caller expects to store. It's rounded up to a power of two in
-|rlength|, the real length of the new hash table. After the rounding
-|hashtable_default_free| calculates how many of those slots are
-available for use, approximately 70\% for tables larger than
-|HASHTABLE_TINY|.
-
-The length of a hashtable can be 0 and is enlarged as soon as
-something's inserted into it. This is a useful saving of space in
-a few situations.
-
 @d hashtable_default_free(L) (((L) == HASHTABLE_TINY)@|
         ? (HASHTABLE_TINY - 1) /* Guarantee at least one |NIL|. */@t\iII@>
-        : ((7 * (1 << (high_bit(L) - 1))) / 10))
+        : ((7 * (1ull << high_bit(L))) / 10))
                 /* $\lfloor70\%\rfloor$ */
+@#
+@d hashtable_length_c(O)        (array_length_c(O) - 2)
+@d hashtable_base(O)            (array_base(O))
+@d hashtable_blocked_c(O)       (fixed_value(array_base(O)[array_length_c(O) - 2]))
+@d hashtable_blocked_p(O)       (hashtable_blocked_c(O) >= 1)
+@d hashtable_free_c(O)          (fixed_value(array_base(O)[array_length_c(O) - 1]))
+@d hashtable_free_p(O)          (hashtable_free_c(O) > 0)
+@d hashtable_unused_c(O)        (hashtable_free_c(O) + hashtable_blocked_c(O))
+@d hashtable_used_c(O)          (hashtable_length_c(O) - hashtable_unused_c(O))
+@#
+@d hashtable_set_blocked_m(O,V) (array_base(O)[array_length_c(O) - 2] = fix(V))
+@d hashtable_set_free_m(O,V)    (array_base(O)[array_length_c(O) - 1] = fix(V))
+@<Fun...@>=
+hash hash_cstr (byte *, half *);
+hash hash_buffer (byte *, half);
+@#
+bool hashtable_match_paired (cell, void *);
+bool hashtable_match_raw (cell, void *);
+error_code copy_hashtable (cell, cell *);
+error_code copy_hashtable_imp (cell, cell);
+error_code hashtable_enlarge_m (cell);
+error_code hashtable_erase_m (cell, cell, bool);
+error_code hashtable_reduce_m (cell);
+error_code hashtable_save_m (cell, cell, bool);
+error_code hashtable_scan (cell, hash, void *, half *);
+error_code hashtable_search (cell, cell, cell *);
+error_code hashtable_search_raw (cell, hash, byte *, half, cell *);
+error_code hashtable_to_list (cell, int, cell *);
+error_code new_hashtable (half, cell *);
+hash hashtable_key_paired (cell);
+hash hashtable_key_raw (cell);
+
+@ At base a new hashtable is an array set to |NIL| with the free
+and blocked slots set appropriately. This primary constructor
+increases the desired length (which is an optional argument to the
+constructor at run time) to the next power of two and calculates
+the initial free count.
+
+@d new_hashtable_imp(L,F,R) do@+ { /* Length, Free, R */
+        assert(((L) == 0 && (F) == 0) || ((F) < (L)));
+        orreturn(new_array_imp((L) + 2, fix(0), NIL, FORM_HASHTABLE, (R)));
+        hashtable_set_blocked_m(*(R), 0);
+        hashtable_set_free_m(*(R), (F));
+}@+ while (0)
 @c
 error_code
-new_hashtable (intmax_t  length,
-               cell     *ret)
+new_hashtable (half  slots,
+               cell *ret)
 {
-        intmax_t f, rlength;
+        half nfree, rlength;
         error_code reason;
 
-        assert(HASHTABLE_HEADER_LENGTH * sizeof (cell) == sizeof (hashtable));
-        if (length < 0)
-                return LERR_INCOMPATIBLE;
-        else if (length == 0)
-                rlength = f = 0;
+        assert(slots >= 0
+                && slots <= (half) hashtable_default_free(HASHTABLE_MAX));
+        if (slots == 0)
+                rlength = nfree = 0;
         else {
-                rlength = 1 << (high_bit(length) - 1);
-                if (rlength < length)
-                        rlength <<= 1;
-                if (rlength <= HASHTABLE_TINY)
-                        f = (rlength = HASHTABLE_TINY) - 1;
-                else
-                        f = hashtable_default_free(rlength);
-                if (rlength > (intmax_t) (HALF_MAX - HASHTABLE_HEADER_LENGTH))
-                        return LERR_LIMIT;
+                if (slots <= (half) hashtable_default_free(HASHTABLE_TINY)) {
+                        rlength = HASHTABLE_TINY;
+                        nfree = hashtable_default_free(HASHTABLE_TINY);
+                } else {
+                        rlength = 1 << high_bit(slots);
+                        nfree = hashtable_default_free(rlength);
+                        while (nfree < slots) {
+                                rlength <<= 1;
+                                nfree = hashtable_default_free(rlength);
+                        }
+                        if (rlength > HASHTABLE_MAX)
+                                return LERR_LIMIT;
+                }
+                assert(nfree >= slots && nfree < rlength);
         }
-        orreturn(new_larry(rlength + HASHTABLE_HEADER_LENGTH,
-                HASHTABLE_HEADER_LENGTH, NIL, FORM_HASHTABLE, ret));
-        hashtable_set_blocked_m(*ret, 0);
-        hashtable_set_free_m(*ret, f);
+        new_hashtable_imp(rlength, nfree, ret);
         return LERR_NONE;
 }
 
-@ When a copy is made of a hashtable it also has the effect of
-making blocked slots available in the copy. The algorithm is split
-in two so that |hashtable_resize_m| can also use it.
+@ Ordinarily the object stored in a hashtable slot is a pair
+containing the key and the value. In one case the object being
+stored is the key itself and there is no pair. These two functions
+are used when comparing with a value in an occupied slot so obtain
+the key symbol's hash.
 
-To copy the contents of one hashtable to another the source is
-scanned in full and the item in any active slot (ie.~which is neither
-|NIL| nor |UNDEFINED|) is inserted afresh into the new hashtable.
+@c
+hash
+hashtable_key_paired (cell o)
+{
+        assert(pair_p(o) && symbol_p(A(o)->sin));
+        return symbol_hash_c(A(o)->sin);
+}
 
-TODO: This should be named |new_hashtable_copy|.
+hash
+hashtable_key_raw (cell o)
+{
+        assert(symbol_p(o));
+        return symbol_hash_c(o);
+}
 
-@.TODO@>
+@ Some of the algorithms used to implement hashtables copy the
+contents of one hashtable into another. The copying part is performed
+by |copy_hashtable_imp| after the new hashtable has been constructed,
+where it is guaranteed to have been created large enough to fit it
+all. The algorithm scans each array slot in the source hashtable
+and if there's a live entry in it inserts it into the new hashtable.
+The number of free slots in the new hashtable is updated afterwards.
+
+The scanning algorithm at the heart of this function is a duplicate
+of the main scanning algorithm in |hashtable_scan|.
+
 @c
 error_code
-copy_hashtable (cell     o,
-                hash_fn  hashfn,
-                cell    *ret)
-{
-        cell new;
-        error_code reason;
-
-        if (!hashtable_p(o))
-                return LERR_INCOMPATIBLE;
-        orreturn(new_hashtable(hashtable_length(o), &new));
-        copy_hashtable_imp(o, hashfn, new);
-        *ret = new;
-        return LERR_NONE;
-}
-
-void
-copy_hashtable_imp (cell    old,
-                    hash_fn hashfn,
-                    cell    new)
+copy_hashtable_imp (cell old,
+                    cell new)
 { /* nb.~|new| is not a ``|cell *|'' and must have already been allocated. */
-        int i, j, length, nfree, nlength;
+        half i, j, nfree;
         cell pos, value;
-        hash nkey;
+        hash hval;
+        hash (*hashfn)(cell);
 
         assert(hashtable_p(old));
         assert(hashtable_p(new));
-        length = hashtable_length(old);
-        nlength = hashtable_length(new);
-        nfree = hashtable_free(new);
-        assert(nfree >= length - (hashtable_free(old) + hashtable_blocked(old)));
-        for (i = 0; i < length; i++) {
-                value = hashtable_ref(old, i);
+        nfree = hashtable_free_c(new);
+        assert(nfree >= hashtable_used_c(old));
+        if (old == Symbol_Table)
+                hashfn = hashtable_key_raw;
+        else
+                hashfn = hashtable_key_paired;
+        for (i = 0; i < hashtable_length_c(old); i++) {
+                value = hashtable_base(old)[i];
                 if (!null_p(value) && defined_p(value)) { /* Slot in |old|. */
-                        nkey = hashfn(value);
-                        j = nkey % nlength;
+                        hval = hashfn(value);
+                        j = hval % hashtable_length_c(new);
                         while (1) { /* Find a (guaranteed) slot in |new|. */
-                                pos = hashtable_ref(new, j);
+                                pos = hashtable_base(new)[j];
                                 if (null_p(pos))
                                         break;
                                 if (j == 0)
-                                        j = nlength - 1;
+                                        j = hashtable_length_c(new) - 1;
                                 else
                                         j--;
                         }
-                        hashtable_set_m(new, j, value);
+                        hashtable_base(new)[j] = value;
                         nfree--;
                 }
         }
         hashtable_set_free_m(new, nfree);
+        return LERR_NONE;
 }
 
-@ Increase the size of a hashtable to fit |nlength| items, or double
-its size if |nlength| is -1. This works by allocating a new hashtable
-of the required size and copying the old hashtable's contents into
-it, then swapping the contents of the newly allocated atom with the
-original |o|, which has the effect that the new atom refers to the
-old hashtable (and will be collected by the garbage collector) and
-the old atom refers to the new hashtable.
+@ A function which can be exposed at run-time to simply copy a
+hashtable is an obvious, light wrapper around the above.
 
-@.TODO@>
 @c
 error_code
-hashtable_resize_m (cell     o,
-                    hash_fn  hashfn,
-                    intmax_t nlength)
+copy_hashtable (cell  o,
+                cell *ret)
 {
-        atom tmp;
         cell new;
         error_code reason;
 
-        if (!hashtable_p(o))
-                return LERR_INCOMPATIBLE;
-
-        if (nlength == -1) { /* Increment to the next $n^2$ size. */
-                if (hashtable_length(o) == 0)
-                        nlength = HASHTABLE_TINY;
-                else if (hashtable_length(o) >= HALF_MAX >> 1)
-                        return LERR_LIMIT;
-                else
-                        nlength = hashtable_length(o) << 1;
-        }
-        orreturn(new_hashtable(nlength, &new));
-        copy_hashtable_imp(o, hashfn, new);
-        tmp = *(atom *) o; /* No need to swap the tag. */
-        *(atom *) o = *(atom *) new;
-        *(atom *) new = tmp;
-        segbuf_owner(o) = o;
-        segbuf_owner(new) = new;
+        orreturn(new_hashtable(hashtable_used_c(o), &new));
+        orassert(copy_hashtable_imp(o, new));
+        *ret = new;
         return LERR_NONE;
 }
 
-@ Insertion, deletion and searching all begin by scanning the
-hashtable for a slot: the first slot counting down from the default
-index which matches the item sought or is |NIL|. The common routine
-to all of these is |hashtable_scan| --- this returns the index of
-the slot with the sought item, or where it should be saved if it's
-not present. If the item isn't present and there's no room to insert
-it |FAIL|, a negative number which is not \CEE/'s |EOF|, is returned
-instead.
-
-The |match| function is passed each potential matching item in turn
-along with |ctx| to determine whether an item already in the hashtable
-matches the item etc.~described in |ctx|.
+@ To insert a new entry into a hashtable that's full the hashtable
+is first enlarged using the copying algorithm above. To maintain
+the fiction that the hashtable is enlarged in-place the atom (passed
+in via |o|) holding the original hashtable is mutated to reference
+the new one.
 
 @c
-intmax_t
-hashtable_scan (cell      o,
-                hash      key,
-                match_fn  match,
-                void     *ctx)
+error_code
+hashtable_enlarge_m (cell o)
 {
-        intmax_t i;
-        cell pos;
+        atom tmp;
+        cell new;
+        half nfree, nlength;
+        error_code reason;
 
         assert(hashtable_p(o));
-        if (hashtable_length(o) == 0)
-                return FAIL;
-        i = key % hashtable_length(o); /* Default index value. */
-        while (1) { /* At least one |NIL| is guaranteed to be present. */
-                pos = hashtable_ref(o, i);
-                if (null_p(pos) || (defined_p(pos) && match(pos, ctx)))
-                        break;
-                if (i == 0)
-                        i = hashtable_length(o) - 1;
-                else
-                        i--;
-        }
-        if (null_p(pos) && !hashtable_free_p(o))
-                return FAIL; /* Full. */
-        return i;
+        if (hashtable_length_c(o) == 0)
+                nlength = HASHTABLE_TINY;
+        else
+                nlength = hashtable_length_c(o) * 2;
+        if (nlength > HASHTABLE_MAX)
+                return LERR_LIMIT;
+        nfree = hashtable_default_free(nlength);
+        new_hashtable_imp(nlength, nfree, &new);
+        copy_hashtable_imp(o, new);
+        tmp = *A(new); /* No need to swap the tag. */
+        *A(new) = *A(o);
+        *A(o) = tmp;
+        segment_object(new)->owner = new;
+        segment_object(o)->owner = o;
+        return LERR_NONE;
 }
 
-@ To search a hashtable for an item to return is a simple wrapper
-around |hashtable_scan| which returns |UNDEFINED| if an item is not
-present, regardless of whether it would fit, or the item itself.
-Recall that storing |UNDEFINED| in the hashtable represents a slot
-from which an item has been removed and thus will never be in a
-slot returned from |hashtable_scan|.
+@ Going the other way, when enough entries have been removed from
+a hashtable it can be reduced to the next size down. This is
+essentially the same as |hashtable_enlarge_m| (with a slightly more
+complex check to determine the size to reduce to) except that whereas
+the previous function will always attempt to enlarge the hashtable,
+|hashtable_reduce_m| will silently do nothing if there's no need to.
 
 @c
 error_code
-hashtable_search (cell      o,
-                  hash      key,
-                  match_fn  match,
-                  void     *ctx,
-                  cell     *ret)
+hashtable_reduce_m (cell o)
 {
-        intmax_t idx;
-        cell value;
+        atom tmp;
+        cell new;
+        half nfree, nlength, olength;
+        error_code reason;
 
-        if (!hashtable_p(o))
-                return LERR_INCOMPATIBLE;
-        idx = hashtable_scan(o, key, match, ctx);
-        if (idx == FAIL) { /* Not an error, |FAIL| means not present. */
-                *ret = UNDEFINED;
+        assert(hashtable_p(o));
+        olength = hashtable_length_c(o);
+        assert(olength > 0);
+        if (hashtable_used_c(o) == 0)
+                nfree = nlength = 0;
+        else if (olength == HASHTABLE_TINY)
                 return LERR_NONE;
+        else {
+                assert(olength % 2 == 0);
+                nlength = olength / 2;
+                nfree = hashtable_default_free(nlength);
+                if (hashtable_used_c(o) > nfree)
+                        return LERR_NONE;
         }
-        value = hashtable_ref(o, idx);
-        if (null_p(value)) { /* Empty slot where this item would
-                    be\footnote{$^1$}{But maybe not, next time
-                    |hashtable_scan| is called}. */
-                *ret = UNDEFINED;
-                return LERR_NONE;
-        }
-        *ret = value;
+        new_hashtable_imp(nlength, nfree, &new);
+        copy_hashtable_imp(o, new);
+        tmp = *A(new); /* No need to swap the tag. */
+        *A(new) = *A(o);
+        *A(o) = tmp;
+        segment_object(new)->owner = new;
+        segment_object(o)->owner = o;
         return LERR_NONE;
 }
 
-@ To simplify the common case where a missing value should be treated
-an error |hashtable_fetch| turns the |UNDEFINED| from |hashtable_search|
-into |LERR_MISSING|.
+@ Ordinary hashtables are used to associate a symbol with any \Ls/
+object, except in one case. As will be explained in the chapter on
+symbols there is one hashtable called the symbol table which
+associates each symbol with itself.
 
-@c
-error_code
-hashtable_fetch (cell      o,
-                 hash      key,
-                 match_fn  match,
-                 void     *ctx,
-                 cell     *ret)
-{
-        cell value;
-        error_code reason;
+This hashtable is searched when attempting to define a new symbol
+from a memory buffer to see if it has already been created so the
+key which is passed to the search function is not a symbol but a
+pointer to this pre-symbol structure.
 
-        orreturn(hashtable_search(o, key, match, ctx, &value));
-        if (undefined_p(value))
-                return LERR_MISSING;
-        *ret = value;
-        return LERR_NONE;
-}
-
-@ When inserting or replacing an item in a hashtable, in addition
-to scanning the hashtable may need to be rescanned if it's going
-to be enlarged. The cell |datum| is what is placed into the hashtable
-while |ctx| is what existing items are compared to in |match|. This
-is because most items in a hashtable will be associating the key
-with which an item is matched with some other data.
-
-If the search for |datum|'s slot turns up empty and the hashtable
-is full then it's resized (if |enlarge| is true) and the scan is
-repeated, which will succeed this time. If |replace| is true the
-item must already exist in the hashtable, if it's false it {\it
-must\/} not. There's no middle ground.
-
-@c
-error_code
-hashtable_save_m (cell      o,
-                  hash      key,
-                  cell      datum,
-                  hash_fn   hashfn,
-                  match_fn  match,@|
-                  void     *ctx,
-                  bool      replace,
-                  bool      enlarge)
-{
-        intmax_t idx;
-        error_code reason;
-
-        if (!hashtable_p(o))
-                return LERR_INCOMPATIBLE;
-again:
-        idx = hashtable_scan(o, key, match, ctx);
-        if (idx == FAIL) {
-                if (replace && !enlarge)
-                        return LERR_MISSING;
-                if (!enlarge)
-                        return LERR_OUT_OF_BOUNDS;
-                enlarge = false; /* Not really necessary. */
-                orreturn(hashtable_resize_m(o, hashfn, -1));
-                goto again;
-        } else if (!null_p(hashtable_ref(o, idx)) && !replace)
-                return LERR_EXISTS;
-        hashtable_set_m(o, idx, datum);
-        hashtable_set_free_m(o, hashtable_free(o) - 1);
-        return LERR_NONE;
-}
-
-@ Removing an item from a hashtable is always possible, if it's
-present, by replacing its slot with |UNDEFINED|. The hashtable is
-reduced in size (freeing the blocked slots) if it would fit in a
-hashtable the next power-of-two size down {\it and\/} |reduce| is
-true.
-
-@c
-error_code
-hashtable_erase_m (cell     o,
-                   hash     key,
-                   cell     label,
-                   hash_fn  hashfn,
-                   match_fn match,@|
-                   bool     reduce)
-{
-        intmax_t idx, nlength, nused;
-        error_code reason;
-
-        if (!hashtable_p(o))
-                return LERR_INCOMPATIBLE;
-        idx = hashtable_scan(o, key, match, (void *) label);
-        if (idx == FAIL)
-                return LERR_MISSING;
-        hashtable_set_m(o, idx, UNDEFINED);
-        hashtable_set_blocked_m(o, hashtable_blocked(o) + 1);
-        if (reduce) {
-                nlength = hashtable_length(o);
-                nused = hashtable_default_free(nlength);
-                nused -= hashtable_free(o) + hashtable_blocked(o);
-                if (nused <= hashtable_default_free(nlength >> 1))
-                        nlength >>= 1;
-                orreturn(hashtable_resize_m(o, hashfn, nlength));
-        }
-        return LERR_NONE;
-}
-
-@ The final hashtable routine returns an unordered list of all the
-active items in the hashtable, optionally filtering every one through
-|filter|.
-
-@c
-error_code
-hashtable_pairs (cell       o,
-                 filter_fn  filter,
-                 cell      *ret)
-{
-        cell rest, value;
-        intmax_t i;
-        error_code reason;
-
-        if (!hashtable_p(o))
-                return LERR_INCOMPATIBLE;
-        if (hashtable_length(o) == 0)
-                return NIL;
-
-        rest = NIL;
-        for (i = 0; i < hashtable_length(o); i++) {
-                value = hashtable_ref(o, i);
-                if (!null_p(value) && defined_p(value)) {
-                        if (filter != NULL)
-                                orreturn(filter(value, &value));
-                        orreturn(cons(value, rest, &rest));
-                }
-        }
-        *ret = rest;
-        return LERR_NONE;
-}
-
-@* Symbols. A symbol is a unique named object which represents
-itself. The name (called the {\it label\/}) is any opaque buffer
-of any length (including zero) but usually consists of printable
-characters. In practice the length of a symbol is limited to
-|HALF_MAX| bytes which is impractically high. Note that symbol
-labels are not aware of any sort of text encoding --- their textual
-appearance is a coincidence.
-
-If a symbol's label is short enough it's interned and stored in the
-allocated symbol atom, otherwise a segment is allocated to hold the
-label. This does mean that the key of a short symbol is recalculated
-every time it's used rather than being cached but these symbols are
-short enough that the extra computation time should be insignificant.
-
-@d SYMBOL_MAX HALF_MAX /* 2GiB ought to be enough for anyone. */
-@#
-@d symint_object(O) ((symbol *) NULL) /* Safety valve. */
-@d symint_key(O)    (hash_buffer(symbol_label(O), symbol_length(O)))
-@d symint_label(O)  (((atom *) (O))->buffer)
-@#
-@d symbuf_object(O) ((symbol *) segment_base(O))
-@d symbuf_key(O)    (symbuf_object(O)->key)
-@d symbuf_label(O)  (symbuf_object(O)->label)
-@#
-@d symbol_label(O)  (symbol_intern_p(O) ? symint_label(O) : symbuf_label(O))
-@d symbol_key(O)    (symbol_intern_p(O) ? symint_key(O) : symbuf_key(O))
-@d symbol_length(O) (segment_length(O))
 @<Type def...@>=
 typedef struct {
-        hash key; /* Remember the hashed key of long symbols. */
-        byte label[]; /* Note that this is {\it bytes\/} not characters. */
-} symbol;
+        byte *buf;
+        half  length;
+} hashtable_raw;
 
-typedef struct { /* Used to compare a buffer prior to initialising a symbol. */
-        byte     *buf;
-        intmax_t  length;
-} symbol_compare;
-
-@ In order to ensure that each symbol is unique --- which is to say
-that two symbols with the same label are the same symbol and two
-different symbols have distinct labels --- every symbol is stored
-in a hashtable known as the symbol table.
-
-@<Global...@>=
-shared cell Symbol_Table = NIL;
-
-@ Some symbols are used internally by \Ls/. In order to allow \CEE/
-code to refer to them with numerical identifiers they are added to
-|Label| during initialisation.
-
-@ @<Type def...@>=
-typedef enum {
-        @<Constant Symbol Labels@>@;
-        LSL_LENGTH
-} symbol_const;
-
-@ @<Global...@>=
-@.TODO@>
-shared cell Label[LSL_LENGTH + 42]; /* TODO: What is the question here? */
-
-@ @<Extern...@>=
-extern shared cell Symbol_Table, Label[];
-
-@ It will be more efficient to initialise |Symbol_Table| to the
-correct size here. TODO that when it's known (it may vary if some
-parts of \Ls/ are left out in small builds).
-
-@.TODO@>
-@<Initialise heap...@>=
-orabort(new_hashtable(0, &Symbol_Table)); /* Very early in the
-                                        initialisation process. */
-
-@ @<Fun...@>=
-error_code new_symbol_buffer (byte *, intmax_t, bool *, cell *);
-error_code new_symbol_imp (hash, byte *, intmax_t, bool *, cell *);
-void symbol_remember (symbol_const, cell);
-hash symbol_table_hash (cell);
-bool symbol_table_match (cell, void *);
-
-@ Record a symbol in |Label| during initialisation for quick access.
-
-@d init_identifier(S,L,V) do {
-        orabort(new_symbol_const((L), &(V)));
-        symbol_remember((S), (V));
-} while (0)
-@c
-void
-symbol_remember (symbol_const constant,
-                 cell         sym)
-{
-        Label[constant] = sym;
-}
-
-@ When a symbol is being built out of what would become its label
-\Ls/ needs to be able to compare that buffer with symbols that are
-already stored in the symbol table to see if it has already been
-instantiated. The same function is also used to compare two symbols
-that already exist.
+@ And of course there are two comparison callback functions, one
+for each type of hashtable.
 
 @c
 bool
-symbol_table_match (cell  o,
-                    void *ctx)
+hashtable_match_paired (cell  each,
+                        void *ctx)
 {
-        symbol_compare *cmp = ctx;
-        intmax_t i;
+        assert(pair_p(each) && symbol_p(A(each)->sin));
+        assert(symbol_p((cell) ctx));
+        return A(each)->sin == C(ctx);
+}
 
-        assert(symbol_p(o));
-        if (symbol_length(o) != cmp->length)
+bool
+hashtable_match_raw (cell  each,
+                     void *ctx)
+{
+        hashtable_raw *proto = ctx;
+        int i;
+
+        assert(symbol_p(each));
+        if (symbol_length_c(each) != proto->length)
                 return false;
-        for (i = 0; i < cmp->length; i++)
-                if (symbol_label(o)[i] != cmp->buf[i])
+        for (i = 0; i < proto->length; i++)
+                if (symbol_buffer_c(each)[i] != proto->buf[i])
                         return false;
         return true;
 }
 
-@ When the symbol table needs to be enlarged the hashtable
-implementation needs this real function to return the hashed key
-of a symbol and |symbol_key| is defined as a \CEE/ macro.
+@ The central part of a hashtable is this algorithm to determine
+the array index at which the object is, or should be.
+
+To find the correct index take key's hash modulo the length of the
+hashtable. If there's an object there and it matches that being
+sought then the search is over. Alternatively there may be a |NIL|
+indicating the key was not present in this hashtable and either
+this is its correct location or the hashtable is full.
+
+If neither condition was true decrease the index by one and look
+again, wrapping around to the back of the array when passing zero.
+The correct object or |NIL| is guaranteed to come eventually.
+
+When removing an entry from a hashtable it's replaced with |UNDEFINED|
+until the hashtable is reduced. It can't be replaced with |NIL| or
+future searches which were previously blocked by it will see the
+new hole.
+
+Unusually |hashtable_scan| will always set the return value, either
+to the correct index or -1. The error code indicates whether or not
+the key was found at all by raising |LERR_MISSING| regardless of
+whether the hashtable is full.
 
 @c
-hash
-symbol_table_hash (cell o)
+error_code
+hashtable_scan (cell  o,
+                hash  hval,
+                void *ctx,
+                half *ret)
 {
-        assert(symbol_p(o));
-        return symbol_key(o);
+        cell at;
+        bool (*matchfn)(cell, void *);
+
+        assert(hashtable_p(o));
+        if (hashtable_length_c(o) == 0) {
+                *ret = -1;
+                return LERR_MISSING;
+        }
+        if (o == Symbol_Table)
+                matchfn = hashtable_match_raw;
+        else
+                matchfn = hashtable_match_paired;
+        *ret = hval % hashtable_length_c(o); /* Default index value. */
+        while (1) { /* At least one |NIL| is guaranteed to be present. */
+                at = hashtable_base(o)[*ret];
+                if (null_p(at) || (defined_p(at) && matchfn(at, ctx)))
+                        break;
+                if (*ret == 0)
+                        *ret = hashtable_length_c(o) - 1;
+                else
+                        (*ret)--;
+        }
+        if (null_p(at)) {
+                if (!hashtable_free_p(o))
+                        *ret = -1;
+                return LERR_MISSING;
+        } else
+                return LERR_NONE;
 }
 
-@ New symbols are initialised from a memoty buffer that comes from
-different sources, represented by the macros here: a \CEE/ string
-(delimited by zero), the same but a constant string in the \CEE/
-source\footnote{$^1$}{TODO: this is used incorrectly; the |O| in
-|new_symbol_const| should be a {\it constant\/} \CEE/ string so
-that |strlen| is calculated at \CEE/ compile-time} or a miscellaneous
-buffer of a known length.
+@ Searching either kind of hashtable is the same except for packing
+the raw buffer data into a |hashtable_raw| structure. An absent
+value is not an error here. This rather odd twisting of the API
+stems from a time when these functions returned the value half of
+the pair and could be improved (TODO).
 
 @.TODO@>
-@d new_symbol_c(O,R) (new_symbol_buffer((O), -1, NULL, (R)))
-@d new_symbol_const(O,R) (new_symbol_buffer((byte *) (O), strlen(O), NULL, (R)))
 @c
 error_code
-new_symbol_buffer (byte     *buf,
-                   intmax_t  length,
-                   bool     *fresh,
-                   cell     *ret)
+hashtable_search (cell  o,
+                  cell  label,
+                  cell *ret)
 {
-        hash key;
-
-        assert(length >= -1);
-        if (length == -1)
-                key = hash_cstr(buf, &length);
-        else
-                key = hash_buffer(buf, length);
-        if (length > SYMBOL_MAX)
-                return LERR_LIMIT;
-        return new_symbol_imp(key, buf, length, fresh, ret);
-}
-
-@ When the bounds of a potential symbol and it's hashed key are
-known |new_symbol_imp| creates a new symbol or returns the one which
-already exists.
-
-First the symbol table is scanned by |hashtable_search| using
-|symbol_table_match| as a comparator and if that fails a new symbol
-is allocated, saved into the symbol table and returned.
-
-The object stored in the symbol table doesn't need to refer to
-anything else so |symbol_table_hash| is also passed to |hashtable_save_m|
-in case the symbol table needs to be enlarged.
-
-@c
-error_code
-new_symbol_imp (hash      key,
-                byte     *buf,
-                intmax_t  length,
-                bool     *fresh,
-                cell     *ret)
-{
-        symbol_compare scmp = { buf, length };
-        bool ignore;
-        cell sym;
-        intmax_t i;
+        half idx;
         error_code reason;
 
+        assert(hashtable_p(o));
+        assert(symbol_p(label));
+        reason = hashtable_scan(o, symbol_hash_c(label), (void *) label, &idx);
+        if (reason == LERR_MISSING) {
+                *ret = UNDEFINED;
+                return LERR_NONE;
+        } else if (failure_p(reason))
+                return reason;
+        *ret = hashtable_base(o)[idx];
+        return LERR_NONE;
+}
+
+error_code
+hashtable_search_raw (cell  o,
+                      hash  hval,
+                      byte *buf,
+                      half  length,
+                      cell *ret)
+{
+        hashtable_raw proto;
+        half idx;
+        error_code reason;
+
+        proto.length = length;
+        proto.buf = buf;
+        reason = hashtable_scan(o, hval, (void *) &proto, &idx);
+        if (reason == LERR_MISSING) {
+                *ret = UNDEFINED;
+                return LERR_NONE;
+        } else if (failure_p(reason))
+                return reason;
+        *ret = hashtable_base(o)[idx];
+        return LERR_NONE;
+}
+
+@ Inserting anew and replacing an existing associating in a hashtable
+is the same except for whether its presence or absence is an error.
+When inserting if the hashtable is full and the key not found then
+the hashtable is enlarged.
+
+@c
+error_code
+hashtable_save_m (cell o,
+                  cell datum,
+                  bool replace)
+{
+        hashtable_raw proto;
+        half idx;
+        hash hval;
+        void *ctx;
+        error_code reason;
+
+        assert(hashtable_p(o));
+        if (o == Symbol_Table) {
+                assert(symbol_p(datum));
+                hval = symbol_hash_c(datum);
+                proto.length = -1; /* Match nothing. */
+                ctx = &proto;
+        } else {
+                assert(pair_p(datum) && symbol_p(A(datum)->sin));
+                hval = symbol_hash_c(A(datum)->sin);
+                ctx = (void *) A(datum)->sin;
+        }
+again:
+        reason = hashtable_scan(o, hval, ctx, &idx);
+        if (reason == LERR_MISSING) {
+                if (replace)
+                        return reason;
+                else if (idx == -1) {
+                        orreturn(hashtable_enlarge_m(o));
+                        goto again;
+                }
+        } else if (failure_p(reason))
+                return reason;
+        else if (!replace)
+                return LERR_EXISTS;
+        assert(!failure_p(reason) || hashtable_free_p(o));
+        assert(idx >= 0 && idx < hashtable_length_c(o));
+        hashtable_base(o)[idx] = datum;
+        hashtable_set_free_m(o, hashtable_free_c(o) - 1);
+        return LERR_NONE;
+}
+
+@ Removing an entry from a hashtable replaces it with |UNDEFINED|
+and increases the count of blocked slots. If it crosses a threshold
+|hashtable_reduce_m| to the next size down will reduce the size of
+the hashtable, removing it (and any others).
+
+@c
+error_code
+hashtable_erase_m (cell o,
+                   cell label,
+                   bool relax)
+{
+        half idx;
+        error_code reason;
+
+        assert(hashtable_p(o));
+        assert(symbol_p(label));
+        reason = hashtable_scan(o, symbol_hash_c(label), (void *) label, &idx);
+        if (reason == LERR_MISSING)
+                return relax ? LERR_NONE : LERR_MISSING;
+        assert(!failure_p(reason));
+        hashtable_base(o)[idx] = UNDEFINED;
+        hashtable_set_blocked_m(o, hashtable_blocked_c(o) + 1);
+        return hashtable_reduce_m(o);
+}
+
+@ This page intentionally left blank.
+
+@d HASHTABLE_ASIS  0
+@d HASHTABLE_LABEL 1
+@d HASHTABLE_VALUE 2
+@c
+#if 0
+error_code
+hashtable_to_list (cell  o,
+                   int   preprocess,
+                   cell *ret)
+{
+        assert(hashtable_p(o));
+        acc = NIL;
+        if (preprocess == HASHTABLE_LABEL)
+                pp = lsinx;
+        else if (preprocess == HASHTABLE_VALUE)
+                pp = ldexx;
+        else
+                pp = lasisx;
+        for (i = 0; i < hashtable_length_c(o); i++) {
+                next = hashtable_base(o)[i];
+                if (null_p(next) || !defined_p(next))
+                        continue;
+                orreturn(cons(pp(next), acc, &acc));
+        }
+        *ret = acc;
+        return LERR_NONE;
+}
+#endif
+
+@* Symbols. Most of the time symbols are one or more printable
+letters or other characters, used in particular to bind objects to
+a readable name, but in fact they can be zero or more bytes of any
+value, even zero or any reserved or special character. This sequence
+of bytes is the symbol's {\it label\/}. A symbol also has a {\it
+hash\/} associated with it calculated over the bytes of this label.
+
+If a symbol's label is short enough then it's interned in a heap
+atom rather than allocating a segment, and the hash value is not
+cached but recalculated whenever it's needed.
+
+Every symbol is saved in the symbol table. When a new symbol is
+being created from a span of memory its hash value is calculated
+and then the symbol table is searched to see if that symbol has
+already been created, which is returned instead of creating a new
+one.
+
+@d SYMBOL_MAX (HALF_MAX - sizeof (symbol))
+@d symbol_object(O) ((symbol *) segment_base(O))
+@d symbol_buffer_c(O) (symbol_intern_p(O)
+        ? A(O)->buffer
+        : symbol_object(O)->label)
+@d symbol_hash_c(O) (symbol_intern_p(O)
+        ? hash_buffer(A(O)->buffer, A(O)->length)
+        : symbol_object(O)->hash_value)
+@d symbol_length_c(O) (symbol_intern_p(O) ? A(O)->length
+        : segment_length_c(O) - (half) sizeof (symbol))
+@<Type def...@>=
+typedef struct {
+        hash hash_value; /* Cache the hash value of long symbols. */
+        byte label[]; /* This is {\it bytes\/} not characters. */
+} symbol;
+
+@ @<Global...@>=
+shared cell Symbol_Table = NIL;
+
+@ @<Extern...@>=
+extern shared cell Symbol_Table;
+
+@ @<Fun...@>=
+error_code new_symbol_buffer (byte *, half, bool *, cell *);
+error_code new_symbol_imp (hash, byte *, half, bool *, cell *);
+error_code new_symbol_segment (cell, half, half, cell *);
+
+@ @<Initialise symbol...@>=
+orabort(new_hashtable(0, &Symbol_Table));
+
+@ Most new symbols are created using one of these three front ends,
+|new_symbol_cstr| for a buffer with a terminating zero byte which
+is {\it not\/} included in the symbol and |new_symbol_const| for
+symbols created from constant \CEE/-strings who's length is known
+to the \CEE/ compiler.
+
+@d new_symbol_cstr(O,R) new_symbol_buffer((byte *) (O), -1, NULL, (R))
+@d new_symbol_const(O,R) new_symbol_buffer((byte *) (O), sizeof (O) - 1,
+        NULL, (R))
+@c
+error_code
+new_symbol_buffer (byte *buf,
+                   half  length,
+                   bool *fresh,
+                   cell *ret)
+{
+        hash hval;
+
+        assert(length >= -1 && length < (half) SYMBOL_MAX);
+        if (length == -1)
+                hval = hash_cstr((byte *) buf, &length);
+        else
+                hval = hash_buffer((byte *) buf, length);
+        return new_symbol_imp(hval, buf, length, fresh, ret);
+}
+
+@ TODO: Turn this into another macro.
+
+@.TODO@>
+@c
+error_code
+new_symbol_segment (cell  o,
+                   half  offset,
+                   half  length,
+                   cell *ret)
+{
+        assert(segment_p(o));
+        assert(offset >= 0);
+        assert(length >= 0);
+        assert(length + offset < segment_length_c(o));
+        return new_symbol_buffer(segment_base(o) + offset, length, NULL, ret);
+}
+
+@ To create a symbol from a buffer who's length and hash are known
+first search the symbol table to see if a symbol with that label
+already exists and return it, otherwise allocate a new (possibly
+interned) segment, save it in the symbol table and return that.
+
+@c
+error_code
+new_symbol_imp (hash  hval,
+                byte *buf,
+                half  length,
+                bool *fresh,
+                cell *ret)
+{
+        cell sym;
+        bool ignore;
+        error_code reason;
+
+        assert(length >= 0 && length < (half) SYMBOL_MAX);
         if (fresh == NULL)
                 fresh = &ignore;
-        orreturn(hashtable_search(Symbol_Table, key, symbol_table_match,
-                &scmp, &sym));
+        orreturn(hashtable_search_raw(Symbol_Table, hval, buf, length,
+                &sym));
         if (defined_p(sym)) {
                 *fresh = false;
                 *ret = sym;
                 return LERR_NONE;
         }
         *fresh = true;
-        orreturn(new_segment_imp(Heap_Thread, length, 0, 0, FORM_SYMBOL,
-                FORM_SYMBOL_INTERN, &sym));
-        for (i = 0; i < length; i++)
-                symbol_label(sym)[i] = buf[i];
-        orreturn(hashtable_save_m(Symbol_Table, key, sym,
-                symbol_table_hash, symbol_table_match,@| (void *) sym,
-                false, true));
+        if (length >= INTERN_MAX) {
+                orreturn(new_segment_imp(Heap_Thread, length + sizeof (symbol),
+                        0, FORM_SYMBOL, FORM_NONE, &sym));
+                symbol_object(sym)->hash_value = hval;
+        } else {
+                orreturn(new_atom(NIL, NIL, FORM_SYMBOL_INTERN, &sym));
+                A(sym)->length = length;
+        }
+        memmove(symbol_buffer_c(sym), buf, length);
+        orreturn(hashtable_save_m(Symbol_Table, sym, false));
         *ret = sym;
-        printf("built ");psym(sym);printf(" as %d.\n", TAG(sym));
         return LERR_NONE;
 }
 
-@* Environment. Symbols are bound to values in an {\it environment\/}
-represented by a hashtable and a pointer to another environment
-forming a list. Looking up a binding \Ls/ proceeds along the list
-until an environment {\it layer\/} with the desired binding is
-found. An environment layer without a link to another is a root
-environment.  Usually but not always this will be {\it the\/} root
-environment --- the real root environment is always in |Root|. An
-environment is created empty or by extending an existing environment.
+@* Environment. All of the objects presented so far are united by
+the common theme of being implemented using low level constructs
+to ``look behind the curtain'' of \Ls/' objects. Environment objects
+are the odd one out by being based on plain \Ls/ objects, they are
+included here because they are fundamental. In fact all of other
+objects mostly exists here to provide the support that environment
+objects need.
 
-@d env_layer(O)    (ldex(O))
-@d env_previous(O) (lsin(O))
+An environment is built out of a pair. One half of the pair points
+to a {\it previous\/} environment (circular connections are not
+allowed; an environment cannot point back to itself) and the other
+to a hashtable of symbol-to-value bindings.
+
+Any environment who's previous environment is |NIL| is a {\it root
+environment\/}. One of these is defined during \Ls/' initialisation,
+referred to as {\it the\/} root environment and saved in |Root|.
+
+@d env_layer(O)    (A(O)->dex)
+@d env_previous(O) (A(O)->sin)
 @d env_root_p(O)   (environment_p(O) && null_p(env_previous(O)))
 @<Global...@>=
 shared cell Root = NIL;
+unique cell Environment= NIL;
 
 @ @<Extern...@>=
 extern shared cell Root;
-
-@ @<Finish init...@>=
-orabort(new_empty_env(&Root));
+extern unique cell Environment;
 
 @ @<Fun...@>=
 error_code new_env (cell, cell *);
 cell env_get_root (cell);
-bool env_match (cell, void *);
-hash env_rehash (cell);
-error_code env_root_init (void);
 error_code env_save_m (cell, cell, cell, bool);
 error_code env_search (cell, cell, cell *);
 
-@ Populating the root environment is kept separate from the main
-memory initialisation routines. It seemed like a good idea at the
-time, TODO: it probably isn't.
+@ @<Initialise run-time...@>=
+orabort(new_empty_env(&Root));
+Environment = Root;
 
-@.TODO@>
-@c
-error_code
-env_root_init (void)
-{
-        cell ltmp;
-        int i;
-        error_code reason;
+@ A new environment is created by extending an existing environment,
+a new root or empty environment is created by extending |NIL|.
 
-        @<Populate the |Root| environment@>@;
-        return LERR_NONE;
-}
-
-@ A new environment is an empty hashtable with a link to another
-or |NIL|.
-
-@d new_empty_env(F) (new_env(NIL, (F)))
+@d new_empty_env(R) (new_env(NIL, (R)))
 @c
 error_code
 new_env (cell  o,
@@ -3463,16 +3100,25 @@ new_env (cell  o,
         cell tmp;
         error_code reason;
 
-        if (!environment_p(o) && !null_p(o))
-                return LERR_INCOMPATIBLE;
+        assert(null_p(o) || environment_p(o));
         orreturn(new_hashtable(0, &tmp));
         orreturn(new_atom(o, tmp, FORM_ENVIRONMENT, ret));
         return LERR_NONE;
 }
 
-@ To bind a symbol to a value they are saved in a pair and saved
-into the environment layer hashtable. Searching for a binding will
-return this pair not only the value.
+@ Locate an environment's root however deep in the hierarchy.
+
+@c
+cell
+env_get_root (cell o)
+{
+        assert(environment_p(o));
+        while (!env_root_p(o))
+                o = env_previous(o);
+        return o;
+}
+
+@ Inserting or replacing a binding in an environment.
 
 @c
 error_code
@@ -3487,63 +3133,14 @@ env_save_m (cell o,
         if (!environment_p(o) || !symbol_p(label) || undefined_p(value))
                 return LERR_INCOMPATIBLE;
         orreturn(cons(label, value, &tmp));
-        return hashtable_save_m(env_layer(o), symbol_key(label), tmp,
-                env_rehash, env_match, (void *) label, replace, true);
+        return hashtable_save_m(env_layer(o), tmp, replace);
 }
 
-@ Environments use the following functions with a hashtable to match
-symbols against existing bindings and obtain the binding's label's
-key.
+@ Searching an environment for a binding searches each level of the
+hierarchy in turn until the binding is found or the root environment
+is passed. The value that was bound, and not the pair saved into
+the hashtable, is returned.
 
-@c
-bool
-env_match (cell  o,
-           void *ctx)
-{
-        cell want = (cell) ctx;
-
-        assert(pair_p(o));
-        assert(symbol_p(lsin(o)));
-        return lsin(o) == want;
-}
-
-hash
-env_rehash (cell o)
-{
-        assert(pair_p(o));
-        assert(symbol_p(lsin(o)));
-        return symbol_key(lsin(o));
-}
-
-@ The \Ls/ operator \.{root-environment} doesn't return the environment
-in |Root| but follows a list of environments until it finds ``a''
-root environment, without a link to another. The separate meanings
-of root environment allow the run-time \Ls/ to be fully dynamic
-without compromising its own integrity.
-
-@c
-cell
-env_get_root (cell o)
-{
-        assert(environment_p(o));
-        while (!env_root_p(o))
-                o = env_previous(o);
-        return o;
-}
-
-@ Searching for a binding proceeds along an environment's list of
-ascendents. If |hashtable_search| finds a bound pair then the whole
-binding is returned. If there was no binding, or if a binding was
-found but its value is |UNDEFINED|, then a bare |UNDEFINED| ({\it
-not\/} the pair) is returned --- this is not considered a failure
-here.
-
-TODO: |error_search| etc. should be removed in favour of |root_search|
-but one part of the assembler takes |error_search| as an (optional)
-argument.
-
-@.TODO@>
-@d root_search(L,R) (env_search(Root, (L), (R)))
 @c
 error_code
 env_search (cell  o,
@@ -3551,125 +3148,25 @@ env_search (cell  o,
             cell *ret)
 {
         cell tmp;
-        hash key;
         error_code reason;
 
-        if (!environment_p(o) || !symbol_p(label))
-                return LERR_INCOMPATIBLE;
-        key = symbol_key(label);
+        assert(environment_p(o));
+        assert(symbol_p(label));
         for (; !null_p(o); o = env_previous(o)) {
-                orreturn(hashtable_search(env_layer(o), key,
-                        env_match, (void *) label, &tmp));
+                orreturn(hashtable_search(env_layer(o), label, &tmp));
                 if (defined_p(tmp)) {
-                        *ret = ldex(tmp); /* May be |UNDEFINED|! */
+                        assert(pair_p(tmp));
+                        *ret = A(tmp)->dex;
                         return LERR_NONE;
                 }
         }
-        *ret = UNDEFINED;
-        return LERR_NONE;
+        return LERR_MISSING;
 }
 
-@* Run-time \AM\ Primitives. A {\it primitive\/} is a reference to
-a \CEE/ function with a name and a description of its arguments
-that can be called at run-time. The primitive object is substantially
-similar to the error object with the addition of a function pointer
-and its \Ls/ signature, embedded in the label.
+@* SCOW. Very little thought has gone into this object so not much
+description will either.
 
-TODO: Match the error API more closely (|primitive_label|, not fixed).
-
-@.TODO@>
-@d primitive(O)               (fixed_value(lsin(O)))
-@d primitive_label(O)         (ldex(O))
-@d primitive_object(O)        (&Primitive[primitive(O)])
-@d primitive_applicative_p(O) (primitive_p(O)@|
-        && primitive_object(O)->schema[0] >= '0'
-        && primitive_object(O)->schema[0] <= '9')
-@d primitive_operative_p(O)   (primitive_p(O) && !primitive_applicative_p(O))
-@<Type def...@>=
-typedef enum {
-        PRIMITIVE_PAIR_P,
-        PRIMITIVE_SYMBOL_P,
-        PRIMITIVE_LENGTH
-} primitive_code;
-
-typedef error_code @[@] (*primitive_fn)(cell, cell *);
-
-typedef struct {
-        cell  owner; /* Heap storage. */
-        primitive_fn action;
-        char *schema; /* \Ls/ binding \AM\ signature. */
-} primitive_table;
-
-@ @<Global...@>=
-primitive_table Primitive[] = {
-        @<Primitive schemata@>
-};
-
-@ @<Extern...@>=
-extern primitive_table Primitive[];
-
-@ @<Populate...@>=
-for (i = 0; i < PRIMITIVE_LENGTH; i++) {
-        orreturn(new_symbol_const(Primitive[i].schema + 4, &ltmp));
-        orreturn(new_atom(fix(i), ltmp, FORM_PRIMITIVE, &Primitive[i].owner));
-        orreturn(env_save_m(Root, ltmp, Primitive[i].owner, false));
-}
-
-@ @<Fun...@>=
-error_code primitive_predicate (cell, cell *);
-error_code primitive_search (cell, cell *);
-
-@ @c
-error_code
-primitive_search (cell  o,
-                  cell *ret)
-{
-        global_search(o, primitive_p, ret)@;
-}
-
-@ There are only two primitives at the moment.
-
-@<Primitive...@>=
-[PRIMITIVE_PAIR_P]   = { NIL, primitive_predicate, "11__pair?" },@/
-[PRIMITIVE_SYMBOL_P] = { NIL, primitive_predicate, "11__symbol?" },@/
-
-@ Object predicate primitives use the same function which performs
-the test and converts the result to a \Ls/ value.
-
-@d primitive_call(O,R) primitive_object(O)->action((O), (R))
-@c
-error_code
-primitive_predicate (cell  o,
-                     cell *ret)
-{
-        bool answer;
-        cell value;
-        error_code reason;
-
-        assert(primitive_p(o));
-        assert(primitive_object(o)->schema[0] == '1'
-                && primitive_object(o)->schema[1] == '1');
-        orreturn(clink_pop(&Control_Link, &value));
-        switch (primitive(o)) {
-        case PRIMITIVE_PAIR_P: answer = pair_p(value);@+ break;
-        case PRIMITIVE_SYMBOL_P: answer = symbol_p(value);@+ break;
-        }
-        *ret = predicate(answer);
-        return LERR_NONE;
-}
-
-@* Segmented \CEE/ Object Wrapper. A \CEE/ struct in a segment, or
-an array of them. Every \CEE/ struct definition is registered an
-entry in the global \CEE/-array |SCOW_Attributes| which records its
-length and required base alignment. A scow object is a segment with
-the |SCOW_Attributes| ID in its spare datum cell.
-
-It is not expected that |SCOW_Attributes| will grow particularly
-large and no attempt is made to remove unused entries.
-
-The first scow registration is hard-coded to the osthread object.
-
-This algorithm is very much subject to change.
+There is one built in scow for threads, to hold a |pthread_t|.
 
 @d LSCOW_PTHREAD_T 0
 @<Type def...@>=
@@ -3677,344 +3174,162 @@ typedef struct {
         int length, align;
 } scow;
 
+@ @<Global...@>=
+shared scow *SCOW_Attributes = NULL;
+shared int SCOW_Length = 1; /* To fit |pthread_t| */
+
+@ @<Extern...@>=
+extern shared scow *SCOW_Attributes;
+extern shared int SCOW_Length;
+
 @ @<Fun...@>=
 error_code register_scow (int, int, int *);
 error_code new_scow (int, intmax_t, cell *);
 bool scow_id_p (cell, int);
 half scow_length (cell);
 
+@ @<Initialise for...@>=
+orabort(alloc_mem(NULL, SCOW_Length * sizeof (scow), 0,
+        (void **) &SCOW_Attributes));
+
+@** I/O. None.
+
+@* Runes (Characters). Not defined.
+
+@d ascii_p(O) ((O) >= 0x00 && (O) <= 0x7f)
+@d ascii_space_p(O) ((O) == ' ' || (O) == '\t' || (O) == '\n')
+@d ascii_digit_p(O) ((O) >= '0' && (O) <= '9')
+@d ascii_hex_p(O) (((O) & 0xdf) >= 'A' && ((O) & 0xdf) <= 'F')
+@d ascii_printable_p(O) ((O) >= 0x21 && (O) <= 0x7e)
+@d ascii_upcase_p(O) ((O) >= 'A' && (O) <= 'Z')
+@d ascii_downcase_p(O) ((O) >= 'a' && (O) <= 'z')
+@d ascii_upcase(O) (ascii_downcase_p(O) ? (O) - 0x20 : (O))
+@d ascii_downcase(O) (ascii_upcase_p(O) ? (O) + 0x20 : (O))
+
+@** Virtual Machine.
+
+Table ID = XX YYYY,YYYY YYZZ,ZZZZ
+
+XX shifted left |OBJECTDB_SPLIT_GAP|.
+
+@d ADDRESS_INVALID       INTPTR_MAX
+@#
+@d CODE_PAGE_LENGTH      0x1000000l /* $2^{24}$ */
+@d CODE_PAGE_WIDTH       24
+@d CODE_PAGE_MASK        (CODE_PAGE_LENGTH - 1)
+@d CODE_PAGE_MAX         (CODE_PAGE_LENGTH - 1)
+@d INSTRUCTION_LENGTH    (CODE_PAGE_LENGTH / sizeof (instruction))
+@#
+@d OBJECTDB_SPLIT_BOTTOM 0x00ffc0
+@d OBJECTDB_SPLIT_TOP    0x030000
+@d OBJECTDB_SPLIT_GAP    6 /* to |0x3000000| */
+@d OBJECTDB_TABLE        0x03ffc0
+@d OBJECTDB_ROW          0x00003f
+@d OBJECTDB_TABLE_LENGTH (1 << 12)
+@d OBJECTDB_ROW_LENGTH   (1 << 6)
+@d OBJECTDB_MAX          (OBJECTDB_TABLE_LENGTH * OBJECTDB_ROW_LENGTH)
+@<Type def...@>=
+typedef uintptr_t address; /* |void *| would also be acceptable but for
+                                arithmetic. */
+@#
+typedef int32_t instruction;
+
 @ @<Global...@>=
-shared scow *SCOW_Attributes = NULL;
-shared int SCOW_Length = 1;
+shared cell Program_ObjectDB = NIL; /* Array of multiples of |OBJECTDB_ROW_LENGTH|. */
+shared half Program_ObjectDB_Free = 0; /* Multiple of |OBJECTDB_ROW_LENGTH|. */
+shared cell Program_Export_Table = NIL; /* Pairs of (name . index). */
+shared address *Program_Export_Base = NULL; /* Array indexed in to. */
+shared half Program_Export_Free = 0; /* Next available array slot. */
+shared pthread_mutex_t Program_Lock; /* Global lock for all of the above. */
+@#
+unique address Ip = ADDRESS_INVALID; /* Current (or previous) instruction. */
+shared address Empty_Trap_Handler[LERR_LENGTH] = {0};
+unique address *Trap_Handler = Empty_Trap_Handler;
+unique address Trap_Ip = ADDRESS_INVALID;
+unique error_code Trapped = LERR_NONE;
+@#
+#ifdef LLTEST
+shared long Interpret_Count = 0, Interpret_Limit = 0;
+#endif
 
 @ @<Extern...@>=
-extern shared scow *SCOW_Attributes;
-extern shared int SCOW_Length;
+extern shared cell Program_ObjectDB, Program_Export_Table;
+extern shared half Program_ObjectDB_Free, Program_Export_Free;
+extern shared address *Program_Export_Base;
+extern shared pthread_mutex_t Program_Lock;
+@#
+extern shared address Empty_Trap_Handler[];
+extern unique address Ip, *Trap_Handler, Trap_Ip;
+extern unique error_code Trapped;
+@#
+extern shared long Interpret_Count, Interpret_Limit;
 
-@ The scow attribute array will never shrink or be released so it's
-fine for it to be a segmentless memory allocation.
+@
+@d instruction_page(O) ((O) & ~CODE_PAGE_MASK)
 
-TODO: Add a mutex around this.
+@<Fun...@>=
+error_code init_vm (void);
+error_code vm_locate_entry (cell, address *);
 
-@.TODO@>
-@c
+@ @<Initialise program...@>=
+for (i = 0; i < LERR_LENGTH; i++)
+        Empty_Trap_Handler[i] = ADDRESS_INVALID;
+Trap_Handler = (address *) Empty_Trap_Handler;
+@#
+orabort(init_osthread_mutex(&Program_Lock, false, false));
+orabort(new_array(0, fix(0), &Program_ObjectDB));
+orabort(alloc_mem(NULL, CODE_PAGE_LENGTH, 1 << CODE_PAGE_WIDTH,
+        (void **) &Program_Export_Base));
+assert((address) Program_Export_Base == instruction_page((address)
+        Program_Export_Base));
+orabort(new_hashtable(0, &Program_Export_Table));
+
+@ @(initialise.c@>=
 error_code
-register_scow (int  length,
-               int  align,
-               int *ret)
+init_vm (void)
 {
+        address atmp, adefault;
+        cell ltmp, capture, evaluate, optional, verbatim;
+        cell sig[SIGNATURE_LENGTH];
+        char btmp[1024], *bptr; /* Way more space than necessary. */
+        int i, j, k;
         error_code reason;
 
-        if (SCOW_Length == INT_MAX)
-                return LERR_LIMIT;
-        orreturn(mem_alloc(SCOW_Attributes, (SCOW_Length + 1) * sizeof (scow),
-                sizeof (void *),@| (void **) &SCOW_Attributes));
-        *ret = SCOW_Length++;
-        SCOW_Attributes[*ret].length = length;
-        SCOW_Attributes[*ret].align = align;
+        assert(!VM_Ready);
+        @<Initialise error symbols@>@;
+        @<Initialise assembler symbols@>@;
+        @<Initialise \Ls/ primitives@>@;
+        @<Initialise evaluator and other bytecode@>@;
+        @<Link \Ls/ primitives to installed bytecode@>@;
+        VM_Ready = true;
         return LERR_NONE;
-
-}
-
-@ After registration of its size an object for an array of structs
-can be allocated with the registration ID.
-
-A possible optimisation could adapt interned segments so their
-length is |scow_id|.
-
-@.TODO@>
-@d scow_object(O)       (segment_base(O))
-@d scow_scid(O)         (pointer_datum(O))
-@d scow_set_scid(O,V)   (pointer_set_datum_m((O), (V)))
-@c
-error_code
-new_scow (int       scid,
-          intmax_t  length,
-          cell     *ret)
-{
-        cell lscid;
-        scow *sdb;
-        error_code reason;
-
-        assert(scid >= 0 && scid < SCOW_Length);
-        orreturn(new_int_c(scid, true, &lscid));
-        sdb = SCOW_Attributes + scid;
-        orreturn(new_segment_imp(Heap_Thread, length, sdb->length,
-                sdb->align, FORM_CSTRUCT, FORM_NONE, ret));
-        scow_set_scid(*ret, lscid);
-        return LERR_NONE;
-}
-
-@ A scow matches if its tag is correct {\it and\/} if the ID matches.
-
-@c
-bool
-scow_id_p (cell o,
-           int  scid)
-{
-        intmax_t iscid;
-        error_code reason;
-
-        if (!cstruct_p(o))
-                return false;
-        reason = int_value(scow_scid(o), &iscid);
-        assert(!failure_p(reason));
-        return iscid == scid;
-}
-
-@ Return the length of an array of scow objects.
-
-@c
-half
-scow_length (cell o)
-{
-        intmax_t iscid;
-        error_code reason;
-
-        assert(cstruct_p(o));
-        reason = int_value(scow_scid(o), &iscid);
-        assert(!failure_p(reason));
-        return segment_length(o) / SCOW_Attributes[iscid].length;
-}
-
-@** I/O. Almost no I/O routines are implemented. The only thing
-known at this stage is that there needs to be a file descriptor
-object --- on unix an integer or an opaque HANDLE on Windows.
-
-A global database of file descriptors is kept but it's not clear
-that it's useful.
-
-@d FILE_HANDLE_BUFFER_LENGTH 512
-@<Global...@>=
-shared cell *Files = NULL; /* All the objects holding a file descriptor. */
-shared int Files_Length = 0; /* ... and how many there are. */
-shared pthread_mutex_t Files_Lock;
-
-@ @<Extern...@>=
-extern shared cell *Files;
-extern shared int Files_Length;
-extern shared pthread_mutex_t Files_Lock;
-
-@ @<Fun...@>=
-error_code new_file_handle (int, cell *);
-error_code file_handle_close_m (cell);
-error_code file_handle_get (cell, int *, cell *);
-error_code file_handle_read_word (cell, int, cell *);
-error_code file_handle_release (cell);
-
-@ What if 0/1/2 come in closed?
-
-@<Finish init...@>=
-orabort(mem_alloc(NULL, 3 * sizeof (cell), 0, (void **) &Files));
-for (i = 0; i < 3; i++)
-        Files[i] = NIL;
-Files_Length = 3;
-orabort(new_file_handle(0, Files + 0));
-orabort(new_file_handle(1, Files + 1));
-orabort(new_file_handle(2, Files + 2));
-
-@ @d file_handle_id(O) (lsin(O))
-@d file_handle_state(O) (ldex(O))
-@c
-error_code
-new_file_handle (int   fd,
-                 cell *ret)
-{
-        cell newfd;
-        error_code reason;
-
-        if (fd < 0)
-                return LERR_INCOMPATIBLE;
-        if (fd < Files_Length && !null_p(Files[fd]))
-                return LERR_EXISTS;
-        reason = LERR_NONE;
-        orreturn(new_atom(fd, NIL, FORM_FILE_HANDLE, &newfd));
-        if (pthread_mutex_lock(&Files_Lock) != 0)
-                return LERR_INTERNAL;
-        if (fd >= Files_Length)
-                ortrap(mem_alloc(Files, (fd + 1) * sizeof (cell), 0,
-                        (void **) &Files));
-        for (; Files_Length <= fd; Files_Length++)
-                Files[Files_Length] = NIL;
-        assert(Files_Length > fd);
-        *ret = Files[fd] = newfd;
-Trap:
-        pthread_mutex_unlock(&Files_Lock);
-        return reason;
-}
-
-@ |Files_Lock| must be locked by the caller.
-
-@c
-error_code
-file_handle_release (cell o)
-{
-        intmax_t fd, pfd;
-        error_code reason;
-
-        if (!file_handle_p(o))
-                return LERR_INCOMPATIBLE;
-        orreturn(int_value(o, &fd));
-
-                pfd = (fd >= 0) ? fd : -(fd + 1);
-        if (Files_Length <= pfd || Files[pfd] != o)
-                return LERR_INTERNAL;
-
-        if (true_p(file_handle_state(o))) {
-                Files[pfd] = VOID; /* Not closed properly. */
-                return LERR_LEAK;
-        } else {
-                Files[pfd] = NIL;
-                return LERR_NONE;
-        }
 }
 
 @ @c
 error_code
-file_handle_close_m (cell o)
+vm_locate_entry (cell     label,
+                 address *ret)
 {
-        cell lfd, lneg;
-        intmax_t fd;
-        bool tried;
+        cell loffset;
+        word coffset;
         error_code reason;
 
-        if (!file_handle_p(o))
-                return LERR_INCOMPATIBLE;
-        if (fixed_p(file_handle_id(o))
-                    && false_p(file_handle_state(o)))
-                return LERR_UNOPENED_CLOSE;
-        reason = LERR_NONE;
-        tried = false;
-        orassert(file_handle_get(o, NULL, &lfd));
-        orassert(int_value(lfd, &fd));
-        if (fd < 0)
-                return LERR_BUSY;
-        assert(fd <= Files_Length);
-        if (Files[fd] != o)
-                return LERR_INTERNAL;
-        orreturn(new_int_c(-(fd + 1), true, &lneg));
-        if (pthread_mutex_lock(&Files_Lock) != 0)
-                return LERR_INTERNAL;
-        orassert(lsin_set_m(o, lneg));
-        orassert(ldex_set_m(o, LFALSE));
-        pthread_mutex_unlock(&Files_Lock);
-again:
-        if (close(fd) == -1)
-                switch (errno) {
-                case EBADF:
-                        reason = LERR_INTERNAL;
-                        goto Trap;
-                case EINTR:
-                        if (!tried) {
-                                tried = true;
-                                goto again;
-                        } else {
-                                reason = LERR_INTERRUPT;
-                                goto Trap;
-                        }
-                case EIO:
-                        reason = LERR_IO;
-                        goto Trap;
-                }
-        orassert(file_handle_release(o)); /* ie.~|Files[fd] = NIL|. */
-Trap:
-        if (pthread_mutex_lock(&Files_Lock) != 0)
-                return LERR_INTERNAL;
-        orassert(lsin_set_m(o, lfd)); /* It'll be GCd soon though. */
-        if (failure_p(reason))
-                orassert(ldex_set_m(o, LTRUE));
-        pthread_mutex_unlock(&Files_Lock);
-        return reason;
-}
-
-@ Normally the file descriptor is stored as-is but is flipped into
-a negative number internally when the file handle is being operated
-on.
-
-@c
-error_code
-file_handle_get (cell  o,
-                 int  *iret,
-                 cell *cret)
-{
-        cell i;
-        int v;
-        error_code reason;
-
-        assert(!(iret != NULL && cret != NULL));
-        assert(iret != NULL || cret != NULL);
-        if (!file_handle_p(o))
-                return LERR_INCOMPATIBLE;
-        if (iret == NULL)
-                iret = &v;
-        *iret = file_handle_id(o);
-        if (*iret < 0)
-                *iret = -(*iret - 1);
-        if (cret == NULL)
-                return LERR_NONE;
-@#
-        orreturn(new_int_c(*iret, true, &i));
-        if (*iret < 0)
-                *cret = i;
-        else {
-                orreturn(int_abs(i, &i));
-                orreturn(int_sub(i, fix(1), cret));
-        }
+        assert(symbol_p(label));
+        orreturn(hashtable_search(Program_Export_Table, label, &loffset));
+        if (undefined_p(loffset))
+                return LERR_MISSING;
+        orreturn(int_value(A(loffset)->dex, &coffset));
+        assert(coffset >= 0 && coffset < Program_Export_Free);
+        *ret = Program_Export_Base[coffset];
         return LERR_NONE;
 }
 
-@ @c @.TODO@>
-error_code
-file_handle_read_word (cell  o,
-                       int   length,
-                       cell *ret)
-{
-        atom got = {0};
-        cell new;
-        char *base;
-        int fd, rret;
-        error_code reason;
+@* Registers. There are too many general registers. They have no
+run-time state associated with them except a name.
 
-        if (length < 1 || length > ATOM_BYTES)
-                return LERR_INCOMPATIBLE;
-
-        orreturn(file_handle_get(o, &fd, NULL));
-        orreturn(new_word(0, 0, &new));
-        base = (char *) &got;
-        errno = 0;
-        rret = read(fd, base, length);
-        if (rret == 0)
-                return LERR_EOF;
-        *ret = new;
-        *((atom *) (*ret)) = got;
-        if (rret == length)
-                return LERR_NONE;
-        switch (errno) {
-        default:@;
-        case 0:
-                ((char *) (*ret))[CELL_BYTES - 1] = rret;
-                return LERR_EOF;
-        case EFAULT:@; /* Part of buf points outside the process's allocated address space. */
-        case EINVAL:@; /* |max_length| was larger than |SSIZE_MAX|. */
-                /* impossible... */
-        case EBADF:@; /* not a valid file or socket descriptor open for reading. */
-        case ENOTCONN:@; /* The connection-oriented socket has not been connected. */
-                return LERR_INTERNAL; /* TODO: save |errno|. */
-        case EIO:@; /* An I/O error occurred while reading from the file system. */
-        case EISDIR:@; /* The underlying file is a directory. */
-                return LERR_IO; /* TODO: save |errno|. */
-        case EINTR:@; /* A read from a slow device was interrupted by a
-                                        signal before any data arrived. */
-                return LERR_INTERRUPT;
-        case EAGAIN:@; /* The file was marked for non-blocking I/O, and no
-                                        data were ready to be read. */
-                return LERR_BUSY;
-        }
-}
-
-@** Virtual Machine. There are 40-something general registers. This
-is certainly too many and this VM is mostly stack-based anyway.
-
+@d register_id_c(O) (A(O)->sin)
+@d register_label_c(O) (A(O)->dex)
+@#
 @d LR_r0             0
 @d LR_r1             1
 @d LR_r2             2
@@ -4058,26 +3373,18 @@ is certainly too many and this VM is mostly stack-based anyway.
 @d LR_r40           40
 @d LR_r41           41
 @d LR_r42           42
-@d LR_r43           43
-@d LR_r44           44
-@d LR_GENERAL       44
+@d LR_GENERAL       42
 
-@ 19 registers are used by the virtual machine including 4 which
-aren't a normal cell; these are defined later.
+@ Some global state isn't represented by a register, perhaps these
+should be: |Root|, |SCOW_Attributes|, |Threads|. More?
 
-Of the 13 cell registers 4 have been introduced already: the symbol
-table and three heaps. The remaining registers are defined here and
-also the per-thread array of pointers to them which is used by the
-garbage collector.
-
-``Missing'' registers: |Root|, |SCOW_Attributes|, |Threads|.
-
-
-@d LR_Accumulator   45
-@d LR_Argument_List 46
-@d LR_Control_Link  47 /* Special: push/pop */
-@d LR_Environment   48 /* Typed: environment? */
-@d LR_Expression    49
+@d LR_Scrap         43
+@d LR_Accumulator   44
+@d LR_Argument_List 45
+@d LR_Control_Link  46 /* Special: push/pop */
+@d LR_Environment   47 /* Typed: environment? */
+@d LR_Expression    48
+@d LR_Root          49
 @d LR_Heap_Shared   50 /* Typed: heap */
 @d LR_Heap_Thread   51 /* Typed: heap */
 @d LR_Heap_Trap     52 /* Typed: heap */
@@ -4097,12 +3404,13 @@ garbage collector.
 @d LR_SPECIAL       63
 @d LR_LENGTH        64 /* $2^6$ */
 @<Global...@>=
-unique cell *Register[LR_CELL + 1] = {0};
+unique cell *Register[LR_CELL + 1] = {NULL}; /* The registers. */
+shared cell Register_Table[LR_LENGTH] = {NIL}; /* Run-time register objects. */
 @#
+unique cell Scrap = NIL;
 unique cell Accumulator = NIL;
 unique cell Argument_List = NIL;
 unique cell Control_Link = NIL;
-unique cell Environment = NIL;
 unique cell Expression = NIL;
 unique cell Trap_Arg1 = NIL;
 unique cell Trap_Arg2 = NIL;
@@ -4110,98 +3418,21 @@ unique cell Trap_Result = NIL;
 unique cell VM_Arg1 = NIL;
 unique cell VM_Arg2 = NIL;
 unique cell VM_Result = NIL;
+unique cell General[LR_GENERAL + 1] = {NIL};
 
 @ @<Extern...@>=
-extern unique cell *Register[];
-extern unique cell Accumulator, Argument_List, Control_Link, Environment,
-        Expression, Trap_Arg1, Trap_Arg2, Trap_Result, VM_Arg1, VM_Arg2,
-        VM_Result;
+extern shared cell Register_Table[];
+extern unique cell General[], *Register[];
+extern unique cell Accumulator, Argument_List, Control_Link,
+        Expression, Scrap, Trap_Arg1, Trap_Arg2, Trap_Result, VM_Arg1,
+        VM_Arg2, VM_Result;
 
-@ @<Type def...@>=
-typedef int vm_register; /* |register| is a \CEE/ reserved word. */
-
-typedef struct {
-        cell  owner;
-        char *label;
-} register_table;
-
-@ @<Global...@>=
-shared register_table Register_Table[LR_LENGTH] = {
-        [LR_Accumulator]  = { NIL, "VM:Accumulator" },@|
-        [LR_Argument_List]= { NIL, "VM:Argument-List" },@|
-        [LR_Control_Link] = { NIL, "VM:Control-Link" },@|
-        [LR_Environment]  = { NIL, "VM:Environment" },@|
-        [LR_Expression]   = { NIL, "VM:Expression" },@|
-        [LR_Heap_Shared]  = { NIL, "VM:Heap-Shared" },@|
-        [LR_Heap_Thread]  = { NIL, "VM:Heap-Thread" },@|
-        [LR_Heap_Trap]    = { NIL, "VM:Heap-Trap" },@|
-        [LR_Symbol_Table] = { NIL, "VM:Symbol-Table" },@|
-        [LR_Trap_Arg1]    = { NIL, "VM:Trap-Arg1" },@|
-        [LR_Trap_Arg2]    = { NIL, "VM:Trap-Arg2" },@|
-        [LR_Trap_Result]  = { NIL, "VM:Trap-Result" },@|
-        [LR_Arg1]         = { NIL, "VM:Arg1" },@|
-        [LR_Arg2]         = { NIL, "VM:Arg2" },@|
-        [LR_Result]       = { NIL, "VM:Result" },@|
-        [LR_Trap_Ip]      = { NIL, "VM:Trap-Ip", },@|
-        [LR_Trapped]      = { NIL, "VM:Trapped", },@|
-        [LR_Trap_Handler] = { NIL, "VM:Trap-Handler" },@|
-        [LR_Ip]           = { NIL, "VM:Ip" },@|
-
-@#
-        [LR_r0]           = { NIL, "VM:R0" },@|
-        [LR_r1]           = { NIL, "VM:R1" },@|
-        [LR_r2]           = { NIL, "VM:R2" },@|
-        [LR_r3]           = { NIL, "VM:R3" },@|
-        [LR_r4]           = { NIL, "VM:R4" },@|
-        [LR_r5]           = { NIL, "VM:R5" },@|
-        [LR_r6]           = { NIL, "VM:R6" },@|
-        [LR_r7]           = { NIL, "VM:R7" },@|
-        [LR_r8]           = { NIL, "VM:R8" },@|
-        [LR_r9]           = { NIL, "VM:R9" },@|
-        [LR_r10]          = { NIL, "VM:R10" },@|
-        [LR_r11]          = { NIL, "VM:R11" },@|
-        [LR_r12]          = { NIL, "VM:R12" },@|
-        [LR_r13]          = { NIL, "VM:R13" },@|
-        [LR_r14]          = { NIL, "VM:R14" },@|
-        [LR_r15]          = { NIL, "VM:R15" },@|
-        [LR_r16]          = { NIL, "VM:R16" },@|
-        [LR_r17]          = { NIL, "VM:R17" },@|
-        [LR_r18]          = { NIL, "VM:R18" },@|
-        [LR_r19]          = { NIL, "VM:R19" },@|
-        [LR_r20]          = { NIL, "VM:R20" },@|
-        [LR_r21]          = { NIL, "VM:R21" },@|
-        [LR_r22]          = { NIL, "VM:R22" },@|
-        [LR_r23]          = { NIL, "VM:R23" },@|
-        [LR_r24]          = { NIL, "VM:R24" },@|
-        [LR_r25]          = { NIL, "VM:R25" },@|
-        [LR_r26]          = { NIL, "VM:R26" },@|
-        [LR_r27]          = { NIL, "VM:R27" },@|
-        [LR_r28]          = { NIL, "VM:R28" },@|
-        [LR_r29]          = { NIL, "VM:R29" },@|
-        [LR_r30]          = { NIL, "VM:R30" },@|
-        [LR_r31]          = { NIL, "VM:R31" },@|
-        [LR_r32]          = { NIL, "VM:R32" },@|
-        [LR_r33]          = { NIL, "VM:R33" },@|
-        [LR_r34]          = { NIL, "VM:R34" },@|
-        [LR_r35]          = { NIL, "VM:R35" },@|
-        [LR_r36]          = { NIL, "VM:R36" },@|
-        [LR_r37]          = { NIL, "VM:R37" },@|
-        [LR_r38]          = { NIL, "VM:R38" },@|
-        [LR_r39]          = { NIL, "VM:R39" },@|
-        [LR_r40]          = { NIL, "VM:R40" },@|
-        [LR_r41]          = { NIL, "VM:R41" },@|
-        [LR_r42]          = { NIL, "VM:R42" },@|
-        [LR_r43]          = { NIL, "VM:R43" },@|
-        [LR_r44]          = { NIL, "VM:R44" },@|
-};
-
-@ @<Extern...@>=
-extern shared register_table Register_Table[];
-
-@ @<(Re-)Initialise per thread@>=
+@ @<(Re-)Initialise thread register pointers@>=
+Register[LR_Scrap] = &Scrap;
 Register[LR_Accumulator] = &Accumulator;
 Register[LR_Argument_List] = &Argument_List;
 Register[LR_Environment] = &Environment;
+Register[LR_Root] = &Root;
 Register[LR_Expression] = &Expression;
 Register[LR_Control_Link] = &Control_Link;
 Register[LR_Arg1] = &VM_Arg1;
@@ -4210,115 +3441,174 @@ Register[LR_Result] = &VM_Result;
 Register[LR_Trap_Arg1] = &Trap_Arg1;
 Register[LR_Trap_Arg2] = &Trap_Arg2;
 Register[LR_Trap_Result] = &Trap_Result;
+for (i = 0; i <= LR_GENERAL; i++)
+        Register[i] = General + i;
 
-@ @<Finish init...@>=
-Environment = Root;
+@ @<Data...@>=
+shared char *Register_Label[LR_LENGTH] = {
+        [LR_Scrap]        = "VM:Temp",@|
+        [LR_Accumulator]  = "VM:Accumulator",@|
+        [LR_Argument_List]= "VM:Argument-List",@|
+        [LR_Control_Link] = "VM:Control-Link",@|
+        [LR_Environment]  = "VM:Environment",@|
+        [LR_Root]         = "VM:Root",@|
+        [LR_Expression]   = "VM:Expression",@|
+        [LR_Heap_Shared]  = "VM:Heap-Shared",@|
+        [LR_Heap_Thread]  = "VM:Heap-Thread",@|
+        [LR_Heap_Trap]    = "VM:Heap-Trap",@|
+        [LR_Symbol_Table] = "VM:Symbol-Table",@|
+        [LR_Trap_Arg1]    = "VM:Trap-Arg1",@|
+        [LR_Trap_Arg2]    = "VM:Trap-Arg2",@|
+        [LR_Trap_Result]  = "VM:Trap-Result",@|
+        [LR_Arg1]         = "VM:Arg1",@|
+        [LR_Arg2]         = "VM:Arg2",@|
+        [LR_Result]       = "VM:Result",@|
+        [LR_Trap_Ip]      = "VM:Trap-Ip",@|
+        [LR_Trapped]      = "VM:Trapped",@|
+        [LR_Trap_Handler] = "VM:Trap-Handler",@|
+        [LR_Ip]           = "VM:Ip",@|
+@#
+        [LR_r0]           = "VM:R0",@|
+        [LR_r1]           = "VM:R1",@|
+        [LR_r2]           = "VM:R2",@|
+        [LR_r3]           = "VM:R3",@|
+        [LR_r4]           = "VM:R4",@|
+        [LR_r5]           = "VM:R5",@|
+        [LR_r6]           = "VM:R6",@|
+        [LR_r7]           = "VM:R7",@|
+        [LR_r8]           = "VM:R8",@|
+        [LR_r9]           = "VM:R9",@|
+        [LR_r10]          = "VM:R10",@|
+        [LR_r11]          = "VM:R11",@|
+        [LR_r12]          = "VM:R12",@|
+        [LR_r13]          = "VM:R13",@|
+        [LR_r14]          = "VM:R14",@|
+        [LR_r15]          = "VM:R15",@|
+        [LR_r16]          = "VM:R16",@|
+        [LR_r17]          = "VM:R17",@|
+        [LR_r18]          = "VM:R18",@|
+        [LR_r19]          = "VM:R19",@|
+        [LR_r20]          = "VM:R20",@|
+        [LR_r21]          = "VM:R21",@|
+        [LR_r22]          = "VM:R22",@|
+        [LR_r23]          = "VM:R23",@|
+        [LR_r24]          = "VM:R24",@|
+        [LR_r25]          = "VM:R25",@|
+        [LR_r26]          = "VM:R26",@|
+        [LR_r27]          = "VM:R27",@|
+        [LR_r28]          = "VM:R28",@|
+        [LR_r29]          = "VM:R29",@|
+        [LR_r30]          = "VM:R30",@|
+        [LR_r31]          = "VM:R31",@|
+        [LR_r32]          = "VM:R32",@|
+        [LR_r33]          = "VM:R33",@|
+        [LR_r34]          = "VM:R34",@|
+        [LR_r35]          = "VM:R35",@|
+        [LR_r36]          = "VM:R36",@|
+        [LR_r37]          = "VM:R37",@|
+        [LR_r38]          = "VM:R38",@|
+        [LR_r39]          = "VM:R39",@|
+        [LR_r40]          = "VM:R40",@|
+        [LR_r41]          = "VM:R41",@|
+        [LR_r42]          = "VM:R42",@|
+};
 
-@
-@d register_id(O)     (lsin(O))
-@d register_label(O)  (ldex(O))
-@d register_object(O) (&Register_Table[register_id(O)])
-@<Fun...@>=
-error_code register_search (cell, cell *);
-
-@ @<Finish init...@>=
+@ @<Initialise ass...@>=
 for (i = 0; i < LR_LENGTH; i++) {
-        orabort(new_symbol_const(Register_Table[i].label, &ltmp));
-        orabort(new_atom(i, ltmp, FORM_REGISTER, &Register_Table[i].owner));
+        orreturn(new_symbol_cstr(Register_Label[i], &ltmp));
+        orreturn(new_atom(fix(i), ltmp, FORM_REGISTER, Register_Table + i));
+        orreturn(env_save_m(Root, ltmp, Register_Table[i], false));
 }
 
-@ @<Populate the |Root| environment@>=
-for (i = 0; i < LR_LENGTH; i++) {
-        ltmp = register_label(Register_Table[i].owner);
-        orreturn(env_save_m(Root, ltmp, Register_Table[i].owner, false));
-}
-
-@ Three commonly-used registers are bound to an additional short
+@ Six commonly-used registers are bound to an additional short
 names for convenience.
 
-@<Populate the |Root| environment@>=
+@<Initialise ass...@>=
 orabort(new_symbol_const("VM:Acc", &ltmp));
-orabort(env_save_m(Root, ltmp, Register_Table[LR_Accumulator].owner, false));
+orabort(env_save_m(Root, ltmp, Register_Table[LR_Accumulator], false));
 orabort(new_symbol_const("VM:Args", &ltmp));
-orabort(env_save_m(Root, ltmp, Register_Table[LR_Argument_List].owner, false));
+orabort(env_save_m(Root, ltmp, Register_Table[LR_Argument_List], false));
 orabort(new_symbol_const("VM:Clink", &ltmp));
-orabort(env_save_m(Root, ltmp, Register_Table[LR_Control_Link].owner, false));
+orabort(env_save_m(Root, ltmp, Register_Table[LR_Control_Link], false));
 orabort(new_symbol_const("VM:Env", &ltmp));
-orabort(env_save_m(Root, ltmp, Register_Table[LR_Environment].owner, false));
+orabort(env_save_m(Root, ltmp, Register_Table[LR_Environment], false));
 orabort(new_symbol_const("VM:Expr", &ltmp));
-orabort(env_save_m(Root, ltmp, Register_Table[LR_Expression].owner, false));
+orabort(env_save_m(Root, ltmp, Register_Table[LR_Expression], false));
+orabort(new_symbol_const("VM:Tmp", &ltmp));
+orabort(env_save_m(Root, ltmp, Register_Table[LR_Scrap], false));
 
-@ @c
-error_code
-register_search (cell  o,
-                 cell *ret)
-{
-        global_search(o, register_p, ret)@;
-}
+@* Opcodes.
 
-@ Opcodes work similarly to registers. These could probably be
-organised more efficiently.
-
+@d opcode_id_c(O)        (A(O)->sin)
+@d opcode_label_c(O)     (A(O)->dex)
+@d opcode_object(O)      (&Op[fixed_value(opcode_id_c(O))])
+@d opcode_signature_c(O) (&opcode_object(O)->arg0)
 @<Type def...@>=
-typedef enum {
-        OP_ADD,
-        OP_APPLICATIVE,
-        OP_CAR,
-        OP_CDR,
-        OP_CMP,
-        OP_CMPEQ,
-        OP_CMPGE,
-        OP_CMPGT,
-        OP_CMPIS,
-        OP_CMPLE,
-        OP_CMPLT,
-        OP_CONS,
-        OP_DEFINE_M,
-        OP_DELIMIT,
-        OP_EXTEND,
-        OP_HALT,
-        OP_JOIN,
-        OP_JUMP,
-        OP_LOAD,
-        OP_LOOKUP,
-        OP_OPEN,
-        OP_OPERATIVE,
-        OP_PEND,
-        OP_REPLACE_M,
-        OP_SLO,
-        OP_SPORK,
-        OP_SUB,
-        OP_TEST,
-        OP_TRAP,
-        OP_WIDESPORK,
-        OP_WIDETEST,
-        OPCODE_LENGTH
-} opcode;
-
 typedef struct {
         cell   owner;
-        char  *label;
         char   arg0;
         char   arg1;
         char   arg2;
 } opcode_table;
 
-@ Sorted first by length, then alphabetically, because CWEB can't
-(?) align code in columns.
+@ @<Type def...@>=
+typedef enum {
+        OP_HALT, /* Instruction 0 for uninitialised memory. */
+        OP_ADD,
+        OP_APPLICATIVE,
+        OP_APPLICATIVE_P,
+        OP_ARRAY_P,
+        OP_BRANCH,
+        OP_CAR,
+        OP_CDR,
+        OP_CLOSURE_P,
+        OP_CMP,
+        OP_CMPEQ_P,
+        OP_CMPGE_P,
+        OP_CMPGT_P,
+        OP_CMPIS_P,
+        OP_CMPLE_P,
+        OP_CMPLT_P,
+        OP_CONS,
+        OP_DEFINE_M,
+        OP_DELIMIT,
+        OP_EXTEND,
+        OP_INTEGER_P,
+        OP_JOIN,
+        OP_JUMP,
+        OP_LENGTH,
+        OP_LOAD,
+        OP_LOOKUP,
+        OP_MUL,
+        OP_OPEN,
+        OP_OPERATIVE,
+        OP_OPERATIVE_P,
+        OP_PAIR_P,
+        OP_PEEK,
+        OP_PEEK2,
+        OP_PEEK4,
+        OP_PEEK8,
+        OP_PEND,
+        OP_POKE_M,
+        OP_POKE2_M,
+        OP_POKE4_M,
+        OP_POKE8_M,
+        OP_PRIMITIVE_P,
+        OP_REPLACE_M,
+        OP_RESUMPTION_P,
+        OP_SEGMENT_P,
+        OP_SIGNATURE,
+        OP_SPORK,
+        OP_SUB,
+        OP_SYMBOL,
+        OP_SYMBOL_P,
+        OP_TRAP,
+        OP_WIDEBRANCH,
+        OP_WIDESPORK,
+        OPCODE_LENGTH
+} opcode;
 
-Of the arguments which accept |ALOT| in the first place, only
-|OP_JOIN| can use anything other than a register.
-
-|OP_TRAP| reads a symbol in the assembly and stores it as an integer
-in the bytecode, a la register/opcode.
-
-|OP_HALT| is the only other unusual opcode with no arguments.
-Everything else takes 1 or 2 and saves the result in a register.
-
-|OP_SPORK| and |OP_TEST| should only be used to jump to symbolic
-addresses if the symbols are guaranteed to be in the first $2^{16}$
-exported symbols.
-
+@
 @d NARG 0 /* No argument. */
 @d AADD 1 /* An address. */
 @d ALOB 2 /* An \Ls/ object. */
@@ -4327,237 +3617,448 @@ exported symbols.
 @d ARGH 5 /* A trap code (symbol, encoded as an 8-bit iny). */
 @<Global...@>=
 shared opcode_table Op[OPCODE_LENGTH] = {@|
-        [OP_APPLICATIVE]= { NIL, "VM:APPLICATIVE",  AREG, ALOT, ALOT },@|
-        [OP_OPERATIVE]  = { NIL, "VM:OPERATIVE",    AREG, ALOT, ALOT },@|
-        [OP_REPLACE_M]  = { NIL, "VM:REPLACE!",     AREG, ALOT, ALOT },@|
-        [OP_WIDESPORK]  = { NIL, "VM:WIDESPORK",    AADD, NARG, NARG },@|
-        [OP_DEFINE_M]   = { NIL, "VM:DEFINE!",      AREG, ALOT, ALOT },@|
-        [OP_WIDETEST]   = { NIL, "VM:WIDETEST",     AADD, NARG, NARG },@|
-        [OP_DELIMIT]    = { NIL, "VM:DELIMIT",      AREG, NARG, NARG },@|
-        [OP_EXTEND]     = { NIL, "VM:EXTEND",       AREG, ALOB, NARG },@|
-        [OP_LOOKUP]     = { NIL, "VM:LOOKUP",       AREG, ALOB, NARG },@|
-        [OP_CMPEQ]      = { NIL, "VM:CMPEQ?",       AREG, ALOT, ALOT },@|
-        [OP_CMPGE]      = { NIL, "VM:CMPGE?",       AREG, ALOT, ALOT },@|
-        [OP_CMPGT]      = { NIL, "VM:CMPGT?",       AREG, ALOT, ALOT },@|
-        [OP_CMPIS]      = { NIL, "VM:CMPIS?",       AREG, ALOT, ALOT },@|
-        [OP_CMPLE]      = { NIL, "VM:CMPLE?",       AREG, ALOT, ALOT },@|
-        [OP_CMPLT]      = { NIL, "VM:CMPLT?",       AREG, ALOT, ALOT },@|
-        [OP_SPORK]      = { NIL, "VM:SPORK",        AREG, AADD, NARG },@|
-        [OP_CONS]       = { NIL, "VM:CONS",         AREG, ALOT, ALOT },@|
-        [OP_HALT]       = { NIL, "VM:HALT",         NARG, NARG, NARG },@|
-        [OP_JOIN]       = { NIL, "VM:JOIN",         AREG, ALOB, NARG },@|
-        [OP_JUMP]       = { NIL, "VM:JUMP",         AADD, NARG, NARG },@|
-        [OP_LOAD]       = { NIL, "VM:LOAD",         AREG, ALOB, NARG },@|
-        [OP_OPEN]       = { NIL, "VM:OPEN",         AREG, ALOB, NARG },@|
-        [OP_PEND]       = { NIL, "VM:PEND",         AREG, AADD, NARG },@|
-        [OP_TEST]       = { NIL, "VM:TEST",         AREG, AADD, NARG },@|
-        [OP_TRAP]       = { NIL, "VM:TRAP",         ARGH, NARG, NARG },@|
-        [OP_ADD]        = { NIL, "VM:ADD",          AREG, ALOT, ALOT },@|
-        [OP_CAR]        = { NIL, "VM:CAR",          AREG, ALOB, NARG },@|
-        [OP_CDR]        = { NIL, "VM:CDR",          AREG, ALOB, NARG },@|
-        [OP_CMP]        = { NIL, "VM:CMP",          AREG, ALOT, ALOT },@|
-        [OP_SLO]        = { NIL, "VM:SLO",          AREG, ALOB, NARG },@|
-        [OP_SUB]        = { NIL, "VM:SUB",          AREG, ALOT, ALOT },@/
+        [OP_APPLICATIVE_P]  = { NIL, AREG, ALOB, NARG },@|
+        [OP_RESUMPTION_P]   = { NIL, AREG, ALOB, NARG },@|
+        [OP_APPLICATIVE]    = { NIL, AREG, ALOT, ALOT },@|
+        [OP_OPERATIVE_P]    = { NIL, AREG, ALOB, NARG },@|
+        [OP_PRIMITIVE_P]    = { NIL, AREG, ALOB, NARG },@|
+        [OP_WIDEBRANCH]     = { NIL, AADD, NARG, NARG },@|
+        [OP_CLOSURE_P]      = { NIL, AREG, ALOT, ALOT },@|
+        [OP_INTEGER_P]      = { NIL, AREG, ALOB, NARG },@|
+        [OP_OPERATIVE]      = { NIL, AREG, ALOT, ALOT },@|
+        [OP_REPLACE_M]      = { NIL, AREG, ALOT, ALOT },@|
+        [OP_SIGNATURE]      = { NIL, AREG, ALOB, NARG },@|
+        [OP_WIDESPORK]      = { NIL, AADD, NARG, NARG },@|
+        [OP_SEGMENT_P]      = { NIL, AREG, ALOB, NARG },@|
+        [OP_DEFINE_M]       = { NIL, AREG, ALOT, ALOT },@|
+        [OP_SYMBOL_P]       = { NIL, AREG, ALOB, NARG },@|
+        [OP_ARRAY_P]        = { NIL, AREG, ALOB, NARG },@|
+        [OP_CMPEQ_P]        = { NIL, AREG, ALOT, ALOT },@|
+        [OP_CMPGE_P]        = { NIL, AREG, ALOT, ALOT },@|
+        [OP_CMPGT_P]        = { NIL, AREG, ALOT, ALOT },@|
+        [OP_CMPIS_P]        = { NIL, AREG, ALOT, ALOT },@|
+        [OP_CMPLE_P]        = { NIL, AREG, ALOT, ALOT },@|
+        [OP_CMPLT_P]        = { NIL, AREG, ALOT, ALOT },@|
+        [OP_DELIMIT]        = { NIL, AREG, NARG, NARG },@|
+        [OP_POKE2_M]        = { NIL, AREG, ALOT, ALOT },@|
+        [OP_POKE4_M]        = { NIL, AREG, ALOT, ALOT },@|
+        [OP_POKE8_M]        = { NIL, AREG, ALOT, ALOT },@|
+        [OP_BRANCH]         = { NIL, AREG, AADD, NARG },@|
+        [OP_EXTEND]         = { NIL, AREG, ALOB, NARG },@|
+        [OP_LENGTH]         = { NIL, AREG, ALOB, NARG },@|
+        [OP_LOOKUP]         = { NIL, AREG, ALOB, NARG },@|
+        [OP_PAIR_P]         = { NIL, AREG, ALOB, NARG },@|
+        [OP_POKE_M]         = { NIL, AREG, ALOT, ALOT },@|
+        [OP_PEEK2]          = { NIL, AREG, ALOT, ALOT },@|
+        [OP_PEEK4]          = { NIL, AREG, ALOT, ALOT },@|
+        [OP_PEEK8]          = { NIL, AREG, ALOT, ALOT },@|
+        [OP_SYMBOL]         = { NIL, AREG, ALOT, ALOT },@|
+        [OP_SPORK]          = { NIL, AREG, AADD, NARG },@|
+        [OP_CONS]           = { NIL, AREG, ALOT, ALOT },@|
+        [OP_HALT]           = { NIL, NARG, NARG, NARG },@|
+        [OP_JOIN]           = { NIL, AREG, ALOB, NARG },@|
+        [OP_JUMP]           = { NIL, AADD, NARG, NARG },@|
+        [OP_LOAD]           = { NIL, AREG, ALOB, NARG },@|
+        [OP_OPEN]           = { NIL, AREG, ALOB, NARG },@|
+        [OP_PEEK]           = { NIL, AREG, ALOT, ALOT },@|
+        [OP_PEND]           = { NIL, AREG, AADD, NARG },@|
+        [OP_TRAP]           = { NIL, ARGH, NARG, NARG },@|
+        [OP_ADD]            = { NIL, AREG, ALOT, ALOT },@|
+        [OP_CAR]            = { NIL, AREG, ALOB, NARG },@|
+        [OP_CDR]            = { NIL, AREG, ALOB, NARG },@|
+        [OP_CMP]            = { NIL, AREG, ALOT, ALOT },@|
+        [OP_MUL]            = { NIL, AREG, ALOT, ALOT },@|
+        [OP_SUB]            = { NIL, AREG, ALOT, ALOT },@/
 };
 
 @ @<Extern...@>=
 extern shared opcode_table Op[];
 
-@
-@d opcode_id(O)        (lsin(O))
-@d opcode_label(O)     (ldex(O))
-@d opcode_object(O)    (&Op[opcode_id(O)])
-@d opcode_signature(O) (&(Op[opcode_id(O)].arg0))
-@<Fun...@>=
-error_code opcode_search (cell, cell *);
+@ @<Data...@>=
+shared char *Opcode_Label[OPCODE_LENGTH] = {@|
+        [OP_APPLICATIVE_P]  = "VM:APPLICATIVE?",@|
+        [OP_RESUMPTION_P]   = "VM:RESUMPTION?",@|
+        [OP_APPLICATIVE]    = "VM:APPLICATIVE",@|
+        [OP_OPERATIVE_P]    = "VM:OPERATIVE?",@|
+        [OP_PRIMITIVE_P]    = "VM:PRIMITIVE?",@|
+        [OP_WIDEBRANCH]     = "VM:WIDEBRANCH",@|
+        [OP_CLOSURE_P]      = "VM:CLOSURE?",@|
+        [OP_INTEGER_P]      = "VM:INTEGER?",@|
+        [OP_OPERATIVE]      = "VM:OPERATIVE",@|
+        [OP_REPLACE_M]      = "VM:REPLACE!",@|
+        [OP_SIGNATURE]      = "VM:SIGNATURE",@|
+        [OP_WIDESPORK]      = "VM:WIDESPORK",@|
+        [OP_SEGMENT_P]      = "VM:SEGMENT?",@|
+        [OP_DEFINE_M]       = "VM:DEFINE!",@|
+        [OP_SYMBOL_P]       = "VM:SYMBOL?",@|
+        [OP_ARRAY_P]        = "VM:ARRAY?",@|
+        [OP_CMPEQ_P]        = "VM:CMPEQ?",@|
+        [OP_CMPGE_P]        = "VM:CMPGE?",@|
+        [OP_CMPGT_P]        = "VM:CMPGT?",@|
+        [OP_CMPIS_P]        = "VM:CMPIS?",@|
+        [OP_CMPLE_P]        = "VM:CMPLE?",@|
+        [OP_CMPLT_P]        = "VM:CMPLT?",@|
+        [OP_DELIMIT]        = "VM:DELIMIT",@|
+        [OP_POKE2_M]        = "VM:POKE2!",@|
+        [OP_POKE4_M]        = "VM:POKE4!",@|
+        [OP_POKE8_M]        = "VM:POKE8!",@|
+        [OP_BRANCH]         = "VM:BRANCH",@|
+        [OP_EXTEND]         = "VM:EXTEND",@|
+        [OP_LENGTH]         = "VM:LENGTH",@|
+        [OP_LOOKUP]         = "VM:LOOKUP",@|
+        [OP_PAIR_P]         = "VM:PAIR?",@|
+        [OP_POKE_M]         = "VM:POKE!",@|
+        [OP_SYMBOL]         = "VM:SYMBOL",@|
+        [OP_PEEK2]          = "VM:PEEK2",@|
+        [OP_PEEK4]          = "VM:PEEK4",@|
+        [OP_PEEK8]          = "VM:PEEK8",@|
+        [OP_SPORK]          = "VM:SPORK",@|
+        [OP_CONS]           = "VM:CONS",@|
+        [OP_HALT]           = "VM:HALT",@|
+        [OP_JOIN]           = "VM:JOIN",@|
+        [OP_JUMP]           = "VM:JUMP",@|
+        [OP_LOAD]           = "VM:LOAD",@|
+        [OP_OPEN]           = "VM:OPEN",@|
+        [OP_PEEK]           = "VM:PEEK",@|
+        [OP_PEND]           = "VM:PEND",@|
+        [OP_TRAP]           = "VM:TRAP",@|
+        [OP_ADD]            = "VM:ADD",@|
+        [OP_CAR]            = "VM:CAR",@|
+        [OP_CDR]            = "VM:CDR",@|
+        [OP_CMP]            = "VM:CMP",@|
+        [OP_MUL]            = "VM:MUL",@|
+        [OP_SUB]            = "VM:SUB",@/
+};
 
-@ @<Finish init...@>=
+@ @<Initialise ass...@>=
 for (i = 0; i < OPCODE_LENGTH; i++) {
-        orabort(new_symbol_const(Op[i].label, &ltmp));
-        orabort(new_atom(i, ltmp, FORM_OPCODE, &Op[i].owner));
+        orabort(new_symbol_cstr(Opcode_Label[i], &ltmp));
+        orabort(new_atom(fix(i), ltmp, FORM_OPCODE, &Op[i].owner));
+        orabort(env_save_m(Root, ltmp, Op[i].owner, false));
 }
 
-@ @<Populate the |Root| environment@>=
-for (i = 0; i < OPCODE_LENGTH; i++)
-        orreturn(env_save_m(Root, opcode_label(Op[i].owner), Op[i].owner, false));
+@* Run-time primitives.
 
-@ Identical to |register_search| except for the result validation.
-
-@c
-error_code
-opcode_search (cell  o,
-               cell *ret)
-{
-        global_search(o, opcode_p, ret)@;
-}
-
-@ An instruction address is simply a disguised pointer. TODO: account
-for different word sizes.
-
-@.TODO@>
-@d PROGRAM_INVALID     UINTPTR_MAX /* Yes, it's yet another |NULL|. */
 @<Type def...@>=
-typedef uintptr_t address; /* |void *| would also be acceptable but for
-                                arithmetic. */
+typedef error_code @[@] (*primitive_fn)(cell, cell *);
+
+typedef struct {
+        cell    signature;
+        cell    owner;
+        address wrapper;
+        primitive_fn action;
+} primitive;
+
+@ @d primitive_object(O) (&Primitive[fixed_value(A(O)->sin)])
+@d primitive_signature_c(O) (primitive_object(O)->signature)
+@<Type def...@>=
+typedef enum {
+        PRIMITIVE_ADD,
+        PRIMITIVE_SUB,
+        PRIMITIVE_MUL,
+
+        PRIMITIVE_ARRAY_LENGTH,
+        PRIMITIVE_ARRAY_OFFSET,
+        PRIMITIVE_ARRAY_P,
+        PRIMITIVE_ARRAY_REF,
+        PRIMITIVE_ARRAY_RESIZE_M,
+        PRIMITIVE_ARRAY_SET_M,
+        PRIMITIVE_BOOLEAN_P,
+        PRIMITIVE_CAR,
+        PRIMITIVE_CDR,
+        PRIMITIVE_CONS,
+        PRIMITIVE_DO,
+        PRIMITIVE_FALSE_P,
+        PRIMITIVE_IS_P,
+        PRIMITIVE_LAMBDA,
+        PRIMITIVE_NEW_ARRAY,
+        PRIMITIVE_NEW_SEGMENT,
+        PRIMITIVE_NULL_P,
+        PRIMITIVE_PAIR_P,
+        PRIMITIVE_SEGMENT_LENGTH,
+        PRIMITIVE_SEGMENT_P,
+        PRIMITIVE_SEGMENT_RESIZE_M,
+        PRIMITIVE_NEW_SYMBOL_SEGMENT,
+        PRIMITIVE_SYMBOL_HASH,
+        PRIMITIVE_SYMBOL_P,
+        PRIMITIVE_SYMBOL_SEGMENT,
+        PRIMITIVE_SYS_READ,
+        PRIMITIVE_SYS_WRITE,
+        PRIMITIVE_TRUE_P,
+        PRIMITIVE_VOV,
+        PRIMITIVE_CURRENT_ENVIRONMENT,
+        PRIMITIVE_ROOT_ENVIRONMENT,
+
+        PRIMITIVE_VOID_P,
+        PRIMITIVE_INTEGER_P,
+
+        PRIMITIVE_LENGTH
+} primitive_code;
 @#
-typedef int32_t instruction;
+enum {
+        SIGNATURE_00,
+        SIGNATURE_11,
+        SIGNATURE_13,
+        SIGNATURE_22,
+        SIGNATURE_24,
+        SIGNATURE_33,
+        SIGNATURE_C,
+        SIGNATURE_EV,
+        SIGNATURE_EVC,
+        SIGNATURE_EVO,
+        SIGNATURE_VC,
+        SIGNATURE_LENGTH
+};
 
-@ Instructions are encoded in 32 bits or 4 bytes. The opcode
-categorises the arguments three ways (four if you include |OP_HALT|):
-address, single-object and dual-object.
-
-Two mode bits then identify how to interpret the remaining 3 bytes.
-
-Addresses, 16 or 24 bit, may be direct --- either relative or offset
-within the current 24-bit page --- or reference an offset in a
-global 24-bit page where a full-width address is located.
-
-Dual-object instructions use each mode bit to determine whether the
-respective argument represents a register or an inline object. If
-it's a register then the high bit indicates whether the value should
-be obtained from the register by popping a stack.
-
-Single-object instructions always include 6 bits identifying a
-register in their target argument. The mode indentifies one of four
-ways of interpreting the remaining 18 bits:
-
-\yitem |LBC_OBJECT_CONSTANT| The low 16 bits are treated as a signed
-integer (|int16_t|) holding the internal \Ls/ representation of a
-constant (ie.~it will be 0 representing |NIL| or a negative number).
-
-\yitem |LBC_OBJECT_INTEGER| The low 16 bits are similarly treated as a signed
-integer, this time representing itself.
-
-\yitem |LBC_OBJECT_REGISTER| The lowest 8 bits are ignored and the 8 above
-it are interpreted as a register just like the first of a dual-argument
-instruction.
-
-\yitem |LBC_OBJECT_TABLE| The lowest 6 bits constitute an index. 12 bits
-above that (including 2 from {\it above\/} the target register ---
-see |TABL| in the diagram) a table ID. Tables are a process-global
-resource allocated and populated when an assembly object is linked
-which contain arbitrary objects.
-
-These macros return the bits marked X shifted to the right.
-
-TODO: Art.
-
-@.TODO@>
-@d IB0(I) 42
-@#
-@d ximOP(I)   (((I) & 0x3f000000) >> 24)   /* ..XXXXXX ........ ........ ........ */
-@d ximMODE(I) (((I) & 0xc0000000) >> 30)   /* XX...... ........ ........ ........ */
-@#
-@d ximARG0(I) (((I) & 0x00ff0000) >> 16)   /* ........ XXXXXXXX ........ ........ */
-@d ximREG0(I) (((I) & 0x003f0000) >> 16)   /* ........ ..XXXXXX ........ ........ */
-@d ximPOP0(I) (((I) & 0x00800000) >> 23)   /* ........ X....... ........ ........ */
-@#
-@d ximARG1(I) (((I) & 0x0000ff00) >>  8)   /* ........ ........ XXXXXXXX ........ */
-@d ximREG1(I) (((I) & 0x00003f00) >>  8)   /* ........ ........ ..XXXXXX ........ */
-@d ximPOP1(I) (((I) & 0x00008000) >> 23)   /* ........ ........ X....... ........ */
-@#
-@d ximARG2(I) (((I) & 0x000000ff) >>  0)   /* ........ ........ ........ XXXXXXXX */
-@d ximREG2(I) (((I) & 0x0000003f) >>  0)   /* ........ ........ ........ ..XXXXXX */
-@d ximPOP2(I) (((I) & 0x00000080) >> 23)   /* ........ ........ ........ X....... */
-@#
-@d ximARGD(I) (((I) & 0x0000ffff) >>  0)   /* ........ ........ XXXXXXXX XXXXXXXX */
-@d ximARGT(I) (((I) & 0x00ffffff) >>  0)   /* ........ XXXXXXXX XXXXXXXX XXXXXXXX */
-@#
-@d ximTTOP(I) (((I) & 0x00c00000) >> 22)   /* ........ XX...... ........ ........ */
-@d ximTLEG(I) (((I) & 0x0000ffc0) >>  6)   /* ........ ........ XXXXXXXX XX...... */
-@d ximTABL(I) ((ximTTOP(I) << 10) | ximTLEG(I))  /* ........ XX--><-- XXXXXXXX XX...... */
-@d ximINDX(I) (((I) & 0x0000003f) >>  0)   /* ........ ........ ........ ..XXXXXX */
-@#
-@d ximADDD(I) (*(((uint16_t *) &(I)) + 1))
-@d ximINTD(I) (*(((int16_t *) &(I)) + 1))
-@d ximINT0(I) (*(((int8_t *) &(I)) + 1))
-@d ximINT1(I) (*(((int8_t *) &(I)) + 2))
-@d ximINT2(I) (*(((int8_t *) &(I)) + 3))
-@#
-@d TINY_MIN (-0x10)
-@d TINY_MAX ( 0x0f)
-@#
-@# /* Lose these: */
-@#
-@d LBC_ADDRESS_DIRECT   0 /* Unsigned 16/24 bit offset. */
-@d LBC_ADDRESS_INDIRECT 1 /* Unsigned 16/24 bit offset to |PROGRAM_EXPORT_BASE|
-                                has pointer-size address. */
-@d LBC_ADDRESS_RELATIVE 2 /* Signed 16 bit delta. */
-@d LBC_ADDRESS_REGISTER 3 /* Integer in a register */
-@d LBC_FIRST_REGISTER   2 /* These are not backwards. */
-@d LBC_SECOND_REGISTER  1
-@d LBC_OBJECT_CONSTANT  0 /* Small fixed integers also; ignore low byte */
-@d LBC_OBJECT_INTEGER   1 /* 16 bit signed. */
-@d LBC_OBJECT_REGISTER  2 /* Ignore low byte */
-@d LBC_OBJECT_TABLE     3 /* Index into global table. */
-
-@ The first special register is the instruction pointer.
-
-@d OBJECTDB_SPLIT_BOTTOM 0x3ff
-@d OBJECTDB_SPLIT_GAP    6
-@d OBJECTDB_SPLIT_TOP    0xb00
-@d OBJECTDB_TABLE_WIDTH  6
-@d OBJECTDB_TABLE_LENGTH (1 << OBJECTDB_TABLE_WIDTH)
-@d OBJECTDB_DB_WIDTH     (24 - (OBJECTDB_TABLE_WIDTH + 6))
-@d OBJECTDB_DB_LENGTH    (1 << OBJECTDB_DB_WIDTH)
-@d OBJECTDB_MAX          (OBJECTDB_TABLE_LENGTH * OBJECTDB_DB_LENGTH)
-@#
-@d PROGRAM_LENGTH      0x1000000ul /* $2^{24}$ */
-@d PROGRAM_WIDTH       24
-@d PROGRAM_KEY         (PROGRAM_LENGTH - 1)
-@d PROGRAM_PAGE        (~PROGRAM_KEY)
-@#
-@d instruction_page(O) ((O) & PROGRAM_PAGE)
+@ @d PO(P,S,F) [(P)] = { (S), NIL, ADDRESS_INVALID, (F) }
 @<Global...@>=
-unique address Ip = PROGRAM_INVALID; /* Current (or previous) instruction. */
-shared cell ObjectDB = NIL;
-shared int ObjectDB_Free = 0; /* Multiple of |OBJECTDB_TABLE_LENGTH|. */
-shared cell Program_Export_Table = NIL;
-shared address *Program_Export_Base = NULL;
-shared address Program_Export_Free = 0;
-shared pthread_mutex_t Program_Lock;
+shared primitive Primitive[PRIMITIVE_LENGTH] = {
+        PO(PRIMITIVE_CAR,                 SIGNATURE_11, NULL),@/
+        PO(PRIMITIVE_ARRAY_LENGTH,        SIGNATURE_11, NULL /*| primp_array_length |*/),@/
+        PO(PRIMITIVE_CURRENT_ENVIRONMENT, SIGNATURE_00, NULL),@/
+        PO(PRIMITIVE_ROOT_ENVIRONMENT,    SIGNATURE_00, NULL),@/
+};
 
 @ @<Extern...@>=
-extern unique address Ip;
-extern shared int ObjectDB_Free;
-extern shared cell ObjectDB, Program_Export_Table;
-extern shared address *Program_Export_Base, Program_Export_Free;
-extern shared pthread_mutex_t Program_Lock;
+extern shared primitive Primitive[];
 
-@ @<Initialise memory...@>=
-orabort(init_osthread_mutex(&Program_Lock, false, false));
+@ @<Data...@>=
+shared char *Primitive_Label[PRIMITIVE_LENGTH] = {
+        [PRIMITIVE_ADD]                 = "+",
+        [PRIMITIVE_SUB]                 = "-",
+        [PRIMITIVE_MUL]                 = "*",
 
-@ TODO: Program allocations leak. No longer: This page is known by
-its global pointer. Code pages refer to their heap owner which
-refers back to them.
+        [PRIMITIVE_CURRENT_ENVIRONMENT] = "current-environment",
+        [PRIMITIVE_ROOT_ENVIRONMENT]    = "root-environment",
+        [PRIMITIVE_ARRAY_LENGTH]        = "array/length",
+        [PRIMITIVE_ARRAY_OFFSET]        = "array/offset",
+        [PRIMITIVE_ARRAY_P]             = "array?",
+        [PRIMITIVE_ARRAY_REF]           = "array/ref",
+        [PRIMITIVE_ARRAY_RESIZE_M]      = "array/resize!",
+        [PRIMITIVE_ARRAY_SET_M]         = "array/set!",
+        [PRIMITIVE_BOOLEAN_P]           = "boolean?",
+        [PRIMITIVE_CAR]                 = "car",
+        [PRIMITIVE_CDR]                 = "cdr",
+        [PRIMITIVE_CONS]                = "cons",
+        [PRIMITIVE_DO]                  = "do",
+        [PRIMITIVE_FALSE_P]             = "false?",
+        [PRIMITIVE_IS_P]                = "is?",
+        [PRIMITIVE_LAMBDA]              = "lambda",
+        [PRIMITIVE_NEW_ARRAY]           = "new-array",
+        [PRIMITIVE_NEW_SEGMENT]         = "new-segment",
+        [PRIMITIVE_NULL_P]              = "null?",
+        [PRIMITIVE_PAIR_P]              = "pair?",
+        [PRIMITIVE_SEGMENT_LENGTH]      = "segment/length",
+        [PRIMITIVE_SEGMENT_P]           = "segment?",
+        [PRIMITIVE_SEGMENT_RESIZE_M]    = "segment/resize!",
+        [PRIMITIVE_NEW_SYMBOL_SEGMENT]  = "segment->symbol",
+        [PRIMITIVE_SYMBOL_HASH]         = "symbol/hash",
+        [PRIMITIVE_SYMBOL_P]            = "symbol?",
+        [PRIMITIVE_SYMBOL_SEGMENT]      = "symbol/segment",
+        [PRIMITIVE_SYS_READ]            = "sys/read",
+        [PRIMITIVE_SYS_WRITE]           = "sys/write",
+        [PRIMITIVE_TRUE_P]              = "true?",
+        [PRIMITIVE_VOV]                 = "vov",
 
-@.TODO@>
-@<Finish init...@>=
-orabort(new_array(0, fix(0), &ObjectDB));
-orabort(mem_alloc(NULL, PROGRAM_LENGTH, 1 << PROGRAM_WIDTH,
-        (void **) &Program_Export_Base));
-assert((address) Program_Export_Base == instruction_page((address)
-        Program_Export_Base));
-orabort(new_hashtable(0, &Program_Export_Table));
+        [PRIMITIVE_VOID_P]              = "void?",
+        [PRIMITIVE_INTEGER_P]           = "integer?",
+};
 
-@ @<Fun...@>=
-void interpret (void);
-error_code interpret_address16 (instruction, address *);
-error_code interpret_address24 (instruction, address *);
-error_code interpret_argument (instruction, int, cell *);
-error_code interpret_register (instruction, int, cell *);
-error_code interpret_save (instruction, cell);
-error_code interpret_solo_argument (instruction, cell *);
-error_code interpret_tiny_object (instruction, int, cell *);
+@ @<Initialise \Ls/...@>=
+orreturn(cons(fix(0), fix(0), sig + SIGNATURE_00));
+orreturn(cons(fix(1), fix(1), sig + SIGNATURE_11));
+orreturn(cons(fix(1), fix(3), sig + SIGNATURE_13));
+orreturn(cons(fix(2), fix(2), sig + SIGNATURE_22));
+orreturn(cons(fix(2), fix(4), sig + SIGNATURE_24));
+orreturn(cons(fix(3), fix(3), sig + SIGNATURE_33));
+@#
+orreturn(new_symbol_const("capture", &capture));
+orreturn(new_symbol_const("evaluate", &evaluate));
+orreturn(new_symbol_const("optional", &optional));
+orreturn(new_symbol_const("verbatim", &verbatim));
+@#
+orreturn(cons(verbatim, NIL, sig + SIGNATURE_EV));
+orreturn(cons(evaluate, sig[SIGNATURE_EV], sig + SIGNATURE_EV));
+@#
+orreturn(cons(capture, NIL, sig + SIGNATURE_C));
+orreturn(cons(verbatim, sig[SIGNATURE_EVC], sig + SIGNATURE_EVC));
+orreturn(cons(evaluate, sig[SIGNATURE_EVC], sig + SIGNATURE_EVC));
+@#
+orreturn(cons(optional, NIL, sig + SIGNATURE_EVO));
+orreturn(cons(verbatim, sig[SIGNATURE_EVO], sig + SIGNATURE_EVO));
+orreturn(cons(evaluate, sig[SIGNATURE_EVO], sig + SIGNATURE_EVO));
+@#
+orreturn(cons(capture, NIL, sig + SIGNATURE_VC));
+orreturn(cons(verbatim, sig[SIGNATURE_VC], sig + SIGNATURE_VC));
+@#
+for (i = 0; i < PRIMITIVE_LENGTH; i++) {
+        Primitive[i].signature = sig[Primitive[i].signature];
+        orreturn(new_symbol_cstr(Primitive_Label[i], &ltmp));
+        orreturn(new_atom(fix(i), ltmp, FORM_PRIMITIVE, &Primitive[i].owner));
+        orreturn(env_save_m(Root, ltmp, Primitive[i].owner, false));
+}
 
-@ TODO: What if |Ip| rolls onto the next page? Theoretically possible but
-no need to check for it?
+@
+@d PRIMITIVE_PREFIX "!Primitive/"
+@d PRIMITIVE_DEFAULT "!Primitive.Default"
+@<Link \Ls/...@>=
+k = 11 + 7; /* |strlen(PRIMITIVE_WRAPPER)| */
+memmove(btmp, PRIMITIVE_DEFAULT, k);
+orreturn(new_symbol_buffer((byte *) btmp, k, NULL, &ltmp));
+orreturn(vm_locate_entry(ltmp, &adefault));
+@#
+k = 11; /* |strlen(PRIMITIVE_PREFIX)| */
+btmp[k - 1] = '/'; /* |memmove(btmp, PRIMITIVE_PREFIX, k)| */
+for (i = 0; i < PRIMITIVE_LENGTH; i++) {
+        bptr = btmp + k;
+        for (j = 0; Primitive_Label[i][j]; j++, bptr++)
+                *bptr = Primitive_Label[i][j];
+        orreturn(new_symbol_buffer((byte *) btmp, k + j, NULL, &ltmp));
+        reason = vm_locate_entry(ltmp, &atmp);
+        if (reason == LERR_MISSING)
+                Primitive[i].wrapper = adefault;
+        else if (failure_p(reason))
+                return reason;
+        else
+                Primitive[i].wrapper = atmp;
+}
 
-While carrying out an instruction |Ip| points to the {\it next\/}
-instruction.
+@* Stack. Based on list or array.
 
-@d IB(I,B)  (((char *) &(I))[B])
-@d UB(I,B)  (((unsigned char *) &(I))[B])
+@<Fun...@>=
+error_code init_stack_array (cell *);
+error_code init_stack_list (cell *);
+error_code stack_array_enlarge (cell *);
+error_code stack_array_peek (cell *, cell *);
+error_code stack_array_pop (cell *, cell *);
+error_code stack_array_push (cell *, cell);
+error_code stack_array_reduce (cell *);
+error_code stack_list_pop_imp (cell *, bool, cell *);
+error_code stack_list_push (cell *, cell);
+
+@ @<Initialise run-time ...@>=
+orreturn(init_stack_array(&Control_Link));
+
+@ @c
+error_code
+init_stack_list (cell *ret)
+{
+        *ret = NIL;
+        return LERR_NONE;
+}
+
+@ @c
+error_code
+stack_list_push (cell *stack,
+                 cell  value)
+{
+        error_code reason;
+
+        orreturn(cons(value, *stack, stack));
+        return LERR_NONE;
+}
+
+@ @d stack_list_pop(S,R) stack_list_pop_imp((S), true, (R))
+@d stack_list_peek(S,R) stack_list_pop_imp((S), false, (R))
+@c
+error_code
+stack_list_pop_imp (cell *stack,
+                    bool  popping,
+                    cell *ret)
+{
+        if (null_p(*stack))
+                return LERR_UNDERFLOW;
+        else if (!pair_p(*stack))
+                return LERR_INCOMPATIBLE;
+        *ret = A(*stack)->sin;
+        if (popping)
+                *stack = A(*stack)->dex;
+        return LERR_NONE;
+}
+
+@ @c
+error_code
+init_stack_array (cell *ret)
+{
+        error_code reason;
+        orreturn(new_array(1 + (32 * CELL_BYTES), fix(0), ret));
+        array_base(*ret)[0] = fix(1);
+        return LERR_NONE;
+}
+
+@ @d stack_array_p(O) (array_p(O) && array_length_c(O) > 0
+        && fixed_p(array_base(O)[0]) && fixed_value(array_base(O)[0]) > 0
+        && fixed_value(array_base(O)[0]) <= array_length_c(O))
+
+@ @c
+error_code
+stack_array_push (cell *stack,
+                  cell  value)
+{
+        half sp;
+        assert(stack_array_p(*stack));
+        sp = fixed_value(array_base(*stack)[0]);
+        if (sp == array_length_c(*stack))
+                return LERR_OVERFLOW;
+        array_base(*stack)[sp++] = value;
+        array_base(*stack)[0] = fix(sp);
+        return LERR_NONE;
+}
+
+@ @c
+error_code
+stack_array_pop (cell *stack,
+                 cell *ret)
+{
+        half sp;
+        assert(stack_array_p(*stack));
+        sp = fixed_value(array_base(*stack)[0]);
+        if (sp == 1)
+                return LERR_UNDERFLOW;
+        *ret = array_base(*stack)[--sp];
+        array_base(*stack)[0] = fix(sp);
+        return LERR_NONE;
+}
+
+@ @c
+error_code
+stack_array_peek (cell *stack,
+                  cell *ret)
+{
+        half sp;
+        assert(stack_array_p(*stack));
+        sp = fixed_value(array_base(*stack)[0]);
+        if (sp == 1)
+                return LERR_UNDERFLOW;
+        *ret = array_base(*stack)[sp - 1];
+        return LERR_NONE;
+}
+
+@ @c
+error_code
+stack_array_enlarge (cell *stack)
+{
+        half nlength;
+        assert(stack_array_p(*stack));
+        nlength = array_length_c(*stack) + 64;
+        return array_resize_m(*stack, nlength, NIL);
+}
+
+@ @c
+error_code
+stack_array_reduce (cell *stack)
+{
+        half nlength;
+        assert(stack_array_p(*stack));
+        assert(array_length_c(*stack) > 65);
+        nlength = array_length_c(*stack) + 64;
+        return array_resize_m(*stack, nlength, NIL);
+}
+
+@* Interpreter.
+
+@d IB(I,B)  ((int32_t) (((char *) &(I))[B]))
+@d UB(I,B)  ((uint32_t) (((unsigned char *) &(I))[B]))
 @#
 @d MODE(I)  ((UB((I), 0) >> 6) & 0x03)
 @d OP(I)    ((UB((I), 0) >> 0) & 0x3f)
@@ -4565,34 +4066,75 @@ instruction.
 @d SINT(I)  ((int16_t) (be32toh(I) & 0xffff))
 @d UINT(I)  ((uint16_t) (be32toh(I) & 0xffff))
 @#
-@d TL3(I)   (((UB((I), 3) >> 6) & 0xc0) << 10)
-@d TL2(I)   (((UB((I), 2) >> 0) & 0xff) <<  2)
-@d TL1(I)   (((UB((I), 1) >> 6) & 0x03) <<  0)
-@d TABLE(I) (TL3(I) | TL2(I) | TL1(I))
-@d INDEX(I) ((UB((I), 3) >> 0) & 0x3f)
+@d TBLLO(I) ((UB((I), 2) << 8) | UB((I), 3))
+@d TBLHI(I) ((UB((I), 1) & 0xc0) << 10)
+@d TABLE(I) (TBLHI(I) | TBLLO(I))
 @#
 @d REG(I,B) (UB((I), (B)) & 0x3f)
 @d POP(I,B) (UB((I), (B)) & 0x80)
+@#
+@d BYTECODE_ADDRESS_DIRECT   0 /* Unsigned 16/24 bit offset. */
+@d BYTECODE_ADDRESS_INDIRECT 1 /* Unsigned 16/24 bit offset to |PROGRAM_EXPORT_BASE|
+                                has pointer-size address. */
+@d BYTECODE_ADDRESS_RELATIVE 2 /* Signed 16 bit delta. */
+@d BYTECODE_ADDRESS_REGISTER 3 /* Integer in a register */
+@d BYTECODE_FIRST_REGISTER   2 /* These are not backwards. */
+@d BYTECODE_SECOND_REGISTER  1
+@d BYTECODE_OBJECT_CONSTANT  0 /* Small fixed integers also; ignore low byte */
+@d BYTECODE_OBJECT_INTEGER   1 /* 16 bit signed. */
+@d BYTECODE_OBJECT_REGISTER  2 /* Ignore low byte */
+@d BYTECODE_OBJECT_TABLE     3 /* Index into global table. */
+@d BYTECODE_CONSTANT_INTEGER 0x80
+@d BYTECODE_CONSTANT_SPECIAL 0x00
+@<Fun...@>=
+error_code interpret (void);
+error_code interpret_address16 (instruction, address *);
+error_code interpret_address24 (instruction, address *);
+error_code interpret_argument (instruction, int, cell *);
+int32_t interpret_int16 (instruction, bool);
+int32_t interpret_int24 (instruction, bool);
+error_code interpret_register (instruction, int, cell *);
+error_code interpret_save (instruction, cell);
+error_code interpret_solo_argument (instruction, cell *);
+error_code interpret_tiny_object (instruction, int, cell *);
+@
+@d pins(O) for (int _i = 0; _i < 4; _i++)
+        printf("%02hhx", ((char *) (O))[_i])
+@d psym(O) for (half _i = 0; _i < symbol_length_c(O); _i++)
+        putchar(symbol_buffer_c(O)[_i]);
 @c
-void
+error_code
 interpret (void)
 {
         address link;
         instruction ins; /* Register? A copy of the current instruction. */
+        int width;
         error_code reason;
 
-        Trapped = false;
-        while (!Trapped) {
+        Trapped = LERR_NONE;
+        while (!failure_p(Trapped)) {
                 reason = LERR_NONE;
-                if (Ip < 0 || Ip >= PROGRAM_INVALID) {
+                if (Ip < 0 || Ip >= ADDRESS_INVALID) {
                         ins = 0;
                         reason = LERR_ADDRESS;
                         goto Trap;
                 }
                 ins = *(instruction *) Ip;
                 Ip += sizeof (instruction);
+Reinterpret:
+#ifdef LLTEST
+#if 0
+                printf("%7lu %p: ", Interpret_Count, (void *) (Ip - sizeof (instruction)));
+                pins(&ins); putchar(' '); psym(opcode_label_c(Op[OP(ins)].owner)); putchar('\n');
+#endif
+                Interpret_Count++;
+                if (Interpret_Limit && Interpret_Count >= Interpret_Limit)
+                        return LERR_LENGTH; /* Cheeky. */
+#endif
                 switch (OP(ins)) { @<Carry out an operation@> }
         }
+Halt:
+        return reason;
 }
 
 @ @c
@@ -4606,8 +4148,8 @@ interpret_argument (instruction  ins,
         assert(argc >= 0 && argc <= 2);
         switch (argc) {
         case 0: regp = true;@+ break;
-        case 1: regp = MODE(ins) & LBC_FIRST_REGISTER;@+ break;
-        case 2: regp = MODE(ins) & LBC_SECOND_REGISTER;@+ break;
+        case 1: regp = MODE(ins) & BYTECODE_FIRST_REGISTER;@+ break;
+        case 2: regp = MODE(ins) & BYTECODE_SECOND_REGISTER;@+ break;
         }
         if (regp)
                 return interpret_register(ins, argc, ret);
@@ -4630,47 +4172,28 @@ interpret_register (instruction  ins,
         case LR_Ip:
                 if (POP(ins, argc + 1))
                         return LERR_INCOMPATIBLE;
-                return new_int_c(Ip, true, ret);
+                return new_int_c(Ip, ret);
         case LR_Trap_Ip:
                 if (POP(ins, argc + 1))
                         return LERR_INCOMPATIBLE;
-                return new_int_c(Trap_Ip, true, ret);
+                return new_int_c(Trap_Ip, ret);
         case LR_Trapped:
                 if (POP(ins, argc + 1))
                         return LERR_INCOMPATIBLE;
-                *ret = predicate(Trapped);
+                *ret = Error[Trapped];
                 return LERR_NONE;
         case LR_Control_Link:
                 if (POP(ins, argc + 1))
-                        return clink_pop(Register[REG(ins, argc + 1)], ret);
+                        return stack_array_pop(Register[REG(ins, argc + 1)], ret);
                 else
-                        return clink_peek(Register[REG(ins, argc + 1)], ret);
+                        return stack_array_peek(Register[REG(ins, argc + 1)], ret);
         default:
-                if (POP(ins, argc + 1))
-                        return clink_pop(Register[REG(ins, argc + 1)], ret);
+                if (argc && POP(ins, argc + 1))
+                        return stack_list_pop(Register[REG(ins, argc + 1)], ret);
                 else
                         *ret = *Register[REG(ins, argc + 1)];
                 return LERR_NONE;
         }
-}
-
-@ @c
-error_code
-interpret_tiny_object (instruction  ins,
-                       int          argc,
-                       cell        *ret)
-{
-        int8_t value;
-
-        assert(argc >= 1 && argc <= 2);
-        value = IB(ins, argc + 1);
-        if (fixed_p(value))
-                *ret = fix(((value >> 4) & 0xf) - (-TINY_MIN));
-        else if (special_p(value))
-                *ret = value;
-        else
-                return LERR_INCOMPATIBLE;
-        return LERR_NONE;
 }
 
 @ @c
@@ -4682,50 +4205,48 @@ interpret_solo_argument (instruction  ins,
         int16_t value;
 
         switch(MODE(ins)) {
-        case LBC_OBJECT_CONSTANT:@;
+        case BYTECODE_OBJECT_CONSTANT:@;
                 return interpret_tiny_object(ins, 1, ret);
-        case LBC_OBJECT_INTEGER:@;
+        case BYTECODE_OBJECT_INTEGER:@;
                 value = SINT(ins);
-                return new_int_c(value, true, ret);
-        case LBC_OBJECT_REGISTER:@;
+                return new_int_c(value, ret);
+        case BYTECODE_OBJECT_REGISTER:@;
                 return interpret_register(ins, 1, ret);
-        case LBC_OBJECT_TABLE:@;
-                index = TABLE(ins) << OBJECTDB_TABLE_WIDTH;
-                index |= INDEX(ins);
-                if (index > ObjectDB_Free)
+        case BYTECODE_OBJECT_TABLE:@;
+                index = TABLE(ins);
+                if (index > Program_ObjectDB_Free)
                         return LERR_OUT_OF_BOUNDS;
-                return array_ref_c(ObjectDB, index, ret);
+                *ret = array_base(Program_ObjectDB)[index];
+                return LERR_NONE;
         default:
                 return LERR_INTERNAL;
         }
 }
 
 @ @c
-int32_t
-interpret_int16 (instruction ins,
-                 bool        sign)
+error_code
+interpret_tiny_object (instruction  ins,
+                       int          argc,
+                       cell        *ret)
 {
-        int32_t rval;
+        char value;
+        bool wasfix;
 
-        rval = (((0xff & UB(ins, 2)) << 8) | ((0xff & UB(ins, 3)) << 0));
-        if (sign && rval & 0x00008000)
-                rval |= 0xffff0000;
-        return rval;
-}
-
-@ @c
-int32_t
-interpret_int24 (instruction ins,
-                 bool        sign)
-{
-        int32_t rval;
-
-        rval = (((0xff & UB(ins, 1)) << 16)
-              | ((0xff & UB(ins, 2)) << 8)
-              | ((0xff & UB(ins, 3)) << 0));
-        if (sign && rval & 0x00800000)
-                rval |= 0xff000000;
-        return rval;
+        assert(argc >= 1 && argc <= 2);
+        value = UB(ins, argc + 1);
+        wasfix = value & 0x80;
+        value = ((value & 0x7f) | ((value & 0x40) << 1));
+        if (wasfix)
+                *ret = fix(value);
+        else {
+                if (value)
+                        value = (value * 2) - 1;
+                if (!valid_p(value))
+                        return LERR_INCOMPATIBLE;
+                else
+                        *ret = value;
+        }
+        return LERR_NONE;
 }
 
 @ @c
@@ -4733,34 +4254,31 @@ error_code
 interpret_address16 (instruction  ins,
                      address     *ret)
 {
-        address from, to;
-        cell via;
+        address from, to, ivia;
+        cell rvia;
+        word wvalue;
         error_code reason;
 
-        from = Ip - sizeof (address);
+        from = Ip - sizeof (instruction);
         switch (MODE(ins)) {
-        case LBC_ADDRESS_DIRECT:@;
+        case BYTECODE_ADDRESS_DIRECT:@;
                 to = interpret_int16(ins, false) | instruction_page(from);
                 break;
-        case LBC_ADDRESS_RELATIVE:@;
-                to = interpret_int16(ins, true) + from; /* `via' */
+        case BYTECODE_ADDRESS_RELATIVE:@;
+                to = interpret_int16(ins, true) + from;
                 if (instruction_page(to) != instruction_page(from))
                         return LERR_OUT_OF_BOUNDS;
                 break;
-        case LBC_ADDRESS_INDIRECT:@;
-                to = interpret_int16(ins, false); /* `via' */
-                if (to >= Program_Export_Free)
+        case BYTECODE_ADDRESS_INDIRECT:@;
+                ivia = interpret_int16(ins, false);
+                if (ivia >= (address) Program_Export_Free)
                         return LERR_OUT_OF_BOUNDS;
-                to = Program_Export_Base[to];
+                to = Program_Export_Base[ivia];
                 break;
-        case LBC_ADDRESS_REGISTER:@;
-                orreturn(interpret_register(ins, 1, &via));
-                if (fixed_p(via) && fixed_value(via) >= 0)
-                        to = fixed_value(via);
-                else if (positive_p(via) && !int_more_p(via))
-                        to = int_digit(via);
-                else
-                        return LERR_INCOMPATIBLE;
+        case BYTECODE_ADDRESS_REGISTER:@;
+                orreturn(interpret_register(ins, 1, &rvia));
+                orreturn(int_value(rvia, &wvalue)); /* TODO: Missing a bit! */
+                to = wvalue;
                 break;
         }
         *ret = to;
@@ -4775,38 +4293,57 @@ error_code
 interpret_address24 (instruction  ins,
                      address     *ret)
 {
-        address from, to;
-        cell via;
+        address from, to, ivia;
+        cell rvia;
+        word wvalue;
         error_code reason;
 
-        from = Ip - sizeof (address);
+        from = Ip - sizeof (instruction);
         switch (MODE(ins)) {
-        case LBC_ADDRESS_DIRECT:@;
+        case BYTECODE_ADDRESS_DIRECT:@;
                 to = interpret_int24(ins, false) | instruction_page(from);
                 break;
-        case LBC_ADDRESS_RELATIVE:@;
+        case BYTECODE_ADDRESS_RELATIVE:@;
                 to = interpret_int24(ins, true) + from;
                 if (instruction_page(to) != instruction_page(from))
                         return LERR_OUT_OF_BOUNDS;
                 break;
-        case LBC_ADDRESS_INDIRECT:@;
-                to = interpret_int24(ins, false) + from; /* `via' */
-                if (to >= Program_Export_Free)
+        case BYTECODE_ADDRESS_INDIRECT:@;
+                ivia = interpret_int24(ins, false);
+                if (ivia >= (address) Program_Export_Free)
                         return LERR_OUT_OF_BOUNDS;
-                to = Program_Export_Base[to];
+                to = Program_Export_Base[ivia];
                 break;
-        case LBC_ADDRESS_REGISTER:@;
-                orreturn(interpret_register(ins, 0, &via));
-                if (fixed_p(via) && fixed_value(via) >= 0)
-                        to = fixed_value(via);
-                else if (positive_p(via) && !int_more_p(via))
-                        to = int_digit(via);
-                else
-                        return LERR_INCOMPATIBLE;
+        case BYTECODE_ADDRESS_REGISTER:@;
+                orreturn(interpret_register(ins, 0, &rvia));
+                orreturn(int_value(rvia, &wvalue)); /* TODO: Missing a bit! */
+                to = wvalue;
                 break;
         }
         *ret = to;
         return LERR_NONE;
+}
+
+@ @c
+int32_t
+interpret_int16 (instruction ins,
+                 bool        sign)
+{
+        int32_t rval;
+        rval = sign ? SINT(ins) : UINT(ins);
+        return rval;
+}
+
+@ @c
+int32_t
+interpret_int24 (instruction ins,
+                 bool        sign)
+{
+        int32_t rval;
+        rval = (UB(ins, 1) << 16) | UINT(ins);
+        if (sign && (UB(ins, 1) & 0x80))
+                rval |= 0xff000000;
+        return rval;
 }
 
 @ @c
@@ -4817,13 +4354,14 @@ interpret_save (instruction ins,
 {
         switch (REG(ins, 1)) {
         case LR_Ip:@; /* Could be mutable, but why? */
+        case LR_Root:@;
         case LR_Symbol_Table:@;
         case LR_Trap_Handler:@; /* TODO */
         case LR_Trap_Ip:@;
         case LR_Trapped:@;
                 return LERR_IMMUTABLE;
         case LR_Control_Link:@;
-                return clink_push(Register[REG(ins, 1)], result);
+                return stack_array_push(Register[REG(ins, 1)], result);
                 break;
         case LR_Environment:
                 if (!environment_p(result))
@@ -4841,75 +4379,41 @@ interpret_save (instruction ins,
         }
 }
 
-@ Three special registers control the operation of the trap handler.
-|Heap_Trap| defined above points to a private heap that a trap
-handler can use. The other two are an array of an address of the
-code for each handler, |Trap_Handler|, and |Trap_Ip| which contains
-the instruction address which caused the trap to occur.
-
-@<Global...@>=
-unique address Trap_Ip = PROGRAM_INVALID; /* The instruction which caused a trap. */
-shared address Empty_Trap_Handler[LERR_LENGTH];
-unique address *Trap_Handler = Empty_Trap_Handler;
-unique bool Trapped = false;
-
-@ @<Extern...@>=
-extern shared address Empty_Trap_Handler[];
-extern unique address *Trap_Handler, Trap_Ip;
-extern unique bool Trapped;
-
-@ Initially each trappable condition has no handler, which will
-cause the virtual machine to halt. TODO: This should be a \Ls/
-array.
-
-@.TODO@>
-@<Finish init...@>=
-for (i = 0; i < LERR_LENGTH; i++)
-        Empty_Trap_Handler[i] = PROGRAM_INVALID;
-
-@ Instructions are fixed at 32 bits (and the error codes are small
-enough to fit within a register) so there are two spare bytes after
-the trap reason which could fit further explanation of the error
-\`a la single-object opcodes.
-
-The trap heap is not used by default.
-
-@d real_trap(V) (((V) >= 0 && (V) < LERR_LENGTH) ? (V) : LERR_UNIMPLEMENTED)
-@<Carry out...@>=
+@ @<Carry out...@>=
 default:
-        reason = LERR_INSTRUCTION;
+        if (OP(ins) >= 0 && OP(ins) < OPCODE_LENGTH)
+                reason = LERR_UNIMPLEMENTED;
+        else
+                reason = LERR_INSTRUCTION;
         goto Trap;
-case OP_TRAP: /* Handle |ARG1|/|ARG2| here, if at all */
-        reason = UB(ins, 1);
+case OP_TRAP:
+        ortrap(interpret_argument(ins, 1, &VM_Arg1));
+        assert(fixed_p(VM_Arg1));
+        reason = fixed_value(VM_Arg1);
 Trap:
-printf("TRAP %d\n", reason);
-        Trapped = true;
-        if (Trap_Handler[real_trap(reason)] != PROGRAM_INVALID) {
-                Trapped = false;
+        Trapped = failure_p(reason) ? reason : LERR_INTERNAL;
+        if (Trap_Handler[reason] == ADDRESS_INVALID)
+                goto Halt;
+        else {
+                Trapped = LERR_NONE;
                 Trap_Ip = Ip;
                 Trap_Arg1 = VM_Arg1;
                 Trap_Arg2 = VM_Arg2;
                 Trap_Result = VM_Result;
-                Ip = Trap_Handler[real_trap(reason)];
+                Ip = Trap_Handler[reason];
         }
         break;
 @#
 case OP_HALT:@;
-        return;
-
-@ @<Carry out...@>=
-case OP_PEND:@;
-        ortrap(interpret_address16(ins, &link));
-        orassert(new_int_c(link, true, &VM_Result));
-        ortrap(interpret_save(ins, VM_Result));
-        break;
+        reason = LERR_NONE;
+        goto Halt;
 
 @ @<Carry out...@>=
 case OP_JUMP:@;
         ortrap(interpret_address24(ins, &Ip));
         break;
-case OP_TEST:@; /* Although using |interpret_argument| we know arg 0 must
-                        be a register. */
+case OP_BRANCH:@; /* Although using |interpret_argument| we know arg 0
+                        must be a register. */
         ortrap(interpret_argument(ins, 0, &VM_Result));
         if (POP(ins, 1)) {
                 if (false_p(VM_Result))
@@ -4919,45 +4423,9 @@ case OP_TEST:@; /* Although using |interpret_argument| we know arg 0 must
                         ortrap(interpret_address16(ins, &Ip));
         }
         break;
-case OP_WIDETEST:@;
+case OP_WIDEBRANCH:@;
         if (true_p(Accumulator))
                 ortrap(interpret_address24(ins, &Ip));
-        break;
-
-@ @<Carry out...@>=
-case OP_SLO:@;
-        ortrap(interpret_solo_argument(ins, &VM_Arg1));
-        ortrap(primitive_search(VM_Arg1, &VM_Arg2));
-        ortrap(primitive_call(VM_Arg2, &VM_Result));
-        ortrap(interpret_save(ins, VM_Result));
-        break;
-
-@ @<Carry out...@>=
-case OP_SPORK:@;
-        ortrap(interpret_address16(ins, &link));
-        ortrap(new_osthread(VM_Arg1, link, ((heap_pun *) Heap_Thread)->fun,
-                &VM_Result));
-        ortrap(interpret_save(ins, VM_Result));
-        break;
-case OP_WIDESPORK:@;
-        ortrap(interpret_address24(ins, &link));
-        ortrap(new_osthread(VM_Arg1, link, ((heap_pun *) Heap_Thread)->fun,
-                &Accumulator));
-        break;
-
-@ @<Carry out...@>=
-case OP_JOIN: /* nb.~use |OP_WAIT| for processes. */
-        ortrap(interpret_solo_argument(ins, &VM_Arg1));
-        VM_Result = UNDEFINED;
-        reason = osthread_wait(VM_Arg1, &VM_Result);
-        if (failure_p(reason)) {
-                if (defined_p(VM_Result))
-                        goto Trap;
-                VM_Result = fix(reason);
-                reason = LERR_THREAD;
-                goto Trap;
-        }
-        ortrap(interpret_save(ins, VM_Result));
         break;
 
 @ @<Carry out...@>=
@@ -4965,116 +4433,58 @@ case OP_LOAD:@;
         ortrap(interpret_solo_argument(ins, &VM_Result));
         ortrap(interpret_save(ins, VM_Result));
         break;
-
-@ @<Fun...@>=
-error_code clink_pop_imp (cell *, bool, cell *);
-error_code clink_push (cell *, cell);
-error_code new_closure (bool, cell, cell, cell *);
-error_code closure_open (cell, cell *);
-
-@ @c
-error_code
-clink_push (cell *stack,
-            cell  value)
-{
-        error_code reason;
-
-        orreturn(cons(value, *stack, stack));
-        return LERR_NONE;
-}
-
-@ @d clink_pop(S,R) clink_pop_imp((S), true, (R))
-@d clink_peek(S,R) clink_pop_imp((S), false, (R))
-@c
-error_code
-clink_pop_imp (cell *stack,
-               bool  popping,
-               cell *ret)
-{
-        if (null_p(*stack))
-                return LERR_UNDERFLOW;
-        else if (!pair_p(*stack))
-                return LERR_INCOMPATIBLE;
-        *ret = lsin(*stack);
-        if (popping)
-                *stack = ldex(*stack);
-        return LERR_NONE;
-}
-
-@ The CONS opcode calls cons.
-
-@<Carry out...@>=
-case OP_CONS:@;
-        ortrap(interpret_argument(ins, 1, &VM_Arg1));
-        ortrap(interpret_argument(ins, 2, &VM_Arg2));
-        ortrap(cons(VM_Arg1, VM_Arg2, &VM_Result));
+case OP_PEND:@;
+        ortrap(interpret_address16(ins, &link));
+        orassert(new_int_c(link, &VM_Result));
         ortrap(interpret_save(ins, VM_Result));
         break;
 
 @ @<Carry out...@>=
-case OP_CAR:@;
+case OP_PAIR_P:
         ortrap(interpret_solo_argument(ins, &VM_Arg1));
-        ortrap(lcar(VM_Arg1, &VM_Result));
+        VM_Result = predicate(pair_p(VM_Arg1));
         ortrap(interpret_save(ins, VM_Result));
         break;
-case OP_CDR:@;
+case OP_ARRAY_P:
         ortrap(interpret_solo_argument(ins, &VM_Arg1));
-        ortrap(lcdr(VM_Arg1, &VM_Result));
+        VM_Result = predicate(segment_p(VM_Arg1));
         ortrap(interpret_save(ins, VM_Result));
         break;
-
-@ @<Carry out...@>=
-case OP_APPLICATIVE:@;
-        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Formals */
-        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Body */
-        ortrap(new_closure(true, VM_Arg1, VM_Arg2, &VM_Result));
-        ortrap(interpret_save(ins, VM_Result));
-        break;
-case OP_OPERATIVE:@;
-        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Formals */
-        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Body */
-        ortrap(new_closure(false, VM_Arg1, VM_Arg2, &VM_Result));
-        ortrap(interpret_save(ins, VM_Result));
-        break;
-case OP_OPEN:@;
+case OP_SEGMENT_P:
         ortrap(interpret_solo_argument(ins, &VM_Arg1));
-        ortrap(closure_open(VM_Arg1, &VM_Result)); /* Sets |Environment|. */
+        VM_Result = predicate(segment_p(VM_Arg1));
         ortrap(interpret_save(ins, VM_Result));
         break;
-
-@ Needs \.{(formals . body)} for return from |closure_open|.
-
-TODO: Check formals for list-of-symbols and body for ... something.
-
-@.TODO@>
-@c
-error_code
-new_closure (bool  applicative,
-             cell  formals,
-             cell  body,
-             cell *ret)
-{
-        cell new;
-        error_code reason;
-
-        orreturn(cons(formals, body, &new));
-        return new_atom(applicative ? FORM_APPLICATIVE : FORM_OPERATIVE,
-                Environment, new, ret);
-}
-
-@ @c
-error_code
-closure_open (cell  o,
-              cell *ret)
-{
-        error_code reason;
-
-        if (!closure_p(o))
-                return LERR_INCOMPATIBLE;
-        Environment = lsin(o);
-        *ret = ldex(o);
-        return LERR_NONE;
-}
+case OP_SYMBOL_P:
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        VM_Result = predicate(symbol_p(VM_Arg1));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+case OP_PRIMITIVE_P:
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        VM_Result = predicate(primitive_p(VM_Arg1));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+case OP_APPLICATIVE_P:
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        VM_Result = predicate(applicative_p(VM_Arg1));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+case OP_OPERATIVE_P:
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        VM_Result = predicate(operative_p(VM_Arg1));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+case OP_RESUMPTION_P:
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        VM_Result = LFALSE;
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+case OP_INTEGER_P:
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        VM_Result = predicate(integer_p(VM_Arg1));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
 
 @ Always |Environment|, single arg is symbol or fail.
 
@@ -5084,15 +4494,11 @@ case OP_LOOKUP:@;
         ortrap(env_search(Environment, VM_Arg1, &VM_Result));
         ortrap(interpret_save(ins, VM_Result));
         break;
-
-@ @<Carry out...@>=
 case OP_EXTEND:@;
         ortrap(interpret_solo_argument(ins, &VM_Arg1));
         ortrap(new_env(VM_Arg1, &VM_Result));
         ortrap(interpret_save(ins, VM_Result));
         break;
-
-@ @<Carry out...@>=
 case OP_DEFINE_M:@;
         ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Label */
         ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Value */
@@ -5106,51 +4512,40 @@ case OP_REPLACE_M:@;
         ortrap(interpret_save(ins, VOID));
         break;
 
-@ 2-arg, ints and runes (unicodepoints) are comparable for numerical
-purposes. Floats unsupported still so no other data format is valid.
+@ The CONS opcode calls cons.
 
 @<Carry out...@>=
-case OP_CMP:
-case OP_CMPGT:
-case OP_CMPGE:
-case OP_CMPEQ:
-case OP_CMPLE:
-case OP_CMPLT:
-        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Yin */
-        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Yang */
-        ortrap(int_cmp(VM_Arg1, VM_Arg2, &VM_Result));
-        switch(OP(ins)) {
-        case OP_CMP:
-                break; /* This is fine. */
-        case OP_CMPGT:
-                VM_Result = predicate(fixed_value(VM_Result) < 0);@+
-                break;
-        case OP_CMPGE:
-                VM_Result = predicate(fixed_value(VM_Result) <= 0);@+
-                break;
-        case OP_CMPEQ:
-                VM_Result = predicate(fixed_value(VM_Result) == 0);@+
-                break;
-        case OP_CMPLE:
-                VM_Result = predicate(fixed_value(VM_Result) >= 0);@+
-                break;
-        case OP_CMPLT:
-                VM_Result = predicate(fixed_value(VM_Result) > 0);@+
-                break;
-        }
+case OP_CONS:@;
+        ortrap(interpret_argument(ins, 1, &VM_Arg1));
+        ortrap(interpret_argument(ins, 2, &VM_Arg2));
+        assert(defined_p(VM_Arg1) && defined_p(VM_Arg2));
+        ortrap(cons(VM_Arg1, VM_Arg2, &VM_Result));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+case OP_CAR:@;
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        assert(pair_p(VM_Arg1));
+        VM_Result = A(VM_Arg1)->sin;
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+case OP_CDR:@;
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        assert(pair_p(VM_Arg1));
+        VM_Result = A(VM_Arg1)->dex;
         ortrap(interpret_save(ins, VM_Result));
         break;
 
-@ Everything but numbers are \.{is?\/} identical based on pointer
-equality à la \.{eq?\/} in scheme. Integers xor runes base identity
-on their {\it value\/} not their address. Numerically identical
-integers are is? each other, and runes are \.{is?\/} each other,
-but an integer will never \.{is?\/}-match a rune.
+@ Everything but numbers are \.{is?\/}-identical based on pointer
+equality à la \.{eq?\/} in scheme. Integers and runes base identity
+on their {\it value\/} (and form) not their address. Numerically
+identical integers are is?-identical to each other, and runes are
+\.{is?\/}-identical to each other, but an integer will never
+\.{is?\/}-match a rune.
 
 No idea what to say about floats yet.
 
 @<Carry out...@>=
-case OP_CMPIS:@;
+case OP_CMPIS_P:@;
         ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Yin */
         ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Yang */
         VM_Result = predicate(cmpis_p(VM_Arg1, VM_Arg2));
@@ -5158,1696 +4553,2325 @@ case OP_CMPIS:@;
         break;
 
 @ @<Carry out...@>=
-case OP_ADD:@;
+case OP_CMP:
+case OP_CMPGT_P:
+case OP_CMPGE_P:
+case OP_CMPEQ_P:
+case OP_CMPLE_P:
+case OP_CMPLT_P:
+        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Yin */
+        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Yang */
+        ortrap(int_cmp(VM_Arg1, VM_Arg2, &VM_Result));
+#if 0
+        printf("cmp %d <=> %d : %d\n",
+        fixed_value(VM_Arg1),
+        fixed_value(VM_Arg2),
+        fixed_value(VM_Result));
+#endif
+        switch(OP(ins)) {
+        case OP_CMP:
+                break; /* This is fine. */
+        case OP_CMPGT_P: /* Yin (<:-1),(=:0),(>:+1) Yang? */
+                VM_Result = predicate(fixed_value(VM_Result) > 0);@+
+                break;
+        case OP_CMPGE_P:
+                VM_Result = predicate(fixed_value(VM_Result) >= 0);@+
+                break;
+        case OP_CMPEQ_P:
+                VM_Result = predicate(fixed_value(VM_Result) == 0);@+
+                break;
+        case OP_CMPLE_P:
+                VM_Result = predicate(fixed_value(VM_Result) <= 0);@+
+                break;
+        case OP_CMPLT_P:
+                VM_Result = predicate(fixed_value(VM_Result) < 0);@+
+                break;
+        }
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+
+@ @<Carry out...@>=
+#if 0
+case OP_APPLICATIVE:@;
+        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Formals */
+        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Body */
+        ortrap(new_applicative(VM_Arg1, VM_Arg2, &VM_Result));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+case OP_OPERATIVE:@;
+        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Formals */
+        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Body */
+        ortrap(new_operative(VM_Arg1, VM_Arg2, &VM_Result));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+case OP_OPEN:@;
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        if (primitive_p(VM_Arg1))
+                ortrap(new_int_c(Primitive[primitive(VM_Arg1)].wrapper,
+                        true, &VM_Result));
+        else
+                ortrap(closure_open(VM_Arg1, &VM_Result));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+#endif
+case OP_OPEN:@;
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        assert(primitive_p(VM_Arg1));
+        ortrap(new_int_c(primitive_object(VM_Arg1)->wrapper, &VM_Result));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+case OP_SIGNATURE:@;
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        if (primitive_p(VM_Arg1))
+                VM_Result = primitive_signature_c(VM_Arg1);
+#if 0
+        else if (applicative_p(VM_Arg1))
+                VM_Result = applicative_signature(VM_Arg1);
+        else if (operative_p(VM_Arg1))
+                ortrap(cons(LBA_CAPTURE, NIL, &VM_Result));
+                /* Here for completeness; not actually used to open an
+                        operative closure. */
+#endif
+        else {
+                reason = LERR_INCOMPATIBLE;
+                goto Trap;
+        }
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+
+@ @<Carry out...@>=
+case OP_LENGTH:@;
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        if (segment_p(VM_Arg1))
+                new_int_c(segment_length_c(VM_Arg1), &VM_Result);
+        else if (symbol_p(VM_Arg1))
+                new_int_c(symbol_length_c(VM_Arg1), &VM_Result);
+        else if (array_p(VM_Arg1))
+                new_int_c(array_length_c(VM_Arg1), &VM_Result);
+        else if (fixed_p(VM_Arg1))
+                VM_Result = fix(0);
+        else if (integer_p(VM_Arg1))
+                ortrap(int_length(VM_Arg1, &VM_Result));
+        else
+                assert(!"unreachable");
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+
+@ Unusually this opcode takes 3 arguments and always puts its result
+in the accumulator.
+
+@<Carry out...@>=
+case OP_SYMBOL:@;
+        ortrap(interpret_argument(ins, 0, &VM_Result));
+        ortrap(interpret_argument(ins, 1, &VM_Arg1));
+        ortrap(interpret_argument(ins, 2, &VM_Arg2));
+        assert(fixed_p(VM_Arg1));
+        assert(fixed_p(VM_Arg2));
+        ortrap(new_symbol_segment(VM_Result, fixed_value(VM_Arg1),
+                fixed_value(VM_Arg2), &VM_Result));
+        Accumulator = VM_Result;
+        break;
+
+@ @<Carry out...@>=
+case OP_PEEK8:
+        width = 8;
+        goto PEEK;
+case OP_PEEK4:
+        width = 4;
+        goto PEEK;
+case OP_PEEK2:
+        width = 2;
+        goto PEEK;
+case OP_PEEK:
+        width = 1;
+PEEK:
+        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Segment */
+        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Offset */
+        ortrap(segment_peek(VM_Arg1, fixed_value(VM_Arg2), width, false,
+                &VM_Result));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+
+@ @<Carry out...@>=
+case OP_POKE8_M:
+        width = 8;
+        goto POKE;
+case OP_POKE4_M:
+        width = 4;
+        goto POKE;
+case OP_POKE2_M:
+        width = 2;
+        goto POKE;
+case OP_POKE_M:
+        width = 1;
+POKE:
+        ortrap(interpret_argument(ins, 0, &VM_Result)); /* Segment */
+        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Offset */
+        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Value */
+        ortrap(segment_poke_m(VM_Result, fixed_value(VM_Arg1), width,
+                false, VM_Arg2));
+        break;
+
+@ @<Carry out...@>=
+case OP_ADD:
         ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Yin */
         ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Yang */
         ortrap(int_add(VM_Arg1, VM_Arg2, &VM_Result));
         ortrap(interpret_save(ins, VM_Result));
         break;
-
-@ @<Carry out...@>=
-case OP_SUB:@;
+case OP_SUB:
         ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Yin */
         ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Yang */
         ortrap(int_sub(VM_Arg1, VM_Arg2, &VM_Result));
         ortrap(interpret_save(ins, VM_Result));
         break;
 
-@* Assembler.
+@ @<Carry out...@>=
+case OP_MUL:
+        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Yin */
+        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Yang */
+        ortrap(int_mul(VM_Arg1, VM_Arg2, &VM_Result));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
 
-This text is old and mostly wrong.
+@* Assembly Statement Parser.
 
-The assembler performs the process of assembling to form an assembly
-which can be relocated into executability. The lexer in \.{byteless.lex}
-has been made aware of which opcodes expect which arguments although
-strictly speaking this is a parsing matter. Combined with the fixed
-line length limit and assembly's almost total lack of programmatic
-structure this reduces the amount of error checking needed before
-a line can be deconstructed and appended to the growing program.
+@
 
-Given a port, usually the front-end to a file descriptor, the
-algorithm will:
-
-Create a new assembler object containing
-
-        a 120+1+2 byte line buffer.
-
-        Pending pre and post comment lists
-
-        Up to 64k array of proto-instructions
-
-        Far labels:
-            Pending label for next code line
-            Database of symbols to lines which mention them
-            Database of symbols to lines which define them
-
-        Local labels:
-            Pending label for next code line (singular!)
-            10-array of pairs, line which defines it and lines which are waiting for it
-
-Repeat until EOF:
-
-    Read a line into the buffer
-    Convert to one of:
-        \Lt O OA RO ROO
-        (opcode)                ;; HALT, NOP
-        (opcode object)         ;; TRAP
-        (opcode object address) ;; JUMP, CALL
-        (opcode register object)
-        (opcode register object object)
-      Where object is one of:
-        () \#[tT] \#[fF] \#VOID \#UNDEFINED
-        symbol
-        integer
-        register
-      register is one of:
-        ('peeking id)
-        ('popping id)
-      address is one of:
-        name        (symbol, far)
-        int         (16 bit signed, local)
-    Maintain a table of symbols which are branched to
-    Maintain a table of symbols which are provided
-    Maintain a table of local links
-    Maintain a table of objects
-    Each line also has two comment slots, fore and aft. A line with a fore
-        comment is a new (readable) block.
-    Parse a proto-instruction:
-        Look for and pend a label in the first column and abort if one is found and was pending
-        If there is no content or just comments, append it and continue with the next line
-        Decode the lexical tokens into an opcode and objects
-            If a far label is pending add this line to the definitions
-            If a local label is pending update saved forward links to this line
-            If the opcode indicate a simple branch update the link tables
-            Validate the opcode arguments (Mainly just ALOT)
-            If any arguments are ALOB and not a constant or integer less than 16 bits allocate
-                lookup
-
-If there unfulfilled local links abort
-
-Update symbol links which are provided to relative, for other symbol links allocate an offset
-
-Return a new assembly object containing
-        Table of exported labels
-        Table of objects
-        Up to 64k of real instructions
-
-@ Prior to being encoded instruction arguments are saved in a pair
-who's sin half indicates how to interpret the argument datum in the
-dex half.
-
-@<Constant Sym...@>=
-LBA_ADDRESS,
-LBA_ASIS,
-LBA_INDIRECT,
-LBA_OBJECT,
-LBA_REGISTER,
-LBA_REGISTER_POP,
-LBA_RELATIVE,
-LBA_TABLE,
-
-@ @<Finish init...@>=
-init_identifier(LBA_ADDRESS,      "address",      ltmp);
-init_identifier(LBA_ASIS,         "as-is",        ltmp);
-init_identifier(LBA_INDIRECT,     "indirect",     ltmp);
-init_identifier(LBA_OBJECT,       "object",       ltmp);
-init_identifier(LBA_REGISTER,     "register",     ltmp);
-init_identifier(LBA_REGISTER_POP, "register%pop", ltmp);
-init_identifier(LBA_RELATIVE,     "relative",     ltmp);
-init_identifier(LBA_TABLE,        "table",        ltmp);
-
-@ Assembly objects consist primarily of an array of statements. The
-underlying object is designed for simplicity not efficiency.
-
-@d statement_opcode(O)    (larry_ref_imp((O), 0))
-@d statement_comment(O)   (larry_ref_imp((O), 4))
-@d statement_argument(O,I) (larry_ref_imp((O), (I) + 1))
-@d statement_set_m(O,I,V) (larry_set_m_imp((O), (I) + 1, (V)))
-@d statement_set_comment_m(O,V) (larry_set_m_imp((O), 4, (V)))
+@d ARGUMENT_BACKWARD_ADDRESS 0
+@d ARGUMENT_ERROR            1
+@d ARGUMENT_FAR_ADDRESS      2
+@d ARGUMENT_FORWARD_ADDRESS  3
+@d ARGUMENT_OBJECT           4
+@d ARGUMENT_REGISTER         5
+@d ARGUMENT_REGISTER_POPPING 6
+@d ARGUMENT_RELATIVE         7
+@d ARGUMENT_TABLE            8
+@d ARGUMENT_LENGTH           9
+@#
+@d STATEMENT_LOCAL_LABEL 0
+@d STATEMENT_FAR_LABEL   1
+@d STATEMENT_INSTRUCTION 2
+@d STATEMENT_COVEN       3
+@d STATEMENT_COMMENT     6
+@d STATEMENT_LENGTH      7
+@#
+@d pstas_source_byte(P,I) (segment_base((P)->source)[(P)->start + (I)])
 @<Fun...@>=
-error_code new_statement (cell, cell *);
-bool statement_has_argument_p (cell, int);
-error_code statement_set_argument_m (cell, int, cell);
+error_code new_statement_imp (cell, cell *);
+error_code parse_segment_to_statement (cell, cell, cell, cell *, cell *);
+error_code pstas_any_symbol (statement_parser *,
+        error_code (*)(statement_parser *, half, half), half);
+error_code pstas_argument (statement_parser *, half);
+error_code pstas_argument_address (statement_parser *, half);
+error_code pstas_argument_address_first (statement_parser *, half);
+error_code pstas_argument_encode_error (statement_parser *, half, half);
+error_code pstas_argument_encode_register (statement_parser *, bool,
+        byte *, half, half);
+error_code pstas_argument_encode_symbol (statement_parser *,
+        half, half);
+error_code pstas_argument_error (statement_parser *, half);
+error_code pstas_argument_far_address (statement_parser *, half);
+error_code pstas_argument_local_address (statement_parser *, half);
+error_code pstas_argument_number (statement_parser *, bool, int, bool, half);
+error_code pstas_argument_object (statement_parser *, bool, half);
+error_code pstas_argument_register (statement_parser *, half);
+error_code pstas_argument_signed_number (statement_parser *, bool, bool, half);
+error_code pstas_argument_special (statement_parser *, bool, half);
+error_code pstas_far_label (statement_parser *, half);
+error_code pstas_instruction (statement_parser *, half);
+error_code pstas_instruction_encode (statement_parser *, bool, byte *,
+        half, half);
+error_code pstas_invalid (statement_parser *, half);
+error_code pstas_line_comment (statement_parser *, half);
+error_code pstas_local_label (statement_parser *, half);
+error_code pstas_maybe_no_argument (statement_parser *, half);
+error_code pstas_pre_argument_list (statement_parser *, half);
+error_code pstas_pre_instruction (statement_parser *, half);
+error_code pstas_pre_next_argument (statement_parser *, half);
+error_code pstas_pre_trailing_comment (statement_parser *, half);
+error_code pstas_real_comment (statement_parser *, half);
+error_code statement_append_comment_m (cell, cell);
+error_code statement_argument (cell, cell, cell *);
+error_code statement_comment (cell, cell *);
+error_code statement_far_label (cell, cell *);
+bool statement_has_comment_p (cell);
+bool statement_has_far_label_p (cell);
+bool statement_has_instruction_p (cell);
+bool statement_has_local_label_p (cell);
+error_code statement_instruction (cell, cell *);
+bool statement_integer_fits_p (cell, int, cell);
+error_code statement_local_label (cell, cell *);
+error_code statement_set_argument_m (cell, int, int, cell);
+error_code statement_set_far_label_m (cell, cell);
+error_code statement_set_instruction_m (cell, cell);
+error_code statement_set_local_label_m (cell, cell);
+
+@ @d new_statement(R) new_statement_imp(NIL, (R))
+@c
+error_code
+new_statement_imp (cell  op,
+                   cell *ret)
+{
+        error_code reason;
+        assert(null_p(op) || opcode_p(op));
+        orreturn(new_array_imp(STATEMENT_LENGTH, fix(0), NIL,
+                FORM_STATEMENT, ret));
+        array_base(*ret)[STATEMENT_INSTRUCTION] = op;
+        return LERR_NONE;
+}
 
 @ @c
 error_code
-new_statement (cell  op,
-               cell *ret)
+statement_far_label (cell  o,
+                     cell *ret)
+{
+        assert(statement_p(o));
+        *ret = array_base(o)[STATEMENT_FAR_LABEL];
+        return LERR_NONE;
+}
+
+bool
+statement_has_far_label_p (cell o)
+{
+        assert(statement_p(o));
+        return !null_p(array_base(o)[STATEMENT_FAR_LABEL]);
+}
+
+error_code
+statement_set_far_label_m (cell o,
+                           cell label)
+{
+        assert(statement_p(o));
+        assert(symbol_p(label));
+        assert(null_p(array_base(o)[STATEMENT_FAR_LABEL]));
+        array_base(o)[STATEMENT_FAR_LABEL] = label;
+        return LERR_NONE;
+}
+
+@ @c
+error_code
+statement_local_label (cell  o,
+                       cell *ret)
+{
+        assert(statement_p(o));
+        *ret = array_base(o)[STATEMENT_LOCAL_LABEL];
+        return LERR_NONE;
+}
+
+bool
+statement_has_local_label_p (cell o)
+{
+        assert(statement_p(o));
+        return !null_p(array_base(o)[STATEMENT_LOCAL_LABEL]);
+}
+
+error_code
+statement_set_local_label_m (cell o,
+                             cell label)
+{
+        assert(statement_p(o));
+        assert(fixed_p(label)
+                && fixed_value(label) >= 0 && fixed_value(label) <= 9);
+        assert(null_p(array_base(o)[STATEMENT_LOCAL_LABEL]));
+        array_base(o)[STATEMENT_LOCAL_LABEL] = label;
+        return LERR_NONE;
+}
+
+@ @c
+error_code
+statement_instruction (cell  o,
+                       cell *ret)
+{
+        assert(statement_p(o));
+        *ret = array_base(o)[STATEMENT_INSTRUCTION];
+        return LERR_NONE;
+}
+
+bool
+statement_has_instruction_p (cell o)
+{
+        assert(statement_p(o));
+        return !null_p(array_base(o)[STATEMENT_INSTRUCTION]);
+}
+
+error_code
+statement_set_instruction_m (cell o,
+                             cell op)
+{
+        assert(statement_p(o));
+        assert(opcode_p(op));
+        assert(null_p(array_base(o)[STATEMENT_INSTRUCTION]));
+        array_base(o)[STATEMENT_INSTRUCTION] = op;
+        return LERR_NONE;
+}
+
+@ @c
+error_code
+statement_argument (cell  o,
+                    cell  id,
+                    cell *ret)
+{
+        assert(statement_p(o));
+        assert(fixed_p(id) && fixed_value(id) >= 0 && fixed_value(id) <= 2);
+        *ret = array_base(o)[STATEMENT_COVEN + fixed_value(id)];
+        return LERR_NONE;
+}
+
+error_code
+statement_set_argument_m (cell o,
+                          int  id,
+                          int  cat,
+                          cell object)
+{
+        assert(statement_p(o));
+        assert(id >= 0 && id <= 2);
+        assert(cat >= 0 && cat < ARGUMENT_LENGTH);
+        assert(!special_p(o) || valid_p(object));
+        return new_atom(fix(cat), object, FORM_ARGUMENT,
+                array_base(o) + STATEMENT_COVEN + id);
+}
+
+@ @c
+@.TODO@>
+bool
+statement_integer_fits_p (cell o,
+                          int  argid,
+                          cell number)
+{
+        char signature;
+        cell op;
+
+        assert(statement_p(o));
+        assert(statement_has_instruction_p(o));
+        assert(integer_p(number));
+        statement_instruction(o, &op);
+        signature = opcode_signature_c(op)[argid];
+        assert(signature == ALOT || signature == ALOB);
+        if (!fixed_p(number))
+                return false; /* TODO: Not correct on 16 bit */
+        if (signature == ALOT)
+                return fixed_value(number) >= -64 && fixed_value(number) <= 63;
+        else
+                return fixed_value(number) >= -32768 && fixed_value(number) <= 32767;
+}
+
+@ @c
+bool
+statement_has_comment_p (cell o)
+{
+        assert(statement_p(o));
+        return !null_p(array_base(o)[STATEMENT_COMMENT]);
+}
+
+error_code
+statement_comment (cell  o,
+                   cell *ret)
+{
+        assert(statement_p(o));
+        *ret = array_base(o)[STATEMENT_COMMENT];
+        return LERR_NONE;
+}
+
+error_code
+statement_append_comment_m (cell o,
+                            cell text)
+{
+        cell tmp;
+        error_code reason;
+        assert(statement_p(o));
+        assert(pair_p(text)); /* Triplet: (segment offset length) */
+        orreturn(cons(text, array_base(o)[STATEMENT_COMMENT], &tmp));
+        array_base(o)[STATEMENT_COMMENT] = tmp;
+        return LERR_NONE;
+}
+
+@ @<Type def...@>=
+typedef struct {
+        cell  partial;
+        cell  source;
+        char *signature;
+        int   argument;
+        half  consume;
+        half  start;
+        half  length;
+        half  end;
+} statement_parser;
+
+@ @c
+error_code
+parse_segment_to_statement (cell  source,
+                            cell  start,
+                            cell  length,
+                            cell *consume,
+                            cell *ret)
+{
+        byte first;
+        word value;
+        statement_parser pstate = {0};
+        error_code reason;
+
+        assert(segment_p(source));
+        pstate.source = source;
+
+        orassert(int_value(start, &value));
+        assert(value >= 0 && value < segment_length_c(source));
+        pstate.start = value;
+
+        orassert(int_value(length, &value));
+        assert(value >= 1 && pstate.start + value <= segment_length_c(source));
+        pstate.length = value;
+
+        pstate.end = pstate.start + pstate.length;
+        orreturn(new_statement(&pstate.partial));
+        switch ((first = pstas_source_byte(&pstate, 0))) {
+        case '#':
+        case ';':
+        case '\'':
+                reason = pstas_line_comment(&pstate, 0);
+                break;
+
+        case ' ':
+        case '\t':
+        case '\n':
+                reason = pstas_pre_instruction(&pstate, 0);
+                break;
+
+        default:
+                if (ascii_digit_p(first))
+                        reason = pstas_local_label(&pstate, 0);
+                else if (ascii_printable_p(first))
+                        reason = pstas_far_label(&pstate, 0);
+                else
+                        reason = pstas_invalid(&pstate, 0);
+                break;
+        }
+        if (failure_p(reason))
+                return reason;
+        orreturn(new_int_c(pstate.consume, consume));
+        *ret = pstate.partial;
+        return LERR_NONE;
+}
+
+@ @c
+error_code
+pstas_invalid (statement_parser *pstate @[unused@],
+               half offset @[unused@])
+{
+assert(!"invalid\n");
+        return LERR_UNIMPLEMENTED;
+}
+
+@ @c
+error_code
+pstas_line_comment (statement_parser *pstate,
+                    half offset)
+{
+        byte leader;
+        half i;
+
+        leader = pstas_source_byte(pstate, offset);
+        i = offset;
+next_leader:
+        if (i == pstate->end) {
+                pstate->consume = i;
+                return LERR_NONE;
+        } else if (pstas_source_byte(pstate, i) == leader) {
+                i++;
+                goto next_leader;
+        }
+
+next_space:
+        if (i == pstate->end) {
+                pstate->consume = i;
+                return LERR_NONE;
+        }
+        switch (pstas_source_byte(pstate, i)) {
+        case ' ':
+        case '\t':
+                i++;
+                goto next_space;
+        case '\n':
+                pstate->consume = i + 1;
+                return LERR_NONE;
+        default:
+                if (ascii_printable_p(pstas_source_byte(pstate, i)))
+                        return pstas_real_comment(pstate, i);
+                else
+                        return pstas_invalid(pstate, i);
+        }
+}
+
+@ @c
+error_code
+pstas_local_label (statement_parser *pstate,
+                   half offset)
+{
+        half hoffset;
+        byte h;
+        cell label;
+        error_code reason;
+
+        hoffset = offset + 1;
+        if (hoffset == pstate->end)
+                return pstas_invalid(pstate, hoffset);
+        h = pstas_source_byte(pstate, hoffset);
+        if (h != 'h' && h != 'H')
+                return pstas_invalid(pstate, hoffset);
+        label = fix(pstas_source_byte(pstate, offset) - '0');
+        orassert(statement_set_local_label_m(pstate->partial, label));
+        return pstas_pre_instruction(pstate, hoffset + 1);
+}
+
+@ @c
+error_code
+pstas_far_label (statement_parser *pstate,
+                 half offset)
+{
+        cell label;
+        half i, j;
+        error_code reason;
+
+        j = i = offset + 1;
+next_label:
+        if (i == pstate->end) {
+complete_line:
+                orreturn(new_symbol_segment(pstate->source,
+                        pstate->start + offset, j - offset, &label));
+                orassert(statement_set_far_label_m(pstate->partial, label));
+                pstate->consume = i;
+                return LERR_NONE;
+        }
+        switch (pstas_source_byte(pstate, i)) {
+        case ' ':
+        case '\t':
+                orreturn(new_symbol_segment(pstate->source,
+                        pstate->start + offset, i - offset, &label));
+                orassert(statement_set_far_label_m(pstate->partial, label));
+                return pstas_pre_instruction(pstate, i);
+        case '\n':
+                j = i++;
+                goto complete_line;
+        default:
+                if (ascii_printable_p(pstas_source_byte(pstate, i))) {
+                        i++;
+                        goto next_label;
+                } else
+                        return pstas_invalid(pstate, i);
+        }
+}
+
+@ @c
+error_code
+pstas_pre_instruction (statement_parser *pstate,
+                       half offset)
+{
+        if (offset == pstate->end) {
+                offset--;
+                goto finish_line;
+        }
+        if (pstas_source_byte(pstate, offset) == '\n')
+                goto finish_line;
+        while (pstas_source_byte(pstate, offset) == ' '
+            || pstas_source_byte(pstate, offset) == '\t')
+                offset++;
+        if (pstas_source_byte(pstate, offset) == '\n') {
+finish_line:
+                pstate->consume = offset + 1;
+                return LERR_NONE;
+        }
+        if (ascii_printable_p(pstas_source_byte(pstate, offset)))
+                return pstas_instruction(pstate, offset);
+        else
+                return pstas_invalid(pstate, offset);
+}
+
+@ @c
+error_code
+pstas_instruction (statement_parser *pstate,
+                   half offset)
+{
+        bool pop_p;
+        byte b;
+        byte label[24];
+        half i, out;
+
+        if (offset == pstate->end)
+                return pstas_invalid(pstate, offset);
+        pop_p = (pstas_source_byte(pstate, offset) == '=');
+        i = offset + pop_p;
+        label[0] = 'V';
+        label[1] = 'M';
+        label[2] = ':';
+        out = 3;
+next_byte:
+        if (out == 24 || i == pstate->end)
+                return pstas_instruction_encode(pstate, false, label, out, i);
+
+        switch ((b = pstas_source_byte(pstate, i))) {
+        case ' ':
+        case '\t':
+                return pstas_instruction_encode(pstate, true, label, out, i);
+        case '\n':
+                return pstas_instruction_encode(pstate, false, label, out, i);
+        default:
+                if (ascii_printable_p(pstas_source_byte(pstate, i))) {
+                        label[out++] = ascii_upcase(b);
+                        i++;
+                        goto next_byte;
+                } else
+                        return pstas_invalid(pstate, i);
+        }
+}
+
+@ @c
+error_code
+pstas_instruction_encode (statement_parser *pstate,
+                          bool  more_p,
+                          byte *label,
+                          half  length,
+                          half  offset)
+{
+        cell sop, lop;
+        error_code reason;
+
+        orreturn(new_symbol_buffer(label, length, NULL, &sop));
+        reason = env_search(Environment, sop, &lop);
+        if (reason == LERR_MISSING)
+                return pstas_invalid(pstate, offset);
+        if (failure_p(reason))
+                return reason;
+        if (!opcode_p(lop))
+                return pstas_invalid(pstate, offset);
+        orassert(statement_set_instruction_m(pstate->partial, lop));
+        if (more_p)
+                return pstas_pre_argument_list(pstate, offset);
+        else
+                return pstas_maybe_no_argument(pstate, offset);
+}
+
+@ @c
+error_code
+pstas_maybe_no_argument (statement_parser *pstate,
+                         half offset)
+{
+        cell op;
+        error_code reason;
+
+        orassert(statement_instruction(pstate->partial, &op));
+        assert(opcode_p(op));
+        if (opcode_object(op)->arg0 == NARG) {
+                return pstas_pre_trailing_comment(pstate, offset);
+                pstate->consume = offset;
+                return LERR_NONE;
+        } else
+                return pstas_invalid(pstate, offset);
+}
+
+@ @c
+error_code
+pstas_pre_argument_list (statement_parser *pstate,
+                         half offset)
+{
+        cell op;
+        half i;
+        error_code reason;
+
+        i = offset;
+next_byte:
+        if (i == pstate->end)
+                return pstas_maybe_no_argument(pstate, i);
+        switch (pstas_source_byte(pstate, i)) {
+        case ' ':
+        case '\t':
+                i++;
+                goto next_byte;
+        case '\n':
+                return pstas_maybe_no_argument(pstate, i);
+        default:
+                if (ascii_printable_p(pstas_source_byte(pstate, i))) {
+                        orassert(statement_instruction(pstate->partial, &op));
+                        pstate->signature = opcode_signature_c(op);
+                        if (*pstate->signature == NARG)
+                                return pstas_maybe_no_argument(pstate, i);
+                        pstate->argument = 0;
+                        return pstas_argument(pstate, i);
+                } else
+                        return pstas_invalid(pstate, i);
+        }
+}
+
+@ @c
+error_code
+pstas_argument (statement_parser *pstate,
+                half offset)
+{
+        if (offset == pstate->end)
+                return pstas_invalid(pstate, offset);
+        assert(*pstate->signature != NARG);
+        switch (*pstate->signature) {
+        case AADD: return pstas_argument_address(pstate, offset);
+        case ALOB: return pstas_argument_object(pstate, true, offset);
+        case AREG: return pstas_argument_register(pstate, offset);
+        case ALOT: return pstas_argument_object(pstate, false, offset);
+        case ARGH: return pstas_argument_error(pstate, offset);
+        default: return LERR_INTERNAL;
+        }
+}
+
+@ @c
+error_code
+pstas_argument_address (statement_parser *pstate,
+                        half offset)
+{
+        if (offset == pstate->end)
+                return pstas_invalid(pstate, offset);
+        else if (pstas_source_byte(pstate, offset) == '@@')
+                return pstas_argument_address_first(pstate, offset + 1);
+        else
+                return pstas_argument_register(pstate, offset);
+}
+
+@ @c
+error_code
+pstas_argument_address_first (statement_parser *pstate,
+                              half offset)
+{
+        byte first;
+
+        if (offset == pstate->end)
+                return pstas_invalid(pstate, offset);
+        first = pstas_source_byte(pstate, offset);
+        if (ascii_digit_p(first))
+                return pstas_argument_local_address(pstate, offset);
+        else if (ascii_printable_p(first) && first != ',')
+                return pstas_argument_far_address(pstate, offset);
+        else
+                return pstas_invalid(pstate, offset);
+}
+
+@ @c
+error_code
+pstas_argument_local_address (statement_parser *pstate,
+                              half offset)
+{
+        int label;
+        error_code reason;
+
+        label = pstas_source_byte(pstate, offset) - '0';
+        offset++;
+        if (offset == pstate->end)
+                return pstas_invalid(pstate, offset);
+        switch (pstas_source_byte(pstate, offset)) {
+        case 'b':
+        case 'B':
+                orassert(statement_set_argument_m(pstate->partial,
+                        pstate->argument, ARGUMENT_BACKWARD_ADDRESS,
+                        fix(label)));
+                return pstas_pre_next_argument(pstate, offset + 1);
+        case 'f':
+        case 'F':
+                orassert(statement_set_argument_m(pstate->partial,
+                        pstate->argument, ARGUMENT_FORWARD_ADDRESS,
+                        fix(label)));
+                return pstas_pre_next_argument(pstate, offset + 1);
+        default:
+                return pstas_invalid(pstate, offset);
+        }
+}
+
+@ @c
+error_code
+pstas_argument_far_address (statement_parser *pstate,
+                            half offset)
+{
+        cell label;
+        half i;
+        error_code reason;
+
+        i = offset;
+next_byte:
+        if (i == pstate->end) {
+finish_address:
+                orreturn(new_symbol_segment(pstate->source, pstate->start
+                        + offset, i - offset, &label));
+                orassert(statement_set_argument_m(pstate->partial,
+                        pstate->argument, ARGUMENT_FAR_ADDRESS, label));
+                return pstas_pre_next_argument(pstate, i);
+        }
+        switch (pstas_source_byte(pstate, i)) {
+        case ',':
+        case ' ':
+        case '\t':
+        case '\n':
+                goto finish_address;
+        default:
+                if (ascii_printable_p(pstas_source_byte(pstate, i))) {
+                        i++;
+                        goto next_byte;
+                } else
+                        return pstas_invalid(pstate, i);
+        }
+}
+
+@ @c
+error_code
+pstas_pre_next_argument (statement_parser *pstate,
+                         half offset)
+{
+        byte sep;
+
+        pstate->argument++;
+        pstate->signature++;
+        if (offset == pstate->end)
+                sep = '\n';
+        else
+                sep = pstas_source_byte(pstate, offset);
+        if (pstate->argument > 2 || *pstate->signature == NARG) {
+                if (sep == ' ' || sep == '\t' || sep == '\n')
+                        return pstas_pre_trailing_comment(pstate, offset);
+        } else {
+                if (sep == ',')
+                        return pstas_argument(pstate, offset + 1);
+        }
+        return pstas_invalid(pstate, offset);
+}
+
+@ @c
+error_code
+pstas_pre_trailing_comment (statement_parser *pstate,
+                            half offset)
+{
+        half i;
+
+        i = offset;
+next_byte:
+        if (i == pstate->end) {
+finish_line:
+                pstate->consume = i;
+                return LERR_NONE;
+        }
+        switch (pstas_source_byte(pstate, i)) {
+        case ' ':
+        case '\t':
+                i++;
+                goto next_byte;
+        case '\n':
+                i++;
+                goto finish_line;
+        default:
+                if (ascii_printable_p(pstas_source_byte(pstate, i)))
+                        return pstas_real_comment(pstate, offset);
+                else
+                        return pstas_invalid(pstate, offset);
+        }
+}
+
+@ @c
+error_code
+pstas_real_comment (statement_parser *pstate,
+                    half offset)
+{
+        cell tmp;
+        half i, j;
+        error_code reason;
+
+        i = offset;
+next_byte:
+        if (i == pstate->end) {
+finish_comment:
+                j = i;
+                while (ascii_space_p(pstas_source_byte(pstate, j - 1)))
+                        j--;
+                orreturn(cons(fix(j), NIL, &tmp));
+                orreturn(cons(fix(j - offset), tmp, &tmp));
+                orreturn(cons(pstate->source, tmp, &tmp));
+                orreturn(statement_append_comment_m(pstate->partial, tmp));
+                pstate->consume = i;
+                return LERR_NONE;
+        }
+        switch (pstas_source_byte(pstate, i)) {
+        default:
+                if (!ascii_printable_p(pstas_source_byte(pstate, i)))
+                        return pstas_invalid(pstate, i);
+        case ' ':
+        case '\t':
+                i++;
+                goto next_byte;
+        case '\n':
+                i++;
+                goto finish_comment;
+        }
+}
+
+@ Incorporates |pstas_argument_parse_register|.
+@c
+error_code
+pstas_argument_register (statement_parser *pstate,
+                         half offset)
+{
+        bool first, pop_p;
+        byte b;
+        byte label[24];
+        half i, out;
+
+        if (offset == pstate->end)
+                return pstas_invalid(pstate, offset);
+        pop_p = (pstas_source_byte(pstate, offset) == '=');
+        i = offset + pop_p;
+        label[0] = 'V';
+        label[1] = 'M';
+        label[2] = ':';
+        out = 3;
+        first = true;
+next_byte:
+        if (out == 24 || i == pstate->end)
+                return pstas_argument_encode_register(pstate, pop_p, label, out, i);
+
+        switch ((b = pstas_source_byte(pstate, i))) {
+        case ',':
+        case ' ':
+        case '\t':
+        case '\n':
+                return pstas_argument_encode_register(pstate, pop_p, label, out, i);
+        case '-':
+        case '_':
+                label[out++] = '-';
+                first = true;
+                i++;
+                goto next_byte;
+        default:
+                if (ascii_printable_p(pstas_source_byte(pstate, i))) {
+                        label[out++] = first
+                                ? ascii_upcase(pstas_source_byte(pstate, i))
+                                : ascii_downcase(pstas_source_byte(pstate, i));
+                        first = false;
+                        i++;
+                        goto next_byte;
+                } else
+                        return pstas_invalid(pstate, i);
+        }
+}
+
+@ @c
+error_code
+pstas_argument_encode_register (statement_parser *pstate,
+                                bool  pop_p,
+                                byte *label,
+                                half  length,
+                                half  offset)
+{
+        cell sreg, rreg;
+        error_code reason;
+
+        orreturn(new_symbol_buffer(label, length, NULL, &sreg));
+        reason = env_search(Environment, sreg, &rreg);
+        if (reason == LERR_MISSING)
+                return pstas_invalid(pstate, offset);
+        if (failure_p(reason))
+                return reason;
+        if (!register_p(rreg))
+                return pstas_invalid(pstate, offset);
+        orassert(statement_set_argument_m(pstate->partial,
+                pstate->argument,
+                pop_p ? ARGUMENT_REGISTER_POPPING : ARGUMENT_REGISTER, rreg));
+        return pstas_pre_next_argument(pstate, offset);
+}
+
+@ @c
+error_code
+pstas_argument_error (statement_parser *pstate,
+                      half offset)
+{
+        if (offset == pstate->end || pstas_source_byte(pstate, offset) != '\'')
+                return pstas_invalid(pstate, offset);
+        return pstas_any_symbol(pstate, pstas_argument_encode_error, offset + 1);
+}
+
+@ @c
+error_code
+pstas_argument_encode_error (statement_parser *pstate,
+                             half length_offset,
+                             half offset)
+{
+        cell lerr, serr;
+        error_code reason;
+
+        orreturn(new_symbol_segment(pstate->source, pstate->start + offset,
+                length_offset - offset, &serr));
+        reason = env_search(Environment, serr, &lerr);
+        if (reason == LERR_MISSING)
+                return pstas_invalid(pstate, length_offset);
+        if (failure_p(reason))
+                return reason;
+        if (!error_p(lerr))
+                return pstas_invalid(pstate, length_offset);
+        orassert(statement_set_argument_m(pstate->partial,
+                pstate->argument, ARGUMENT_ERROR, lerr));
+        return pstas_pre_next_argument(pstate, length_offset);
+}
+
+@ @c
+error_code
+pstas_any_symbol (statement_parser *pstate,
+                  error_code (*then)(statement_parser *, half, half),
+                  half offset)
+{
+        half i;
+
+        i = offset;
+next_byte:
+        if (i == pstate->end)
+                return then(pstate, i, offset);
+        switch (pstas_source_byte(pstate, i)) {
+        case ',':
+        case ' ':
+        case '\t':
+        case '\n':
+                return then(pstate, i, offset);
+        default:
+                if (ascii_printable_p(pstas_source_byte(pstate, i))) {
+                        i++;
+                        goto next_byte;
+                } else
+                        return pstas_invalid(pstate, i);
+        }
+}
+
+@ @c
+error_code
+pstas_argument_object (statement_parser *pstate,
+                       bool full,
+                       half offset)
 {
         error_code reason;
 
-        if (!opcode_p(op))
-                return LERR_INCOMPATIBLE;
-        orreturn(new_larry(5, 0, NIL, FORM_STATEMENT, ret));
-        larry_set_m_imp(*ret, 0, op);
+        switch (pstas_source_byte(pstate, offset)) {
+        case '-':
+                return pstas_argument_signed_number(pstate, true, full, offset + 1);
+        case '+':
+                return pstas_argument_signed_number(pstate, false, full, offset + 1);
+        case '#':
+                return pstas_argument_special(pstate, full, offset + 1);
+        case '(':
+                if (offset + 1 == pstate->end
+                    || pstas_source_byte(pstate, offset + 1) != ')')
+                        return pstas_invalid(pstate, offset + 1);
+                orassert(statement_set_argument_m(pstate->partial,
+                        pstate->argument, ARGUMENT_OBJECT, NIL));
+                return pstas_pre_next_argument(pstate, offset + 2);
+        case '\'':
+                if (full)
+                        return pstas_any_symbol(pstate, pstas_argument_encode_symbol, offset + 1);
+                else
+                        return pstas_invalid(pstate, offset);
+        default:
+                if (ascii_digit_p(pstas_source_byte(pstate, offset)))
+                        return pstas_argument_signed_number(pstate, false, full, offset);
+                else
+                        return pstas_argument_register(pstate, offset);
+        }
+}
+
+@ @c
+error_code
+pstas_argument_encode_symbol (statement_parser *pstate,
+                              half length_offset,
+                              half offset)
+{
+        cell sym;
+        error_code reason;
+
+        orreturn(new_symbol_segment(pstate->source, pstate->start + offset,
+                length_offset - offset, &sym));
+        orassert(statement_set_argument_m(pstate->partial,
+                pstate->argument, ARGUMENT_OBJECT, sym));
+        return pstas_pre_next_argument(pstate, length_offset);
+}
+
+@ @c
+error_code
+pstas_argument_special (statement_parser *pstate,
+                         bool full,
+                         half offset)
+{
+        error_code reason;
+
+        if (offset == pstate->end)
+                return pstas_invalid(pstate, offset);
+        switch (pstas_source_byte(pstate, offset)) {
+        case 'b':
+        case 'B':
+                return pstas_argument_number(pstate, false, 2, full, offset + 1);
+        case 'o':
+        case 'O':
+                return pstas_argument_number(pstate, false, 8, full, offset + 1);
+        case 'd':
+        case 'D':
+                return pstas_argument_number(pstate, false, 10, full, offset + 1);
+        case 'x':
+        case 'X':
+                return pstas_argument_number(pstate, false, 16, full, offset + 1);
+        case 'f':
+        case 'F':
+                orassert(statement_set_argument_m(pstate->partial,
+                        pstate->argument, ARGUMENT_OBJECT, LFALSE));
+                return pstas_pre_next_argument(pstate, offset + 1);
+        case 't':
+        case 'T':
+                orassert(statement_set_argument_m(pstate->partial,
+                        pstate->argument, ARGUMENT_OBJECT, LTRUE));
+                return pstas_pre_next_argument(pstate, offset + 1);
+        case 'U':
+                if (offset + 8 < pstate->end
+                    && pstas_source_byte(pstate, offset + 1) == 'N'
+                    && pstas_source_byte(pstate, offset + 2) == 'D'
+                    && pstas_source_byte(pstate, offset + 3) == 'E'
+                    && pstas_source_byte(pstate, offset + 4) == 'F'
+                    && pstas_source_byte(pstate, offset + 5) == 'I'
+                    && pstas_source_byte(pstate, offset + 5) == 'N'
+                    && pstas_source_byte(pstate, offset + 6) == 'E'
+                    && pstas_source_byte(pstate, offset + 8) == 'D') {
+                        orassert(statement_set_argument_m(pstate->partial,
+                                pstate->argument, ARGUMENT_OBJECT, UNDEFINED));
+                        return pstas_pre_next_argument(pstate, offset + 9);
+                } else
+                        return pstas_invalid(pstate, offset);
+        case 'V':
+                if (offset + 3 < pstate->end
+                    && pstas_source_byte(pstate, offset + 1) == 'O'
+                    && pstas_source_byte(pstate, offset + 2) == 'I'
+                    && pstas_source_byte(pstate, offset + 3) == 'D') {
+                        orassert(statement_set_argument_m(pstate->partial,
+                                pstate->argument, ARGUMENT_OBJECT, VOID));
+                        return pstas_pre_next_argument(pstate, offset + 4);
+                } else
+                        return pstas_invalid(pstate, offset);
+        default:
+                return pstas_invalid(pstate, offset);
+        }
+}
+
+@ @c
+error_code
+pstas_argument_signed_number (statement_parser *pstate,
+                              bool negate,
+                              bool full,
+                              half offset)
+{
+        if (offset == pstate->end)
+                return pstas_invalid(pstate, offset);
+        if (pstas_source_byte(pstate, offset) == '#') {
+                offset++;
+                if (offset == pstate->end)
+                                return pstas_invalid(pstate, offset);
+                switch (pstas_source_byte(pstate, offset)) {
+                case 'b':
+                case 'B':
+                        return pstas_argument_number(pstate, negate, 2, full, offset);
+                case 'o':
+                case 'O':
+                        return pstas_argument_number(pstate, negate, 8, full, offset);
+                case 'd':
+                case 'D':
+                        return pstas_argument_number(pstate, negate, 10, full, offset);
+                case 'x':
+                case 'X':
+                        return pstas_argument_number(pstate, negate, 16, full, offset);
+                default:
+                        return pstas_invalid(pstate, offset);
+                }
+        } else if (ascii_digit_p(pstas_source_byte(pstate, offset)))
+                return pstas_argument_number(pstate, negate, 10, full, offset);
+        else
+                return pstas_invalid(pstate, offset);
+}
+
+@ @c
+error_code
+pstas_argument_number (statement_parser *pstate,
+                       bool negate,
+                       int  base,
+                       bool full,
+                       half offset)
+{
+        byte b;
+        cell lsum;
+        int add, sum, max, min, shift, width;
+        half i, j;
+        error_code reason;
+
+        sum = 0;
+        if (full) {
+                min = -32768;
+                max = 32767;
+        } else {
+                min = -64;
+                max = 63;
+        }
+
+        i = offset;
+        switch (base) {
+        case  2: width = 16; shift = 1; break;
+        case  8: width = 6; shift = 3; break;
+        case 10: width = 5; goto next_base10;
+        case 16: width = shift = 4; break;
+        }
+next_digit:
+        if (i == pstate->end)
+                goto finish_number;
+        b = pstas_source_byte(pstate, i);
+        if (ascii_space_p(b) || b == ',')
+                goto finish_number;
+        else if (ascii_digit_p(b) || ascii_hex_p(b)) {
+                if (i - offset == width)
+                        return pstas_invalid(pstate, offset);
+                if (b <= '9')
+                        add = b - '0';
+                else
+                        add = 10 + (b & 0xdf) - 'A';
+                if (add >= base)
+                        return pstas_invalid(pstate, offset);
+                sum = (sum << shift) | add;
+                i++;
+                goto next_digit;
+        } else
+                return pstas_invalid(pstate, offset);
+
+next_base10:
+        if (i == pstate->end)
+                goto finish_base10;
+        b = pstas_source_byte(pstate, i);
+        if (ascii_space_p(b) || b == ',')
+                goto finish_base10;
+        else if (ascii_digit_p(b)) {
+                if (i - offset == width)
+                        return pstas_invalid(pstate, offset);
+                i++;
+                goto next_base10;
+        } else
+                return pstas_invalid(pstate, offset);
+
+finish_base10:
+        for (j = offset; j < i; j++) {
+                sum *= 10;
+                sum += pstas_source_byte(pstate, j) - '0';
+        }
+
+finish_number:
+        if (negate)
+                sum = -sum;
+        if (sum < min || sum > max)
+                return pstas_invalid(pstate, i);
+        orreturn(new_int_c(sum, &lsum));
+        orassert(statement_set_argument_m(pstate->partial,
+                pstate->argument, ARGUMENT_OBJECT, lsum));
+        return pstas_pre_next_argument(pstate, i);
+}
+
+@* Assembler.
+
+@d ASSEMBLY_STATUS 0
+@d ASSEMBLY_STATUS_IN_PROGRESS 0
+@d ASSEMBLY_STATUS_READY       1
+@d ASSEMBLY_STATUS_INSTALLED   2
+
+@d ASSEMBLY_BODY 1
+@d ASSEMBLY_LENGTH 2
+
+@d ASSEMBLY_PROGRESS_BODY              1
+@d ASSEMBLY_PROGRESS_NEXT_ADDRESS      2
+@d ASSEMBLY_PROGRESS_FAR_ADDRESS       3
+@d ASSEMBLY_PROGRESS_FAR_ARGUMENT      4
+@d ASSEMBLY_PROGRESS_PENDING_LABEL     5
+@d ASSEMBLY_PROGRESS_BACKWARD_ADDRESS  6
+@d ASSEMBLY_PROGRESS_FORWARD_ARGUMENT  7
+@d ASSEMBLY_PROGRESS_OBJECTDB          8
+@d ASSEMBLY_PROGRESS_COMMENT_STATEMENT 9
+@d ASSEMBLY_PROGRESS_PENDING_COMMENT   10
+@d ASSEMBLY_PROGRESS_COMMENTARY        11
+@d ASSEMBLY_PROGRESS_BLOB              12
+@d ASSEMBLY_PROGRESS_LENGTH            13
+
+@d ASSEMBLY_READY_BODY       1
+@d ASSEMBLY_READY_EXPORT     2
+@d ASSEMBLY_READY_REQUIRE    3
+@d ASSEMBLY_READY_OBJECTDB   5
+@d ASSEMBLY_READY_COMMENTARY 6
+@d ASSEMBLY_READY_BLOB       7
+@d ASSEMBLY_READY_LENGTH     8
+
+@<Fun...@>=
+error_code new_assembly_progress (cell *);
+error_code new_assembly_buffer(byte *, word, cell *);
+error_code new_assembly_segment (cell, cell *);
+@#
+error_code assembly_append_comment_separator_m (cell);
+error_code assembly_append_far_argument_m (cell, cell, cell, int);
+error_code assembly_append_forward_argument_m (cell, cell, cell, int);
+error_code assembly_append_pending_comment_m (cell, cell);
+error_code assembly_clear_forward_argument_list_m (cell, cell);
+error_code assembly_comment_statement (cell, cell *);
+error_code assembly_commentary (cell, cell, cell *);
+error_code assembly_far_address (cell, cell, cell *);
+error_code assembly_far_argument_list (cell, cell, cell *);
+error_code assembly_forward_argument (cell, cell, cell *);
+bool assembly_has_far_address_p (cell, cell);
+bool assembly_has_pending_label_p (cell);
+error_code assembly_install_object_m (cell, cell, half *);
+error_code assembly_next_address (cell, cell *);
+error_code assembly_object_table (cell o, cell *);
+error_code assembly_pending_comment (cell, cell *);
+error_code assembly_pending_label (cell, cell *);
+error_code assembly_set_backward_address_m (cell, cell, cell);
+error_code assembly_set_comment_statement_m (cell, cell);
+error_code assembly_set_commentary_m (cell, cell, cell);
+error_code assembly_set_far_address_m (cell, cell, cell);
+error_code assembly_set_next_address_m (cell, cell);
+error_code assembly_set_pending_comment_m (cell, cell);
+error_code assembly_set_pending_label_m (cell, cell);
+error_code assembly_set_statement_m (cell, word, cell);
+@#
+error_code assembly_append_line_m (cell, cell);
+error_code assembly_append_statement_m (cell, cell, cell *);
+error_code assembly_encode_ALOT (int, cell, instruction *);
+error_code assembly_encode_AREG (int, cell, instruction *);
+error_code assembly_finish_m (cell, cell *);
+error_code assembly_fix_forward_links_m (cell, cell, cell);
+error_code assembly_install_m (cell, cell *);
+error_code assembly_validate_integer (int, bool, cell, word *);
+
+@
+@d assembly_in_progress_p(O) (assembly_p(O)
+        && array_base(O)[ASSEMBLY_STATUS] == fix(ASSEMBLY_STATUS_IN_PROGRESS))
+@d assembly_ready_p(O) (assembly_p(O)
+        && array_base(O)[ASSEMBLY_STATUS] == fix(ASSEMBLY_STATUS_READY))
+@d assembly_installed_p(O) (assembly_p(O)
+        && array_base(O)[ASSEMBLY_STATUS] == fix(ASSEMBLY_STATUS_INSTALLED))
+@c
+error_code
+new_assembly_progress (cell *ret)
+{
+        cell body, blob, far_address, far_argument;
+        cell backward, forward, commentary, objectdb;
+        error_code reason;
+
+        orreturn(new_array(100, fix(0), &body));
+        orreturn(new_hashtable(0, &far_address));
+        orreturn(new_hashtable(0, &far_argument));
+        orreturn(new_array(10, fix(0), &backward));
+        orreturn(new_array(10, fix(0), &forward));
+        orreturn(new_array(0, fix(0), &objectdb));
+        orreturn(new_hashtable(0, &commentary));
+        orreturn(new_segment(0, 0, &blob));
+        orreturn(new_array_imp(ASSEMBLY_PROGRESS_LENGTH, fix(0), NIL,
+                FORM_ASSEMBLY, ret));
+        array_base(*ret)[ASSEMBLY_STATUS] = fix(ASSEMBLY_STATUS_IN_PROGRESS);
+        array_base(*ret)[ASSEMBLY_PROGRESS_BODY] = body;
+        array_base(*ret)[ASSEMBLY_PROGRESS_NEXT_ADDRESS] = fix(0);
+        array_base(*ret)[ASSEMBLY_PROGRESS_FAR_ADDRESS] = far_address;
+        array_base(*ret)[ASSEMBLY_PROGRESS_FAR_ARGUMENT] = far_argument;
+        array_base(*ret)[ASSEMBLY_PROGRESS_BACKWARD_ADDRESS] = backward;
+        array_base(*ret)[ASSEMBLY_PROGRESS_FORWARD_ARGUMENT] = forward;
+        array_base(*ret)[ASSEMBLY_PROGRESS_OBJECTDB] = objectdb;
+        array_base(*ret)[ASSEMBLY_PROGRESS_COMMENTARY] = commentary;
+        array_base(*ret)[ASSEMBLY_PROGRESS_BLOB] = blob;
+        return LERR_NONE;
+}
+
+@ @c
+error_code
+assembly_statement (cell  o,
+                    word  lineno,
+                    cell *ret)
+{
+        cell body;
+        assert(assembly_p(o));
+        assert(ASSEMBLY_BODY == ASSEMBLY_PROGRESS_BODY);
+        body = array_base(o)[ASSEMBLY_BODY];
+        assert(lineno >= 0 && lineno < array_length_c(body));
+        *ret = array_base(body)[lineno];
+        assert(statement_p(*ret));
+        return LERR_NONE;
+}
+
+error_code
+assembly_set_statement_m (cell o,
+                          word lineno,
+                          cell statement)
+{
+        cell body;
+        word grow;
+        error_code reason;
+
+        assert(assembly_in_progress_p(o));
+        assert(lineno >= 0);
+        assert(statement_p(statement));
+        body = array_base(o)[ASSEMBLY_PROGRESS_BODY];
+        grow = array_length_c(body);
+        while (grow <= lineno)
+                if ((grow += 100) > CODE_PAGE_LENGTH)
+                        return LERR_OUT_OF_BOUNDS;
+        if (grow > array_length_c(body))
+                orreturn(array_resize_m(body, grow, NIL));
+        array_base(body)[lineno] = statement;
+        return LERR_NONE;
+}
+
+@ @c
+error_code
+assembly_next_address (cell  o,
+                       cell *ret)
+{
+        assert(assembly_in_progress_p(o));
+        *ret = array_base(o)[ASSEMBLY_PROGRESS_NEXT_ADDRESS];
+        assert(integer_p(*ret));
+        return LERR_NONE;
+}
+
+error_code
+assembly_set_next_address_m (cell o,
+                             cell addr)
+{
+        assert(assembly_in_progress_p(o));
+        assert(integer_p(addr)); /* |&& >= 0| but maybe not |< length|. */
+        array_base(o)[ASSEMBLY_PROGRESS_NEXT_ADDRESS] = addr;
         return LERR_NONE;
 }
 
 @ @c
 bool
-statement_has_argument_p (cell o,
-                          int  argc)
-{
-        assert(statement_p(o));
-        assert(argc >= 0 && argc <= 2);
-        return !null_p(larry_ref_imp(o, argc + 1));
-}
-
-@ @c
-error_code
-statement_set_argument_m (cell o,
-                          int  argc,
-                          cell datum)
-{
-        cell label;
-
-        assert(statement_p(o));
-        assert(argc >= 0 && argc <= 2);
-        if (!pair_p(datum))
-                return LERR_INCOMPATIBLE;
-        label = lsin(datum);
-        if (label != Label[LBA_ADDRESS]
-                    && label != Label[LBA_ASIS]@|
-                    && label != Label[LBA_INDIRECT]
-                    && label != Label[LBA_OBJECT]
-                    && label != Label[LBA_REGISTER]@|
-                    && label != Label[LBA_REGISTER_POP]
-                    && label != Label[LBA_RELATIVE]
-                    && label != Label[LBA_TABLE])@/
-                return LERR_INCOMPATIBLE;
-        larry_set_m_imp(o, argc + 1, datum);
-        return LERR_NONE;
-}
-
-@ Ensure shared objects are in the same place in theses structs.
-
-@<Type def...@>=
-typedef struct {
-        cell cursor; /* |integer_p|. */
-        cell commentary; /* List of \.{(address . (comment-lines))}. */
-        cell blob; /* |NIL| or a segment of raw data. */
-        cell objectdb; /* Array of \.{(object . (lines))}. */
-        cell fardb; /* Hashtable of \.{\{label address\}}. */
-        cell local[20]; /* \.{latest-reverse} at \.i,
-                                \.{(pending-forward)} at \.{i + 10}. */
-        cell pending_far; /* |symbol_p| or |NIL|. */
-        cell pending_local; /* -1 or 0--9. */
-        cell pending_comment; /* List of segments. */
-} assembly_working;
-
-typedef struct {
-        cell page; /* |NIL| or |pointer_p|. */
-        cell commentary;
-        cell blob;
-        cell objectdb;
-        cell exportdb; /* Far labels which are defined. */
-        cell requiredb; /* Far labels which are only referenced. */
-} assembly_complete;
-
-@ @d ASSEMBLY_LINE_LENGTH        120
-@d ASSEMBLY_COMPLETE_HEADER    (sizeof (assembly_complete) / sizeof (cell))
-@d ASSEMBLY_WORKING_HEADER     (sizeof (assembly_working) / sizeof (cell))
-@#
-@d assembly_address(O)  (larry_ref_imp((O), 0))
-@d assembly_complete_p(O)
-                        (!integer_p(assembly_address(O)))
-@d assembly_installed_p(O)
-                        (integer_p(assembly_address(O))) /* Or |NIL|. */
-@d assembly_working_object(O)
-                        ((assembly_working *) larry_base(O))
-@d assembly_complete_object(O)
-                        ((assembly_complete *) larry_base(O))
-@d assembly_header_length(O)
-                        (assembly_complete_p(O)@|
-                                ? ASSEMBLY_COMPLETE_HEADER@|
-                                : ASSEMBLY_WORKING_HEADER)
-@d assembly_length(O)   (larry_length(O) - assembly_header_length(O))
-@#
-@d assembly_cursor(O)   (fixed_p(assembly_address(O))@|
-                                ? (address) fixed_value(assembly_address(O))@|
-                                : (address) int_digit(assembly_address(O)))
-@d assembly_set_cursor_m(O,A)
-                        (new_int_c((A), true, &assembly_address(O)))
-@d assembly_set_cursor_m_imp(O,A)
-                        (larry_set_m_imp((O), 0, (A)))
-@d assembly_complete_ref(O,I)
-                        (larry_ref_imp((O), (I) + ASSEMBLY_COMPLETE_HEADER))
-@d assembly_working_ref(O,I)
-                        (larry_ref_imp((O), (I) + ASSEMBLY_WORKING_HEADER))
-@d assembly_set_m(O,I,V)(larry_set_m_imp((O), (I) + ASSEMBLY_WORKING_HEADER,
-                                (V)))
-@d assembly_previous_line(O)
-                        (assembly_working_ref((O), assembly_cursor(O) - 1))
-@#
-@d assembly_commentary(O)
-                        (assembly_working_object(O)->commentary)
-@d assembly_set_commentary_m(O,V)
-                        (assembly_working_object(O)->commentary = (V))
-@d assembly_blob(O)     (assembly_working_object(O)->blob)
-@d assembly_set_blob_m(O,V)
-                        (assembly_working_object(O)->blob = (V))
-@#
-@d assembly_objectdb(O) (assembly_working_object(O)->objectdb)
-@d assembly_set_objectdb_m(O,V)
-                        (assembly_working_object(O)->objectdb = (V))
-@d assembly_objectdb_length(O)
-                        (array_length(assembly_working_object(O)->objectdb) - 1)
-@d assembly_objectdb_cursor_imp(O)
-                        (get_array_ref_c(assembly_objectdb(O),
-                                assembly_objectdb_length(O)))
-@d assembly_objectdb_cursor(O)
-                        (fixed_p(assembly_objectdb_cursor_imp(O))@|
-                                ? fixed_value(assembly_objectdb_cursor_imp(O))@|
-                                : int_digit(assembly_objectdb_cursor_imp(O)))
-@d assembly_set_objectdb_cursor_m(O,V)
-                        (array_set_m_c(assembly_objectdb(O),
-                                assembly_objectdb_length(O), (V)))
-@#
-@d assembly_fardb(O)    (assembly_working_object(O)->fardb)
-@d assembly_set_fardb_m(O,V)
-                        (assembly_working_object(O)->fardb = (V))
-@d assembly_localdb(O)  (assembly_working_object(O)->local)
-@#
-@d assembly_pending_local(O)
-                        (fixed_value(assembly_working_object(O)->pending_local))
-@d assembly_pending_local_p(O)
-                        (assembly_pending_local(O) >= 0)
-@d assembly_set_pending_local_m(O,V)
-                        (assembly_working_object(O)->pending_local = fix(V))
-@d assembly_pending_far(O)
-                        (assembly_working_object(O)->pending_far)
-@d assembly_pending_far_p(O)
-                        (!null_p(assembly_working_object(O)->pending_far))
-@d assembly_set_pending_far_m(O,V)
-                        (assembly_working_object(O)->pending_far = (V))
-@d assembly_pending_comment(O)
-                        (assembly_working_object(O)->pending_comment)
-@d assembly_set_pending_comment_m(O,V)
-                        (assembly_working_object(O)->pending_comment = (V))
-@d assembly_pending_comment_p(O)
-                        (!null_p(assembly_pending_comment(O)))
-@#
-@d assembly_exportdb(O) (assembly_complete_object(O)->exportdb)
-@d assembly_set_exportdb_m(O,V)
-                        (assembly_complete_object(O)->exportdb = (V))
-@d assembly_requiredb(O)
-                        (assembly_complete_object(O)->requiredb)
-@d assembly_set_requiredb_m(O,V)
-                        (assembly_complete_object(O)->requiredb = (V))
-
-@ @<Fun...@>=
-error_code new_assembly (cell *);
-error_code finish_assembly (cell, cell *);
-error_code assembly_apply_argument (cell, cell, intmax_t, int, cell);
-error_code assembly_apply_comment (cell, intmax_t, char *, int);
-error_code assembly_apply_far_label (cell, intmax_t, char *, int);
-error_code assembly_apply_local_label (cell, intmax_t, int);
-error_code assembly_begin_opcode (cell, intmax_t, char *, int, cell *);
-error_code assembly_file_handle (cell, cell *);
-error_code assembly_fix_address (cell, address, address);
-error_code assembly_line (cell, intmax_t, char *, int);
-error_code assembly_save_object (cell, cell, cell *);
-error_code assembly_scan_argument (cell, char *, int, int, int, int *, cell *);
-error_code assembly_scan_register (bool, char *, int, int *, cell *);
-error_code assembly_scan_symbol (cell, char *, int, search_fn, int *, cell *);
-error_code assembly_segment (cell, cell *);
-error_code assembly_ensure_length_m (cell, address);
-
-@ @c
-error_code
-new_assembly (cell *ret)
-{
-        cell new, tmp;
-        error_code reason;
-
-        orreturn(new_larry(ASSEMBLY_WORKING_HEADER + 16, 0, NIL,
-                FORM_ASSEMBLY, &new));
-        assembly_set_cursor_m(new, 0);
-        assembly_set_pending_far_m(new, NIL);
-        assembly_set_pending_local_m(new, -1);
-        assembly_set_pending_comment_m(new, NIL);
-        orreturn(new_hashtable(0, &tmp));
-        assembly_set_fardb_m(new, tmp);
-        orreturn(new_array(1, fix(0), &tmp));
-        assembly_set_objectdb_m(new, tmp);
-        *ret = new;
-        return LERR_NONE;
-}
-
-@ @c
-error_code
-assembly_ensure_length_m (cell    o,
-                          address length)
-{
-        address nlength;
-
-        assert(assembly_p(o) && !assembly_complete_p(o));
-        nlength = assembly_length(o);
-        if (nlength >= length)
-                return LERR_NONE;
-        if (nlength == PROGRAM_LENGTH)
-                return LERR_OOM;
-        nlength *= 2;
-        return larry_resize_m(o, ASSEMBLY_WORKING_HEADER + nlength, NIL);
-}
-
-@ Assembly is a two-stage process. First the source (from a file
-descriptor or in memory buffer) is divided into lines of at most
-120 characters (not including the trailing newline) which are
-progressively parsed into a symbolic representation (|assembly_line|).
-After the full source is parsed the representation is processed by
-|assembly_finish| to resolve local addresses, exported address
-symbols and objects/constant.
-
-To assemble code held in memory successive newlines are identified
-and pointers into the buffer are passed to |assembly_line|. As with
-source read in from a file, the text must end with a newline character.
-
-@c
-error_code
-new_assembly_segment (cell  o,
-                      cell *ret)
-{
-        cell new;
-        char *lstart, *lend, *send;
-        intmax_t line; /* The current source line number. */
-        error_code reason;
-
-        if (!segment_p(o))
-                return LERR_INCOMPATIBLE;
-        orreturn(new_assembly(&new));
-        lend = (char *) segment_base(o);
-        send = lend + segment_length(o);
-        lend--;
-        line = 0;
-        while (1) {
-                lstart = lend + 1;
-                lend = lstart;
-                while (lend < send) {
-                        if (*lend == '\n')
-                                goto found_line;
-                        lend++;
-                }
-                if (lstart == lend)
-                        break;
-                return LERR_SYNTAX;
-found_line:
-                if (lend - lstart > ASSEMBLY_LINE_LENGTH + 1)
-                        return LERR_SYNTAX;
-                else
-                        orreturn(assembly_line(new, line, lstart,
-                                (lend - lstart) + 1));
-                line++;
-        }
-        return finish_assembly(new, ret);
-}
-
-@ Lines read in from a file descriptor are read directly into a
-temporary buffer.
-
-@c
-error_code
-new_assembly_file_handle (cell  o,
-                          cell *ret)
-{
-        cell nbyte; /* The next byte. */
-        cell new;
-        cell buffer; /* Pointer to line buffer */
-        char next;
-        int i;
-        intmax_t line;
-        error_code reason;
-
-        if (!file_handle_p(o))
-                return LERR_INCOMPATIBLE;
-        orreturn(new_assembly(&new));
-        orreturn(new_segment(ASSEMBLY_LINE_LENGTH + 1, 1, 0, &buffer));
-        line = i = 0;
-        while (1) {
-                reason = file_handle_read_word(o, 1, &nbyte);
-                if (reason == LERR_EOF) {
-                        if (i == 0)
-                                break;
-                        else
-                                return LERR_SYNTAX;
-                } else if (failure_p(reason))
-                        return reason;
-                segment_base(buffer)[i++] = word(nbyte)[0];
-                if (asm_vspace_p(word(nbyte)[0])) {
-                        orreturn(assembly_line(new, line,
-                                (char *) segment_base(buffer), i));
-                        line++;
-                        i = 0;
-                } else if (i > ASSEMBLY_LINE_LENGTH)
-                        return LERR_SYNTAX;
-        }
-        return finish_assembly(new, ret);
-}
-
-@ The overall structure of the assembly source is simple: each line
-(of up to 120 characters) is parsed into pseudo machine-code which
-to append to the partial assembly.
-
-A line may have a named (``far'') and/or numeric (``local'') label.
-Far labels are those points which can be branched to by the program
-being built (\.{JUMP \#t,@@SomeSubroutine}) and are entry points
-for other programs to call this one with (``exported'' labels).
-Currently there is no way to indicate far labels which should not
-be exported, perhaps there should be.
-
-Local labels are single-digit numbers followed by `\.H' (or `\.h')
-and are referred to with the same number followed by \.B/\.b to
-refer to the previous line with that local label, or \.F/\.f to
-refer to the next. This system is described by Knuth in TAOCP. TODO:
-cite this better.
-
-On the whole that's it but this wouldn't be programming if there
-weren't subtle details.
-
-Source lines do not need to contain code but they can still have a
-label or a comment. This works by using the first character of
-the line to distinguish it: If it's a digit or a valid initial-character
-for a label (predominantly a--z but see |asm_far_start_p|) the line
-begins with a label, alternatively if it's anything other than blank
-(space or tab) the line is a comment.
-
-If the line contains only a label then it identifies the {\it next\/}
-code line. Note that a line can have both a far label and a local
-label but only one of each.
-
-Comments are mostly ignored except that trailing space is trimmed
-and consecutive empty lines are concatenated. Comments are collected
-and associated with the next line of code, acting as an
-introduction\footnote{$^1$}{Much like this.} to the next code
-``block'' --- meaning nothing other than all the code from that
-point until the next blank line. This is for later introspection
-and documentation and has no practical effect.
-
-If the line isn't a comment then the first word is the instruction's
-opcode, followed by blank space and the opcode's arguments, which
-are described later.
-
-After some space the instruction can be followed by a comment, which
-can span multiple lines terminated by a blank line or another code
-line. This is another type of comment about the line itself but is
-equally irrelevant.
-
-The macros below assume ASCII and mask out bit $2^5$ to make
-alphabetic tests case insensitive.
-
-@.TODO@>
-@d asm_hspace_p(O)    ((O) == ' ' || (O) == '\t')
-@d asm_vspace_p(O)    ((O) == '\n')
-@d asm_alpha_p(O)     ((((O) & 0xdf) >= 'A') && (((O) & 0xdf) <= 'Z'))
-@d asm_digit_p(O)     ((O) >= '0' && (O) <= '9')
-@#
-@d asm_here_p(O)      (((O) & 0xdf) == 'H')
-@d asm_back_p(O)      (((O) & 0xdf) == 'B')
-@d asm_fore_p(O)      (((O) & 0xdf) == 'F')
-@d asm_local_p(O)     (asm_back_p(O) || asm_fore_p(O))
-@d asm_far_start_p(O) (asm_alpha_p(O) || (O) == '_' || (O) == ':'
-        || (O) == '$' || (O) == '!')
-@d asm_far_p(O)       ((asm_far_start_p(O) && (O) != '!') /* If it quacks
-                                                            like a comment. */
-        || (O) == '?'
-        || (O) == '#' || (O) == '%' || (O) == '/' || (O) == '-' || (O) == '^')
-@#
-@d asm_const_p(O)     ((O) == '#')
-@d asm_label_p(O)     ((O) == '@@')
-@d asm_object_p(O)    ((O) == '\'')
-@d asm_plusminus_p(O) ((O) == '+' || (O) == '-')
-@d asm_popping_p(O)   ((O) == '=')
-@d asm_separator_p(O) ((O) == ',')
-@#
-@d asm_op_start_p(O)  (asm_alpha_p(O))
-@d asm_op_p(O)        (asm_op_start_p(O) || (O) == '!' || (O) == '?')
-@d asm_false_p(O)     (((O) & 0xdf) == 'F')
-@d asm_true_p(O)      (((O) & 0xdf) == 'T')
-@d asm_greg_p(O)      (((O) & 0xdf) == 'R')
-@d asm_reg_start_p(O) (asm_alpha_p(O)) /* nb.~Includes \.R! */
-@d asm_reg_p(O)       (asm_reg_start_p(O) || asm_digit_p(O)
-        || (O) == '_' || (O) == '-')
-@d asm_sym_start_p(O) (asm_far_start_p(O))
-@d asm_sym_p(O)       (asm_far_p(O))
-
-@ A line is at most 120 characters long {\it not\/} including the
-trailing newline which {\it must\/} be present. After validating
-this the first character determines how the line is formatted. This
-algorithm constitutes a simple combined lexer \AM\ parser which
-treats most errors as a syntax error and aborts as soon as they are
-encountered.
-
-The buffer pointed to in the arguments to |assembly_line| is
-considered immutable.
-
-@d asm_skip_some(B,L,T,P)
-        while ((T)++ < (L))
-                if (!((P((B)[(T)]))))
-                        /* nb.~|P| is {\it not\/} parenthesised so
-                                                the that test can be negated! */
-                        break /* No semicolon */
-@d asm_skip_space(B,L,T) asm_skip_some((B), (L), (T), asm_hspace_p)
-@c
-error_code
-assembly_line (cell      o,
-               intmax_t  srcline,
-               char     *lbuf,
-               int       length)
-{
-        cell line; /* The new line appended to the assembly. */
-        cell op; /* The current line's opcode, if any. */
-        cell found; /* Placeholder for building statements in. */
-        int cursor, more; /* How many bytes have been scanned. */
-        error_code reason;
-
-        if (!assembly_p(o) || assembly_complete_p(o))
-                return LERR_INCOMPATIBLE;
-        if (length == 0 || !asm_vspace_p(lbuf[length - 1]))
-                return LERR_SYNTAX;
-        length--; /* |length| may now be 0 but it's safe to `accidentally'
-                        look one past the end. */
-        cursor = 0;
-        line = NIL;
-        if (asm_digit_p(lbuf[0])) {
-                @<Look for a local label@>
-        } else if (asm_far_start_p(lbuf[(0)])) {
-                @<Look for a far label@>
-        } else if (length == 0 || !asm_hspace_p(lbuf[0]))
-                goto comment;
-        if (cursor == length)
-                goto finish_line;
-        else if (!asm_hspace_p(lbuf[cursor]))
-                return LERR_SYNTAX;
-        asm_skip_space(lbuf, length, cursor);
-        @<Look for an opcode@>@;
-        @<Look for opcode arguments@>@;
-trailing_comment:
-        if (cursor == length)
-                goto finish_line;
-        else if (!asm_hspace_p(lbuf[cursor]))
-                return LERR_SYNTAX;
-        asm_skip_space(lbuf, length, cursor);
-        if (cursor == length)
-                goto finish_line;
-comment:
-        assembly_apply_comment(o, srcline, lbuf + cursor, length - cursor);
-finish_line:
-        if (!null_p(line) && assembly_pending_local_p(o)) {
-                orreturn(new_int_c(assembly_cursor(o) - 1, true,
-                        &(assembly_localdb(o)[assembly_pending_local(o)])));
-                assembly_set_pending_local_m(o, -1);
-        }
-        return LERR_NONE;
-}
-
-@ A local label is an ASCII digit 0--9 followed by the letter h.
-Provided the first two bytes are valid |assembly_apply_local_label|
-configures the assembly object to associate that label with this
-(or the next) line.
-
-@<Look for a local label@>=
-if (length < 2 || !asm_here_p(lbuf[1]))
-        return LERR_SYNTAX;
-orreturn(assembly_apply_local_label(o, srcline, lbuf[0] - '0'));
-cursor = 2;
-
-@ A far label is simply a symbol with some constraints. The range
-of the label within the buffer is similarly identified and passed
-to |assembly_apply_far_label| to prepare to label the next line.
-
-@<Look for a far label@>=
-cursor++;
-asm_skip_some(lbuf, length, cursor, asm_far_p);
-if (cursor == 2)
-        goto comment;
-orreturn(assembly_apply_far_label(o, srcline, lbuf, cursor));
-
-@ From this point on we no longer have an absolute starting position
-so |cursor| and |more| are used to keep track of the cursor within
-the line.
-
-As with the labels the range within the buffer is identified and
-passed to a function to apply it to the partial assembly. In this
-case |assembly_begin_opcode| appends a new line (as a {\it statement\/}
-object) to the assembly, consuming the labels applied above, which
-it returns in |line|.
-
-This block falls through to |@<Look for opcode arguments@>|.
-
-@<Look for an opcode@>=
-if (cursor == length)
-        return LERR_NONE;
-more = cursor;
-if (!asm_op_start_p(lbuf[cursor++])) {
-        if (cursor == length || asm_hspace_p(lbuf[cursor + 1]))
-                goto comment;
-        else
-                return LERR_SYNTAX;
-}
-asm_skip_some(lbuf, length, cursor, asm_op_p);
-if (cursor - more == 2)
-        goto comment;
-orreturn(assembly_begin_opcode(o, line, lbuf + more, cursor - more, &line));
-
-@ Some opcodes do not accept arguments (but can still have comments).
-If they do the arguments are scanned by |assembly_scan_argument|. There can
-be up to three arguments so there's no need to refactor the repetition
-here into a loop. Spaces are not permitted between the arguments
---- they are separated by a comma which is looked for in |assembly_scan_argument|.
-
-This is the main part of this algorithm which merges the concerns
-of lexing and parsing.
-
-@<Look for opcode arguments@>=
-op = statement_opcode(line);
-if (opcode_object(op)->arg0 == NARG)
-        goto trailing_comment;
-if (!asm_hspace_p(lbuf[cursor]))
-        return LERR_SYNTAX;
-asm_skip_space(lbuf, length, cursor);
-orreturn(assembly_scan_argument(o, lbuf + cursor, length - cursor,
-        opcode_object(op)->arg0, 0, &more, &found));
-cursor += more;
-orreturn(assembly_apply_argument(o, line, srcline, 0, found));
-@#
-if (opcode_object(op)->arg1 == NARG)
-        goto trailing_comment;
-orreturn(assembly_scan_argument(o, lbuf + cursor, length - cursor,
-        opcode_object(op)->arg1, 1, &more, &found));
-cursor += more;
-orreturn(assembly_apply_argument(o, line, srcline, 1, found));
-@#
-if (opcode_object(op)->arg2 == NARG)
-        goto trailing_comment;
-orreturn(assembly_scan_argument(o, lbuf + cursor, length - cursor,
-        opcode_object(op)->arg2, 2, &more, &found));
-cursor += more;
-orreturn(assembly_apply_argument(o, line, srcline, 2, found));
-
-@ If the argument being scanned is not the first then the argument
-must be preceeded by a comma separator. |offset| keeps track of the
-point from which an argument is being scanned (instead of, say,
-incrementing |lbuf|) and |cursor| tracks how many bytes have been
-scanned in total, which is returned to the caller in |consume|.
-
-Registers are named directly; other objects and references are
-indicated by the byte which preceeds them: \.@@ -- an address, \.\ft\
--- an object, \.- or \.+ -- an integer or \.\# -- a constant.
-
-Positive integers (and 0) can be written directly, without $\pm$.
-The constants marked by \.\# are the booleans and \.{\#VOID} or
-\.{\#UNDEFINED}. |NIL| is written as \.{()}. Only the booleans can
-use lower-case.
-
-@c
-error_code
-assembly_scan_argument (cell  o,
-                        char *lbuf,
-                        int   length,
-                        int   cat,
-                        int   argc,@|
-                        int  *consume,
-                        cell *ret)
+assembly_has_far_address_p (cell o,
+                            cell label)
 {
         cell found;
-        int cursor, offset;
-        bool minus, popping;
         error_code reason;
-
-        assert(assembly_p(o) && !assembly_complete_p(o));
-        if (length == 0)
-                return LERR_SYNTAX;
-        cursor = offset = 0;
-        minus = false;
-        if (argc) {
-                if (!asm_separator_p(lbuf[0]))
-                        return LERR_SYNTAX;
-                cursor = offset = 1;
-        }
-        switch (cat) {
-        case AADD: /* An address. */
-                if (asm_label_p(lbuf[cursor])) {
-                        offset++;
-                        @<Scan an address...@>@;
-                } else if ((popping = asm_popping_p(lbuf[cursor]))
-                            || asm_reg_start_p(lbuf[cursor])) {
-                        offset++;
-                        goto scan_address_register;
-                } else
-                        return LERR_SYNTAX;
-        case ALOB:@; /* Anything. */
-        case ARGH: /* ... actually, only a symbol (|OP_TRAP|). */
-        printf("ARGH!\n");
-                if (lbuf[offset] == '\'') {
-                        @<Scan a simple object and |goto scan_found|@>
-                } else if (cat == ARGH)
-                        return LERR_SYNTAX; /* |ARGH| must have \ft\
-                                                followed by a symbol. */
-                /* |else| fallthrough. */
-        case ALOT:@; /* A tiny number. */
-        case AREG:@; /* ... or only a register (first argument). */
-                @<Scan a register name or don't |goto scan_found|@>@;
-                if (cat == AREG)
-                        return LERR_SYNTAX;
-                @<Scan a constant and abort or |goto scan_found|@>@;
-        }
-        return LERR_INTERNAL; /* Unreachable. */
-@#
-scan_integer:
-        @<Scan an integer in assembly@>@;
-scan_found:
-        *consume = cursor;
-        *ret = found;
-        return LERR_NONE;
+        assert(assembly_in_progress_p(o));
+        assert(symbol_p(label));
+        orreturn(hashtable_search(array_base(o)[ASSEMBLY_PROGRESS_FAR_ADDRESS],
+                label, &found));
+        return defined_p(found);
 }
 
-@ An address argument is indicated by \.@@, which has already been
-detected. An address argument is saved as a pair who's sinister
-half is false.
-
-@<Scan an address and |goto scan_found|@>=
-if (length - offset < 2)
-        return LERR_SYNTAX;
-cursor = offset;
-if (asm_digit_p(lbuf[cursor])) { /* \.{(\ft address . $\pm$label)} */
-        if (!asm_local_p(lbuf[cursor + 1]))
-                return LERR_SYNTAX;
-        found = fix(lbuf[cursor] - '0');
-        if (asm_back_p(lbuf[cursor + 1]))
-                found = fix(-(fixed_value(found) + 1));
-        orreturn(cons(Label[LBA_ADDRESS], found, &found));
-        cursor += 2;
-} else if (asm_far_start_p(lbuf[cursor])) { /* \.{(\ft address . label)} */
-        orreturn(assembly_scan_far_address(lbuf + cursor, length - cursor,
-                &cursor, &found));
-        cursor += offset;
-} else
-        return LERR_SYNTAX;
-goto scan_found;
-
-@ @<Scan a constant and abort or |goto scan_found|@>=
-if (asm_digit_p(lbuf[offset]))
-        goto scan_integer;
-else if (asm_const_p(lbuf[offset])) {
-        @<Scan a constant in assembly@>
-} else if (asm_plusminus_p(lbuf[offset])) {
-        minus = (lbuf[offset] == '-');
-        offset++;
-        if (length - offset == 0)
-                return LERR_SYNTAX;
-        goto scan_integer;
-} else if (length >= 2 && lbuf[offset] == '('
-                && lbuf[offset + 1] == ')') {
-        cursor += 2;
-        orreturn(cons(Label[LBA_OBJECT], NIL, &found));
-        goto scan_found;
-}
-
-@ Simple constants (including |NIL|) are saved as themselves. Scans
-to \.{(\ft object . \#}{\it \<special\/\>}\.{)}.
-
-Constants in assembly include \.{\#VOID} and \.{\#UNDEFINED} (exactly)
-to mean |VOID| and |UNDEFINED| respectively.
-
-@<Scan a constant in assembly@>=
-if (length - offset < 2)
-        return LERR_SYNTAX;
-else if (asm_false_p(lbuf[offset + 1]))
-        cursor += 2, found = LFALSE;
-else if (asm_true_p(lbuf[offset + 1]))
-        cursor += 2, found = LTRUE;
-else if (length - offset >= 5@|
-            && (lbuf[offset + 1] == 'V' && lbuf[offset + 2] == 'O'
-            && lbuf[offset + 3] == 'I' && lbuf[offset + 4] == 'D'))@/
-        cursor += 5, found = VOID;
-else if (length - offset >= 10@|
-            && lbuf[offset + 1] == 'U'@|
-            && lbuf[offset + 2] == 'N'@|
-            && lbuf[offset + 3] == 'D'@|
-            && lbuf[offset + 4] == 'E'@|
-            && lbuf[offset + 5] == 'F'@|
-            && lbuf[offset + 6] == 'I'@|
-            && lbuf[offset + 7] == 'N'@|
-            && lbuf[offset + 8] == 'E'@|
-            && lbuf[offset + 9] == 'D')@/
-        cursor += 10, found = UNDEFINED;
-else
-        return LERR_SYNTAX;
-orreturn(cons(Label[LBA_OBJECT], found, &found));
-goto scan_found;
-
-@ An integer is a lone zero (\.0) or a sequence of one or more
-digits not beginning with a zero (possibly, as detected previously,
-preceeded by $\pm$; including $\pm0$).
-
-@<Scan an integer in assembly@>=
-cursor = offset;
-if (lbuf[cursor] == 0) {
-        cursor++;
-        found = fix(0);
-} else {
-        asm_skip_some(lbuf, length, cursor, asm_digit_p);
-        orreturn(new_int_buffer(minus, lbuf + offset, cursor - offset, &found));
-}
-orreturn(cons(Label[LBA_OBJECT], found, &found));
-goto scan_found;
-
-@ At present this assembler only supports symbols where any
-s-expression should be permitted. When they are it will be possible,
-although perhaps not very useful, to do away with the special cases
-for constants. The algorithm will also need to parse objects which
-span more than one line, as well as the ability to refer to objects
-other than in-line.
-
-The \.\ft\ which preceeds an object has already been detected.
-
-@<Scan a simple object and |goto scan_found|@>=
-cursor = offset + 1;
-orreturn(assembly_scan_symbol(Label[LBA_OBJECT], lbuf + cursor,
-        length - cursor, (cat == ARGH ? error_search : NULL), &cursor, &found));
-cursor += offset + 1;
-goto scan_found;
-
-@ A register is named without fanfare but may be preceeded by \.!
-if the register will hold a stack and the top item is to be popped
-off of it. The saved object representing a register is a pair with
-the register object in the sinister half and whether it should be
-popped in the dexter half.
-
-@<Scan a register name or don't |goto scan_found|@>=
-popping = asm_popping_p(lbuf[offset]);
-if (popping)
-        offset++;
-if (popping || asm_reg_start_p(lbuf[offset])) {
-scan_address_register:
-        orreturn(assembly_scan_register(popping, lbuf + offset,
-                length - offset, &cursor, &found));
-        cursor += offset;
-        goto scan_found;
-}
-
-@ To detect a register argument a symbol is created by appending
-the register name to a buffer beginning with ``\.{VM:}'' and looking
-for it's binding in the root environment.
-
-The special registers' names are capitalised using title case
-(capitalising only the first letter of each word). A dash\footnote{$^1$}
-{Known to ASCII as ``hyphen (minus)'' or ``hyphen-minus'' in unicode
-parlance for extra recursion.} (\.-) separates each word, which may
-be written as an underscore\footnote{$^2$}{Don't ask.} (\.\_) in
-the source.
-
-The |LERR_INCOMPATIBLE| error may really have been caused by invalid
-syntax (eg. a name which is too long to fit in |tmp|) but there's
-nothing to gain by detecting that specially (there's little enough
-use in looking for |LERR_INCOMPATIBLE| as it is).
-
-@c
+@ @c
 error_code
-assembly_scan_register (bool  popping,
-                        char *lbuf,
-                        int   length,
-                        int  *consume,
-                        cell *ret)
-{
-        bool upcase;
-        cell lreg, sreg;
-        char tmp[24]; /* The longest register name is less than this. */
-        error_code reason;
-
-        if (length < 2)
-                return LERR_SYNTAX;
-        tmp[0] = 'V';
-        tmp[1] = 'M';
-        tmp[2] = ':';
-        if (asm_greg_p(lbuf[0])) {
-                tmp[3] = 'R';
-                tmp[4] = lbuf[1]; /* Let the search detect this as a digit. */
-                *consume = 2;
-                if (length >= 3 && asm_digit_p(lbuf[2])) {
-                            /* ... but not this, which could be anything. */
-                        tmp[5] = lbuf[2];
-                        *consume = 3;
-                }
-        } else { /* ie.~|asm_reg_start_p(lbuf[0])| */
-                tmp[3] = toupper(lbuf[0]);
-                upcase = false;
-                *consume = 1;
-                while (*consume < 21) {
-                        @<Copy a register name to |tmp| with the correct case@>
-                }
-        }
-        orreturn(new_symbol_buffer((byte *) tmp, *consume + 3, NULL, &sreg));
-        reason = root_search(sreg, &lreg);
-        if (reason == LERR_MISSING)
-                return LERR_INCOMPATIBLE;
-        else if (failure_p(reason))
-                return reason;
-        else if (!register_p(lreg))
-                return LERR_INCOMPATIBLE;
-        return cons(Label[popping ? LBA_REGISTER_POP : LBA_REGISTER],
-                lreg, ret);
-}
-
-@ Copy a register name into |tmp| while correctly capitalising it
-by turning \.\_ into \.-, capitalising only the letter immediately
-following \.- (and the very first letter), and converting everything
-else to lower case.
-
-@<Copy a register name to |tmp| with the correct case@>=
-if (*consume < length) {
-        if (!asm_reg_p(lbuf[*consume]))
-                break;
-        else {
-                if (upcase) {
-                        tmp[*consume + 3] = toupper(lbuf[*consume]);
-                        upcase = false;
-                } else {
-                        upcase = (lbuf[*consume] == '_'
-                                || lbuf[*consume] == '-');
-                        if (upcase)
-                                tmp[*consume + 3] = '-';
-                        else
-                                tmp[*consume + 3] = tolower(lbuf[*consume]);
-                }
-                (*consume)++;
-        }
-} else
-        break;
-
-@ Objects and addresses look the same in lieu of a full
-s-expression parser: A (constrained) symbol.
-
-TODO: split implementation into scan (uses only {\it far\/} scanner
-at the moment) and postprocess, then use for opcodes and registers.
-
-@.TODO@>
-@d assembly_scan_object(B,L,C,R) assembly_scan_symbol(Label[LBA_OBJECT],
-        (B), (L), NULL, (C), (R))
-@d assembly_scan_far_address(B,L,C,R) assembly_scan_symbol(Label[LBA_ADDRESS],
-        (B), (L), NULL, (C), (R))
-@c
-error_code
-assembly_scan_symbol (cell       cat,
-                      char      *lbuf,
-                      int        length,
-                      search_fn  lookup,
-                      int       *consume,
-                      cell      *ret)
-{
-        cell new;
-        int offset;
-        error_code reason;
-
-        *consume = 0;
-        if (length - *consume == 0)
-                return LERR_SYNTAX;
-        offset = *consume;
-        if (!asm_far_start_p(lbuf[*consume]))
-                return LERR_SYNTAX;
-        (*consume)++;
-        asm_skip_some(lbuf, length, *consume, asm_far_p);
-        orreturn(new_symbol_buffer((byte *) lbuf + offset,
-                *consume - offset, NULL, &new));
-        printf("ALL...\n");
-        printf("sym "); psym(new); printf("\n");
-        printf("lbl "); for (int i = 0; i < length; i++) putchar(lbuf[i]);
-        printf("\n");
-        if (lookup != NULL)
-                orreturn(lookup(new, &new));
-        return cons(cat, new, ret);
-}
-
-@ The parts necessary to scan through a line of assembly source are
-in place but before using the results to construct a statement, if
-the statement has a label then it is applied to the partial assembly
-object first where it is checked for validity etc.
-
-If an instruction has a local label argument which refers forward
-to |label| its line number will have been recorded in the assembly's
-local labels database. These lines are updated now that the destination
-is known and the forward (dexter) database reset.
-
-Only after the line is fully processed will the backward (sinister)
-database for |length| be updated to refer to this line. This is so
-that backward local references to |label| in {\it this\/} instruction's
-arguments will refer to the prior labelled instruction and not to
-itself.
-
-@c
-error_code
-assembly_apply_local_label (cell     o,
-                            intmax_t srcline @[unused@],
-                            int      label)
-{
-        cell next;
-        intmax_t lineat;
-        error_code reason;
-
-        assert(assembly_p(o) && !assembly_complete_p(o));
-        assert(label >= 0 && label <= 9);
-        if (assembly_pending_local_p(o))
-                return LERR_EXISTS;
-        next = assembly_localdb(o)[label + 10];
-        while (!null_p(next)) {
-        printf("next %d %p?\n", label, next);
-                orassert(int_value(lsin(next), &lineat));
-                assembly_fix_address(o, lineat, assembly_cursor(o));
-                next = ldex(next);
-        }
-        assembly_localdb(o)[label + 10] = NIL; /* Leave sin for later. */
-        assembly_set_pending_local_m(o, label);
-        return LERR_NONE;
-}
-
-@ Far labels must be unique.
-
-@c
-error_code
-assembly_apply_far_label (cell     o,
-                          intmax_t srcline @[unused@],
-                          char    *lbuf,
-                          int      length)
-{
-        bool new;
-        cell found, label, lline;
-        error_code reason;
-
-        assert(assembly_p(o) && !assembly_complete_p(o));
-        assert(length >= 1);
-        if (!null_p(assembly_pending_far(o)))
-                return LERR_SYNTAX;
-        orreturn(new_symbol_buffer((byte *) lbuf, length, NULL, &label));
-        orreturn(new_int_c(assembly_cursor(o), true, &lline));
-        orreturn(cons(label, lline, &lline));
-@#
-        orreturn(hashtable_search(assembly_fardb(o), symbol_key(label),
-                env_match, (void *) label, &found));
-        assert(undefined_p(found) || pair_p(found));
-        new = undefined_p(found);
-        if (!new && pair_p(found) && !null_p(ldex(found)))
-                return LERR_EXISTS;
-@#
-        orreturn(hashtable_save_m(assembly_fardb(o), symbol_key(label),
-                lline, env_rehash, env_match, (void *) label, !new, true));
-        assembly_set_pending_far_m(o, label);
-        return LERR_NONE;
-}
-
-@ Now enough parts are in place to start building an instruction,
-beginning with detecting the opcode in the same manner as with
-register names (see |assembly_scan_register|). Detecting which type
-of error, if any, is equally as useful.
-
-If the opcode name is valid then a statement is created and appended
-to the assembly by |assembly_set_m| (after enlargement) and returned
-to the caller for convenience.
-
-If there is a pending comment append it to the commentary.
-
-TODO: Save |srcline| in the statement object.
-
-@.TODO@>
-@c
-error_code
-assembly_begin_opcode (cell      o,
-                       intmax_t  srcline @[unused@],
-                       char     *lbuf,
-                       int       length,@|
-                       cell     *ret)
-{
-        address cursor;
-        char tmp[24];
-        cell commentary, lcursor, line, lop, sop;
-        int i;
-        error_code reason;
-
-        assert(assembly_p(o) && !assembly_complete_p(o));
-        if (!length)
-                return LERR_SYNTAX;
-@#
-        tmp[0] = 'V';
-        tmp[1] = 'M';
-        tmp[2] = ':';
-        for (i = 0; i < length; i++)
-                tmp[i + 3] = lbuf[i];
-        orreturn(new_symbol_buffer((byte *) tmp, length + 3, NULL, &sop));
-        reason = root_search(sop, &lop);
-        if (reason == LERR_MISSING)
-                return LERR_UNCOMBINABLE;
-        else if (failure_p(reason))
-                return reason;
-        else if (!opcode_p(lop))
-                return LERR_UNCOMBINABLE;
-@#
-        if (assembly_pending_comment_p(o)) {
-                orreturn(cons(assembly_address(o), assembly_pending_comment(o),
-                        &commentary));
-                orreturn(cons(commentary, assembly_commentary(o), &commentary));
-        } else
-                commentary = NIL;
-@#
-        cursor = assembly_cursor(o);
-        orreturn(assembly_ensure_length_m(o, cursor + 1));
-        assert(null_p(assembly_working_ref(o, cursor)));
-        orreturn(new_statement(lop, &line));
-        orreturn(new_int_c(cursor + 1, true, &lcursor));
-@#
-        if (!null_p(commentary))
-                assembly_set_commentary_m(o, commentary);
-        assembly_set_pending_far_m(o, NIL);
-        assembly_set_pending_comment_m(o, NIL);
-        assembly_set_m(o, cursor, line);
-        assembly_set_cursor_m_imp(o, lcursor);
-        *ret = line;
-        return LERR_NONE;
-}
-
-@ Depending on opcode:
-
-argc == 0 must be register or trap. NOT address.
-
-argc == 1 can be anything *iff* there's no argc==2
-
-argc == 2 can be ALOT.
-
-If argc1 or 2 are address, take note?
-
-|obj| comes from |assembly_scan_argument|. Recall:
-
-\.{(\ft object . \{...\})} to \.{(\ft asis . \#const-or-\#integer)},
-\.{(\ft table . object-or-integer)}.
-
-\.{(\ft address . $\pm$local)} to \.{(\ft address . -delta)}
-if reverse, included in local otherwise.
-
-\.{(\ft address . symbol)} recorded but left alone.
-
-\.{(\ft register* . register)} left alone.
-
-A reverse local label is first converted to an integer. After this
-it's safe to update the appropriate lsin in the localdb to the
-current line number. If a two-argument opcode is ever created which
-can accept instruction addresses this will need to be moved to after
-the line is finished after |finish_line| in |assembly_line|.
-
-Far destination labels are added to the fardb with |NIL| in the
-location field to indicate they have been used but not defined.
-
-@.TODO@>
-@c
-error_code
-assembly_apply_argument (cell     o,
-                         cell     line,
-                         intmax_t srcline @[unused@],
-                         int      argc,@|
-                         cell     datum)
-{
-        cell found, label, new_fore, op, record;
-        int cat, id;
-        intmax_t lineat, lineto, value;
-        error_code reason;
-
-        assert(assembly_p(o) && !assembly_complete_p(o));
-        assert(statement_p(line));
-        if (!null_p(statement_argument(line, argc)))
-                return LERR_EXISTS;
-        if (!pair_p(datum))
-                return LERR_INCOMPATIBLE;
-        new_fore = NIL;
-        if (lsin(datum) == Label[LBA_ADDRESS]) {
-                if (symbol_p(ldex(datum))) {
-                        @<Save a record of a far label argument@>
-                } else if (fixed_p(ldex(datum))) {
-                        id = fixed_value(ldex(datum));
-                        if (id >= 0) {
-                                @<Save a local address argument to fix later@>
-                        } else {
-                                @<Fix a local address argument@>
-                        }
-                } else
-                        return LERR_INCOMPATIBLE;
-        } else if (lsin(datum) == Label[LBA_OBJECT]) {
-                if (integer_p(ldex(datum))) {
-                        @<Save large numbers in the object database@>
-                } else if (special_p(ldex(datum)))
-                        orreturn(cons(Label[LBA_ASIS], ldex(datum), &datum));
-                else if (!error_p(ldex(datum)))
-                        orreturn(assembly_save_object(o, ldex(datum), &datum));
-        } else if (lsin(datum) != Label[LBA_REGISTER]
-                        && lsin(datum) != Label[LBA_REGISTER_POP])
-                return LERR_INCOMPATIBLE;
-        orreturn(statement_set_argument_m(line, argc, datum));
-        if (!null_p(new_fore))
-                assembly_localdb(o)[id + 10] = new_fore;
-        return LERR_NONE;
-}
-
-@ Leave |datum| as-is and append the current line number to
-|assembly_localdb(o)[id]|.
-
-@<Save a local address argument to fix later@>=
-orreturn(new_int_c(assembly_cursor(o) - 1, true, &record));
-orreturn(cons(record, assembly_localdb(o)[id + 10], &new_fore));
-
-@ @<Fix a local address argument@>=
-id = -(id + 1);
-if (null_p(assembly_localdb(o)[id]))
-        return LERR_MISSING;
-orreturn(int_value(assembly_localdb(o)[id], &lineat));
-lineto = assembly_cursor(o) - 1;
-orreturn(new_int_c(lineto - lineat, true, &label));
-orreturn(cons(Label[LBA_RELATIVE], label, &datum)); /* Replacement label
-                                                        pair argument. */
-
-@ @<Save a record of a far label argument@>=
-label = ldex(datum);
-orreturn(hashtable_search(assembly_fardb(o), symbol_key(label), env_match,
-        (void *) label, &found));
-if (!defined_p(found)) {
-        orreturn(cons(label, NIL, &record));
-        orreturn(hashtable_save_m(assembly_fardb(o), symbol_key(label),
-                record, env_rehash, env_match, (void *) label, true, true));
-}
-orreturn(cons(Label[LBA_INDIRECT], ldex(datum), &datum));
-
-@ In case the argument being scanned is an |ALOT| the integer must
-be squeezed into 4 bits, within the range $-128$--127 which is fully
-within that of a fixed integer.
-
-TODO: Find a picture of a 4-bit alot.
-
-@.TODO@>
-@<Save large numbers in the object database@>=
-op = statement_opcode(line);
-cat = opcode_signature(op)[argc];
-if (cat != ALOB && cat != ALOT)
-        return LERR_INCOMPATIBLE;
-reason = int_value(ldex(datum), &value);
-if (cat == ALOT && (reason == LERR_LIMIT || value < TINY_MIN
-            || value > TINY_MAX))
-        return LERR_INCOMPATIBLE;
-else if (cat == ALOB && (reason == LERR_LIMIT || value < INT16_MIN
-            || value > INT16_MAX))
-        orreturn(assembly_save_object(o, ldex(datum), &datum));
-else if (failure_p(reason))
-        return reason;
-else
-        orreturn(cons(Label[LBA_ASIS], ldex(datum), &datum));
-
-@ Allocate (or find existing) |obj| in |objectdb| and return a
-representation of its location in |ret|.
-
-The objects can only be integers or symbols (at the moment).
-
-@c
-error_code
-assembly_save_object (cell  o,
-                      cell  obj,
+assembly_far_address (cell  o,
+                      cell  label,
                       cell *ret)
 {
-        cell new_cursor, old, table, index;
-        intmax_t cursor, nlength;
         error_code reason;
-
-        assert(assembly_p(o) && !assembly_complete_p(o));
-        assert(symbol_p(obj) || integer_p(obj) || error_p(obj));
-        index = assembly_objectdb_cursor(o);
-        printf("save at %d\n", index);
-        new_cursor = NIL;
-        for (cursor = 0; cursor < index; cursor++) {
-                orassert(array_ref_c(assembly_objectdb(o), cursor, &old));
-                if (cmpis_p(old, obj))
-                        goto found;
-        }
-        nlength = assembly_objectdb_length(o);
-        printf("not found %d>%d?\n",cursor,nlength);
-        if (cursor >= nlength) {
-                if (nlength == OBJECTDB_TABLE_LENGTH * OBJECTDB_DB_LENGTH)
-                        return LERR_LIMIT;
-                old = assembly_address(o);
-                nlength += OBJECTDB_TABLE_LENGTH + 1;
-                array_resize_m(assembly_objectdb(o), nlength, NIL);
-                assembly_set_objectdb_cursor_m(o, old);
-        }
-        orreturn(new_int_c(cursor + 1, true, &new_cursor));
-found:
-        orreturn(new_int_c(cursor % OBJECTDB_TABLE_LENGTH, true, &index));
-        orreturn(new_int_c(cursor >> OBJECTDB_TABLE_WIDTH, true, &table));
-        orreturn(cons(table, index, &table));
-        orreturn(cons(Label[LBA_TABLE], table, ret));
-        array_set_m_c(assembly_objectdb(o), cursor, obj);
-        if (!null_p(new_cursor))
-                assembly_set_objectdb_cursor_m(o, new_cursor);
+        assert(assembly_in_progress_p(o));
+        assert(symbol_p(label));
+        orreturn(hashtable_search(array_base(o)[ASSEMBLY_PROGRESS_FAR_ADDRESS],
+                label, ret));
+        assert(pair_p(*ret));
+        assert(integer_p(A(*ret)->dex));
         return LERR_NONE;
 }
 
-@ This is called for every instruction containing a forward link
-saved in |ldex(local[id])| to change \.{(\ft address . id)} to
-\.{(\ft relative . +delta)}.
-
-@c
 error_code
-assembly_fix_address (cell    o,
-                      address pending,
-                      address dest)
+assembly_set_far_address_m (cell o,
+                            cell label,
+                            cell lineno)
 {
-        cell new, s;
+        cell tuple;
         error_code reason;
-
-        assert(assembly_p(o) && !assembly_complete_p(o));
-        orreturn(new_int_c(dest - pending, true, &new));
-        orreturn(cons(Label[LBA_RELATIVE], new, &new));
-        s = assembly_working_ref(o, pending);
-        if (opcode_object(statement_opcode(s))->arg0 == AADD)
-                return statement_set_argument_m(s, 0, new);
-        else if (opcode_object(statement_opcode(s))->arg1 == AADD)
-                return statement_set_argument_m(s, 1, new);
-        else
-                return LERR_INTERNAL;
+        assert(assembly_in_progress_p(o));
+        assert(symbol_p(label));
+        assert(integer_p(lineno));
+        orreturn(cons(label, lineno, &tuple));
+        orreturn(hashtable_save_m(array_base(o)[ASSEMBLY_PROGRESS_FAR_ADDRESS],
+                tuple, false));
+        return LERR_NONE;
 }
 
-@ If there is content in pending comment, append to that, otherwise
-append to the most recent statement (unless the line is blank, so
-start a new pending comment).
+@ Hashtable of label : list of (line . argid) tuples.
 
 @c
 error_code
-assembly_apply_comment (cell      o,
-                        intmax_t  srcline @[unused@],
-                        char     *lbuf,
-                        int       length)
+assembly_far_argument_list (cell  o,
+                            cell  label,
+                            cell *ret)
 {
-        cell line, new;
+        cell found;
         error_code reason;
 
-        while (length)
-                if (asm_hspace_p(lbuf[length - 1]))
-                        length--;
-                else
-                        break;
-        if (length)
-                orreturn(new_segment_copy(lbuf, length, 1, 0,
-                        FORM_SEGMENT, FORM_NONE, &new));
+        assert(assembly_in_progress_p(o));
+        assert(symbol_p(label));
+        orreturn(hashtable_search(array_base(o)[ASSEMBLY_PROGRESS_FAR_ARGUMENT],
+                label, &found));
+        if (pair_p(found))
+                *ret = A(found)->dex;
         else
-                new = NIL;
-        if (null_p(new)) {
-                if (!null_p(assembly_pending_comment(o))
-                            && null_p(lsin(assembly_pending_comment(o))))
+                *ret = NIL;
+        for (found = *ret; !null_p(found); found = A(found)->dex) {
+                assert(pair_p(found));
+                assert(pair_p(A(found)->sin));
+                assert(integer_p(A(A(found)->sin)->sin));
+                assert(integer_p(A(A(found)->sin)->dex));
+        }
+        return LERR_NONE;
+}
+
+error_code
+assembly_append_far_argument_m (cell o,
+                                cell label,
+                                cell lineno,
+                                int  argid)
+{
+        bool replace;
+        cell found, tuple;
+        error_code reason;
+
+        assert(assembly_in_progress_p(o));
+        assert(symbol_p(label));
+        assert(integer_p(lineno));
+        assert(argid <= 1);
+        orreturn(cons(lineno, fix(argid), &tuple));
+        orreturn(hashtable_search(array_base(o)[ASSEMBLY_PROGRESS_FAR_ARGUMENT],
+                label, &found));
+        replace = defined_p(found);
+        if (replace) {
+                assert(pair_p(found) && A(found)->sin == label);
+                orreturn(cons(tuple, A(found)->dex, &tuple));
+        } else
+                orreturn(cons(tuple, NIL, &tuple));
+        orreturn(cons(label, tuple, &tuple));
+        return hashtable_save_m(array_base(o)[ASSEMBLY_PROGRESS_FAR_ARGUMENT],
+                tuple, replace);
+}
+
+@ @c
+bool
+assembly_has_pending_label_p (cell o)
+{
+        assert(assembly_in_progress_p(o));
+        return !null_p(array_base(o)[ASSEMBLY_PROGRESS_PENDING_LABEL]);
+}
+
+error_code
+assembly_pending_label (cell  o,
+                        cell *ret)
+{
+        assert(assembly_in_progress_p(o));
+        *ret = array_base(o)[ASSEMBLY_PROGRESS_PENDING_LABEL];
+        return LERR_NONE;
+}
+
+error_code
+assembly_set_pending_label_m (cell o,
+                              cell label)
+{
+        assert(assembly_in_progress_p(o));
+        if (!null_p(label)) {
+                assert((fixed_p(label)
+                        && fixed_value(label) >= 0 && fixed_value(label) <= 9));
+                assert(null_p(array_base(o)[ASSEMBLY_PROGRESS_PENDING_LABEL]));
+        }
+        array_base(o)[ASSEMBLY_PROGRESS_PENDING_LABEL] = label;
+        return LERR_NONE;
+}
+
+@ Backward address. Array of 10 integers or NIL. TODO: flatten back/fore arrays.
+
+@.TODO@>
+@c
+error_code
+assembly_backward_address (cell  o,
+                           cell  link,
+                           cell *ret)
+{
+        assert(assembly_in_progress_p(o));
+        assert(fixed_p(link)
+                && fixed_value(link) >= 0 && fixed_value(link) <= 9);
+        o = array_base(o)[ASSEMBLY_PROGRESS_BACKWARD_ADDRESS];
+        *ret = array_base(o)[fixed_value(link)];
+        return LERR_NONE;
+}
+
+error_code
+assembly_set_backward_address_m (cell o,
+                                 cell link,
+                                 cell lineno)
+{
+        assert(assembly_in_progress_p(o));
+        assert(fixed_p(link)
+                && fixed_value(link) >= 0 && fixed_value(link) <= 9);
+        assert(integer_p(lineno));
+        o = array_base(o)[ASSEMBLY_PROGRESS_BACKWARD_ADDRESS];
+        array_base(o)[fixed_value(link)] = lineno;
+        return LERR_NONE;
+}
+
+@ Forward argument. Array of 10 lists of (lineno . argid) tuples.
+
+@.TODO@>
+@c
+error_code
+assembly_forward_argument (cell  o,
+                           cell  link,
+                           cell *ret)
+{
+        assert(assembly_in_progress_p(o));
+        assert(fixed_p(link)
+                && fixed_value(link) >= 0 && fixed_value(link) <= 9);
+        o = array_base(o)[ASSEMBLY_PROGRESS_FORWARD_ARGUMENT];
+        *ret = array_base(o)[fixed_value(link)];
+        return LERR_NONE;
+}
+
+error_code
+assembly_append_forward_argument_m (cell o,
+                                    cell link,
+                                    cell lineno,
+                                    int  argid)
+{
+        cell linklist, tuple;
+        error_code reason;
+
+        assert(assembly_in_progress_p(o));
+        assert(fixed_p(link)
+                && fixed_value(link) >= 0 && fixed_value(link) <= 9);
+        assert(integer_p(lineno));
+        assert(argid >= 0 && argid <= 2);
+        orreturn(cons(lineno, fix(argid), &tuple));
+        linklist = array_base(o)[ASSEMBLY_PROGRESS_FORWARD_ARGUMENT];
+        return cons(tuple, array_base(linklist)[fixed_value(link)],
+                &array_base(linklist)[fixed_value(link)]);
+}
+
+error_code
+assembly_clear_forward_argument_list_m (cell o,
+                                        cell link)
+{
+        assert(assembly_in_progress_p(o));
+        assert(fixed_p(link)
+                && fixed_value(link) >= 0 && fixed_value(link) <= 9);
+        o = array_base(o)[ASSEMBLY_PROGRESS_FORWARD_ARGUMENT];
+        array_base(o)[fixed_value(link)] = NIL;
+        return LERR_NONE;
+}
+
+@ @c
+error_code
+assembly_object_table (cell  o,
+                       cell *ret)
+{
+        assert(assembly_in_progress_p(o));
+        *ret = array_base(o)[ASSEMBLY_PROGRESS_OBJECTDB];
+        return LERR_NONE;
+}
+
+@ @c
+error_code
+assembly_install_object_m (cell  o,
+                           cell  object,
+                           half *ret)
+{
+        cell objectdb;
+        half i, length;
+
+        assert(assembly_in_progress_p(o));
+        assert(!special_p(o));
+        objectdb = array_base(o)[ASSEMBLY_PROGRESS_OBJECTDB];
+        length = array_length_c(objectdb);
+        for (i = 0; i < length; i++) {
+                if (cmpis_p(object, array_base(objectdb)[i])) {
+                        *ret = i;
                         return LERR_NONE;
-                orreturn(cons(NIL, assembly_pending_comment(o), &new));
-                assembly_set_pending_comment_m(o, new);
-        } else if (!null_p(assembly_pending_comment(o))
-                    || assembly_cursor(o) == 0) {
-                orreturn(cons(new, assembly_pending_comment(o), &new));
-                assembly_set_pending_comment_m(o, new);
-        } else {
-                line = assembly_working_ref(o, assembly_cursor(o) - 1);
-                orreturn(cons(new, statement_comment(line), &new));
-                statement_set_comment_m(line, new);
+                }
         }
+        array_resize_m(objectdb, length + 1, UNDEFINED);
+        array_base(objectdb)[length] = object;
+        *ret = length;
         return LERR_NONE;
 }
 
-@ Ensure there are no pending labels or unresolved forward local
-links. Decide what to do if there's a pending comment.
-
-Create a new array of the precise length.
-
-Copy objectdb.
-
-Scan fardb:
-    If the cdr is NIL add the symbol to requiredb (a list)
-    Otherwise the cdr is an address and add the pair to exportdb (a hashtable)
-
-Copy the instructions.
-
-object db is plus 2 for false cursor
-
-@c
+@ @c
 error_code
-finish_assembly (cell  o,
-                 cell *ret)
+assembly_comment_statement (cell  o,
+                            cell *ret)
 {
-        cell commentary, far, have, want, new, tmp;
-        address i;
+        assert(assembly_in_progress_p(o));
+        *ret = array_base(o)[ASSEMBLY_PROGRESS_COMMENT_STATEMENT];
+        return LERR_NONE;
+}
+
+error_code
+assembly_set_comment_statement_m (cell o,
+                                  cell s)
+{
+        assert(assembly_in_progress_p(o));
+        assert(null_p(s) || statement_p(s));
+        array_base(o)[ASSEMBLY_PROGRESS_COMMENT_STATEMENT] = s;
+        return LERR_NONE;
+}
+
+@ @c
+error_code
+assembly_pending_comment (cell  o,
+                          cell *ret)
+{
+        assert(assembly_in_progress_p(o));
+        *ret = array_base(o)[ASSEMBLY_PROGRESS_PENDING_COMMENT];
+        return LERR_NONE;
+}
+
+error_code
+assembly_set_pending_comment_m (cell o,
+                                cell commentary)
+{
+        assert(assembly_in_progress_p(o));
+        assert(null_p(commentary) || pair_p(commentary));
+        array_base(o)[ASSEMBLY_PROGRESS_PENDING_COMMENT] = commentary;
+        return LERR_NONE;
+}
+
+error_code
+assembly_append_pending_comment_m (cell o,
+                                   cell line)
+{
+        cell tuple;
+        error_code reason;
+        assert(assembly_in_progress_p(o));
+        assert(defined_p(line));
+        orreturn(cons(line, array_base(o)[ASSEMBLY_PROGRESS_PENDING_COMMENT],
+                &tuple));
+        array_base(o)[ASSEMBLY_PROGRESS_PENDING_COMMENT] = tuple;
+        return LERR_NONE;
+}
+
+error_code
+assembly_append_comment_separator_m (cell o)
+{
+        cell tuple;
+        error_code reason;
+        assert(assembly_in_progress_p(o));
+        orreturn(cons(NIL, array_base(o)[ASSEMBLY_PROGRESS_PENDING_COMMENT],
+                &tuple));
+        array_base(o)[ASSEMBLY_PROGRESS_PENDING_COMMENT] = tuple;
+        return LERR_NONE;
+}
+
+@ @c
+error_code
+assembly_commentary (cell  o,
+                     cell  lineno,
+                     cell *ret)
+{
+        cell table;
+        error_code reason;
+        assert(assembly_in_progress_p(o));
+        if (integer_p(lineno))
+                orreturn(int_to_symbol(lineno, &lineno));
+        else
+                assert(symbol_p(lineno));
+        table = array_base(o)[ASSEMBLY_PROGRESS_COMMENTARY];
+        orreturn(hashtable_search(table, lineno, ret));
+        if (undefined_p(*ret))
+                *ret = NIL;
+        return LERR_NONE;
+}
+
+error_code
+assembly_set_commentary_m (cell o,
+                           cell lineno,
+                           cell comment)
+{
+        cell table;
+        error_code reason;
+        assert(assembly_in_progress_p(o));
+        if (integer_p(lineno))
+                orreturn(int_to_symbol(lineno, &lineno));
+        else
+                assert(symbol_p(lineno));
+        table = array_base(o)[ASSEMBLY_PROGRESS_COMMENTARY];
+        orreturn(cons(lineno, comment, &comment));
+        return hashtable_save_m(table, comment, false);
+}
+
+@ TODO: Blob accessors.
+
+@.TODO@>
+
+@ @c
+error_code
+assembly_append_line_m (cell o,
+                        cell line)
+{
+        cell comment, label, lineno, previous;
         error_code reason;
 
-        if (!assembly_p(o) || assembly_complete_p(o))
-                return LERR_INCOMPATIBLE;
-        if (assembly_pending_far_p(o) || assembly_pending_local_p(o))
-                return LERR_SYNTAX;
-@#
-        orreturn(new_larry(ASSEMBLY_COMPLETE_HEADER + assembly_cursor(o),
-                0, NIL, FORM_ASSEMBLY, &new));
-        assembly_address(new) = NIL;
-@#
-        if (assembly_pending_comment_p(o)) {
-                orreturn(new_symbol_const("footer", &commentary));
-                orreturn(cons(commentary, assembly_pending_comment(o),
-                        &commentary));
-                orreturn(cons(commentary, assembly_commentary(o), &commentary));
+        assert(assembly_in_progress_p(o));
+        assert(statement_p(line));
+        assembly_next_address(o, &lineno);
+        statement_far_label(line, &label);
+        if (!null_p(label)) {
+                if (assembly_has_far_address_p(o, label))
+                        return LERR_UNIMPLEMENTED; /* in use */
+                assembly_set_comment_statement_m(o, NIL);
+                assembly_set_far_address_m(o, label, lineno);
         }
-@#
-        assembly_set_blob_m(new, assembly_blob(o));
-@#
-        orreturn(new_array(assembly_objectdb_cursor(o) + 2, UNDEFINED, &tmp));
-        printf("newobj %d\n", array_length(tmp));
-        assembly_set_objectdb_m(new, tmp);
-        for (i = 0; i <= assembly_objectdb_cursor(o); i++)
-                array_set_m_c(tmp, i, get_array_ref_c(assembly_objectdb(o), i));
-@#
-        orreturn(new_hashtable(0, &have));
-        want = NIL;
-        for (i = 0; i < (address) hashtable_length(assembly_fardb(o)); i++) {
-                far = hashtable_ref(assembly_fardb(o), i);
-                if (null_p(far) || undefined_p(far))
-                        continue;
-                if (null_p(ldex(far)))
-                        orreturn(cons(lsin(far), want, &want));
+        statement_local_label(line, &label);
+        if (!null_p(label)) {
+                assert(fixed_p(label)
+                        && fixed_value(label) >= 0 && fixed_value(label) <= 9);
+                assembly_set_comment_statement_m(o, NIL);
+                assembly_set_pending_label_m(o, label);
+        }
+        if (statement_has_instruction_p(line)) {
+                assembly_pending_comment(o, &comment);
+                if (!null_p(comment)) {
+                        assert(pair_p(comment));
+                        if (null_p(A(comment)->sin))
+                                comment = A(comment)->dex;
+                        orreturn(assembly_set_commentary_m(o, lineno, comment));
+                        assembly_set_pending_comment_m(o, NIL);
+                }
+                orreturn(assembly_append_statement_m(o, line, &line));
+                assembly_set_comment_statement_m(o, line);
+        } else if (statement_has_comment_p(line)) {
+                statement_comment(line, &comment);
+                assert(pair_p(comment));
+                if (!null_p(A(comment)->sin))
+                        comment = A(comment)->sin;
+                assembly_comment_statement(o, &previous);
+                if (null_p(previous))
+                        orreturn(assembly_append_pending_comment_m(o, comment));
                 else
-                        orreturn(hashtable_save_m(have, symbol_key(lsin(far)),
-                                far, env_rehash, env_match,@|
-                                (void *) lsin(far), false, true));
+                        orreturn(statement_append_comment_m(previous,
+                                comment));
+        } else {
+                statement_comment(line, &comment);
+                if (!null_p(comment) && !null_p(A(comment)->sin))
+                        orreturn(assembly_append_comment_separator_m(o));
         }
-        assembly_set_exportdb_m(new, have);
-        assembly_set_requiredb_m(new, want);
-@#
-        for (i = 0; i < assembly_cursor(o); i++)
-                larry_set_m_imp(new, i + ASSEMBLY_COMPLETE_HEADER,
-                        assembly_working_ref(o, i));
-@#
-        *ret = new;
         return LERR_NONE;
 }
 
-@* Bytecode.
+@ In practice line numbers all fit within the space of a fixed
+integer except on 16 bit machines where a 24 bit address space
+doesn't make much sense anyway. 16 bit support is not being considered
+especially at this time.
 
-Assembly must be complete and not installed.
-
-Allocate page, copy blob
-
-Allocate CODEPAGE atom (pointer to page w/ link to commentary).
-
-Fill in CODEPAGE atom (not in ret).
-
-Lock Program.
-
-Sufficient space in |ObjectDB| \AM\ Blob + (length * 4) < $2^{24}$.
-
-Copy |Program_Export_Table| allocating pseudo-space in
-|Program_Export_Base| for lookup offset of symbol addresses.
-
-All required symbols extant in {\it Program\_Export\_*}, all exported symols absent.
-
-Allocate, copy \AM\ fill new objectdb space.
-
-Copy \AM\ convert instructions.
-
-Swap pointers (read lock?).
-
-Unlock Program.
-
-Return CODEPAGE atom.
-
-@<Fun...@>=
-error_code install_assembly (cell, cell *);
-error_code program_find_link (cell, cell, instruction *);
-error_code program_find_address (cell, cell, instruction *, address *);
-error_code assembly_encode_ALOT (int, cell, instruction *);
-error_code assembly_encode_AREG (int, cell, instruction *);
-error_code assembly_encode_integer (int, bool, cell, intmax_t *);
-
-@ These goto destinations are most common and quite noisy. In fact
-they're no different from saying |ortrap(LERR_INTERNAL)| but less
-obscure when written out this way.
-
-@s goto_Trap_INTERNAL goto
-@s goto_Trap_INCOMPATIBLE goto
-@d goto_Trap_INTERNAL do@+ {
-        reason = LERR_INTERNAL;
-        goto Trap;
-}@+ while (0)
-@d goto_Trap_INCOMPATIBLE do@+ {
-        reason = LERR_INCOMPATIBLE;
-        goto Trap;
-}@+ while (0)
 @c
 error_code
-install_assembly (cell  o,
-                  cell *ret)
+assembly_append_statement_m (cell  o,
+                             cell  statement,
+                             cell *ret)
 {
-        address avalue, boffset, next, page, real;
-        cell arg, blob, found, label, link, lins, op, tmp;
-        cell new_export, new_objectdb, new_program;
-        long i, j, ioffset, objectdb_length;
+        cell argument, delta, label, lineat, lineno, link, op;
+        int i;
+        word cdelta, clineno;
+        half tablerow;
+        error_code reason;
+
+        assert(assembly_in_progress_p(o));
+        assert(statement_p(statement));
+        assembly_next_address(o, &lineno);
+
+        if (assembly_has_pending_label_p(o)) {
+                assembly_pending_label(o, &label);
+                assert(fixed_p(label));
+                orreturn(assembly_fix_forward_links_m(o, label, lineno));
+        } else
+                label = NIL;
+
+        for (i = 0; i <= 2; i++) { /* Argument 2 can never have an address. */
+                statement_argument(statement, fix(i), &argument);
+                if (null_p(argument))
+                        continue;
+                assert(argument_p(argument));
+                switch (fixed_value(A(argument)->sin)) {
+                case ARGUMENT_FAR_ADDRESS:
+                        orreturn(assembly_append_far_argument_m(o,
+                                A(argument)->dex, lineno, i));
+                        break;
+                case ARGUMENT_FORWARD_ADDRESS:
+                        orreturn(assembly_append_forward_argument_m(o,
+                                A(argument)->dex, lineno, i));
+                        break;
+                case ARGUMENT_BACKWARD_ADDRESS:
+                        link = A(argument)->dex;
+                        assembly_backward_address(o, link, &lineat);
+                        if (null_p(lineat))
+                                return LERR_UNIMPLEMENTED;
+                        assert(fixed_p(lineat) && fixed_p(lineno));
+                        cdelta = fixed_value(lineat) - fixed_value(lineno);
+                        orreturn(new_int_c(cdelta, &delta));
+                        orreturn(statement_set_argument_m(statement,
+                                i, ARGUMENT_RELATIVE, delta));
+                        break;
+
+#if 0
+                case ARGUMENT_OBJECT:
+                        if (integer_p(A(argument)->dex)
+                                    && statement_integer_fits_p(statement,
+                                        i, A(argument)->dex)) {
+                                orreturn(statement_set_argument_m(statement,
+                                        i, ARGUMENT_SPECIAL, A(argument)->dex));
+                        } else {
+                                orreturn(assembly_install_object_m(o,
+                                        A(argument)->dex, &tablerow));
+                                orreturn(new_int_c(tablerow, &link));
+                                orreturn(statement_set_argument_m(statement,
+                                        i, ARGUMENT_TABLE, link));
+                        }
+                        break;
+#endif
+
+                case ARGUMENT_REGISTER:
+                case ARGUMENT_REGISTER_POPPING:
+                        assert(register_p(A(argument)->dex));
+                        break;
+                case ARGUMENT_OBJECT:
+                        orassert(statement_instruction(statement, &op));
+                        if ((integer_p(A(argument)->dex)
+                                    && statement_integer_fits_p(statement,
+                                        i, A(argument)->dex))
+                                  || (special_p(A(argument)->dex) && !fixed_p(A(argument)->dex)))
+                                break;
+                        else if (opcode_signature_c(op)[i] != ALOB)
+                                return LERR_INCOMPATIBLE;
+                        orreturn(assembly_install_object_m(o,
+                                A(argument)->dex, &tablerow));
+                        orreturn(new_int_c(tablerow, &link));
+                        orreturn(statement_set_argument_m(statement,
+                                i, ARGUMENT_TABLE, link));
+                        break;
+                }
+        }
+
+        assert(fixed_p(lineno));
+        clineno = fixed_value(lineno);
+        assert(clineno >= 0 && clineno < CODE_PAGE_MAX);
+        assembly_set_statement_m(o, clineno, statement);
+        if (!null_p(label)) {
+                assembly_set_backward_address_m(o, label, lineno);
+                assembly_set_pending_label_m(o, NIL);
+        }
+        orreturn(new_int_c(clineno + 1, &lineno));
+        assembly_set_next_address_m(o, lineno);
+        *ret = statement;
+        return LERR_NONE;
+}
+
+@ @c
+error_code
+assembly_fix_forward_links_m (cell o,
+                              cell link,
+                              cell lineto)
+{
+        cell argid, delta, linefrom, statement, tuple, pending;
+        word cdelta;
+        error_code reason;
+
+        assert(assembly_in_progress_p(o));
+        assert(fixed_p(link));
+        assert(integer_p(lineto));
+
+        assembly_forward_argument(o, link, &pending);
+        for (; !null_p(pending); pending = A(pending)->dex) {
+                assert(pair_p(pending) && pair_p(A(pending)->sin));
+                tuple = A(pending)->sin;
+                linefrom = A(tuple)->sin;
+                argid = A(tuple)->dex;
+                assert(fixed_p(argid));
+@#
+                assert(fixed_p(linefrom) && fixed_p(lineto));
+                cdelta = fixed_value(lineto) - fixed_value(linefrom);
+                orreturn(new_int_c(cdelta, &delta));
+@#
+                assembly_statement(o, fixed_value(linefrom), &statement);
+                assert(statement_p(statement));
+                orreturn(statement_set_argument_m(statement,
+                        fixed_value(argid), ARGUMENT_RELATIVE, delta));
+
+        }
+        return assembly_clear_forward_argument_list_m(o, link);
+}
+
+@ Check:
+
+pending-label is |NIL|
+
+forward-argument-table links are all |NIL|.
+
+Change:
+
+Add any pending comment to the table at epilogue.
+
+Filter far addresses into exported and dependencies.
+
+For all far-address
+    If begins !, add to export
+    Otherwise if there is no list of statements add it to requires
+    Update matching statements to relative and remove from far-argument
+
+If there are statements left in far-argument they are requirements.
+
+@ @c
+error_code
+assembly_finish_m (cell  o,
+                   cell *ret)
+{
+        cell far_address, far_argument, fromlist, exportdb, require;
+        cell argid, body, comment, lineto, linefrom, next, statement, sym;
+        cell table, tuple;
+        word delta, i;
+        error_code reason;
+
+        assert(assembly_in_progress_p(o));
+        if (assembly_has_pending_label_p(o))
+                return LERR_UNIMPLEMENTED;
+        table = array_base(o)[ASSEMBLY_PROGRESS_FORWARD_ARGUMENT];
+        for (i = 0; i <= 9; i++)
+                if (!null_p(array_base(table)[i]))
+                        return LERR_UNIMPLEMENTED;
+        @<Collect pending comments and reduce the code array@>@;
+        @<Update in-page far links to relative@>@;
+        @<Record remaining required far links@>@;
+        orreturn(new_array_imp(ASSEMBLY_READY_LENGTH, fix(0), NIL,
+                FORM_ASSEMBLY, ret));
+        array_base(*ret)[ASSEMBLY_STATUS] = fix(ASSEMBLY_STATUS_READY);
+        array_base(*ret)[ASSEMBLY_READY_BODY] = body;
+        array_base(*ret)[ASSEMBLY_READY_EXPORT] = exportdb;
+        array_base(*ret)[ASSEMBLY_READY_REQUIRE] = require;
+        array_base(*ret)[ASSEMBLY_READY_OBJECTDB] = array_base(o)[ASSEMBLY_PROGRESS_OBJECTDB];
+        array_base(*ret)[ASSEMBLY_READY_COMMENTARY] = array_base(o)[ASSEMBLY_PROGRESS_COMMENTARY];
+        array_base(*ret)[ASSEMBLY_READY_BLOB] = array_base(o)[ASSEMBLY_PROGRESS_BLOB];
+        return LERR_NONE;
+}
+
+@ @<Collect pending comments and reduce the code array@>=
+orreturn(assembly_pending_comment(o, &comment));
+if (!null_p(comment)) {
+        orreturn(new_symbol_const("epilogue", &sym));
+        assembly_set_commentary_m(o, sym, comment);
+}
+lineto = array_base(o)[ASSEMBLY_PROGRESS_NEXT_ADDRESS];
+assert(fixed_p(lineto));
+body = array_base(o)[ASSEMBLY_PROGRESS_BODY];
+orreturn(array_resize_m(body, fixed_value(lineto), NIL));
+
+@ @<Update in-page far links to relative@>=
+far_address = array_base(o)[ASSEMBLY_PROGRESS_FAR_ADDRESS];
+far_argument = array_base(o)[ASSEMBLY_PROGRESS_FAR_ARGUMENT];
+orreturn(new_hashtable(0, &exportdb));
+for (i = 0; i < hashtable_length_c(far_address); i++) {
+        next = hashtable_base(far_address)[i];
+        if (null_p(next) || !defined_p(next))
+                continue;
+        lineto = A(next)->dex;
+        assert(fixed_p(lineto));
+        if (symbol_buffer_c(A(next)->sin)[0] == '!') {
+                orreturn(cons(A(next)->sin, lineto, &tuple));
+                orreturn(hashtable_save_m(exportdb, tuple, false));
+        }
+        orreturn(hashtable_search(far_argument, A(next)->sin, &fromlist));
+        if (undefined_p(fromlist))
+                continue;
+        assert(pair_p(fromlist) && A(fromlist)->sin == A(next)->sin);
+        fromlist = A(fromlist)->dex;
+        for (; !null_p(fromlist); fromlist = A(fromlist)->dex) {
+                assert(pair_p(A(fromlist)->sin));
+                tuple = A(fromlist)->sin;
+                linefrom = A(tuple)->sin;
+                assert(fixed_p(linefrom));
+                argid = A(tuple)->dex;
+                assert(fixed_p(argid));
+                delta = fixed_value(lineto) - fixed_value(linefrom);
+                assembly_statement(o, fixed_value(linefrom), &statement);
+                statement_set_argument_m(statement,
+                        fixed_value(argid), ARGUMENT_RELATIVE, fix(delta));
+        }
+        hashtable_erase_m(far_argument, A(next)->sin, false);
+}
+
+@ @<Record remaining required far links@>=
+orreturn(new_hashtable(0, &require));
+for (i = 0; i < hashtable_length_c(far_argument); i++) {
+        next = hashtable_base(far_argument)[i];
+        if (null_p(next) || !defined_p(next))
+                continue;
+        orreturn(cons(A(next)->sin, A(next)->dex, &tuple));
+        orreturn(hashtable_save_m(require, tuple, false));
+}
+
+@ @c
+error_code
+assembly_install_m (cell  o,
+                    cell *ret)
+{
+        address avalue, boffset, page, real;
+        cell arg, blob, body, found, label, link, lins, objectdb, op, tmp;
+        cell new_table, new_program, statement_halt;
+        half i, ioffset, new_objectdb_length, next_export;
         instruction ins, ivalue;
-        intmax_t ito, svalue, table, uvalue;
+        word ito, wvalue;
         opcode_table *opb;
         error_code reason;
 
-        if (!assembly_p(o) || assembly_installed_p(o) || !assembly_complete_p(o))
-                return LERR_INCOMPATIBLE;
+        assert(assembly_ready_p(o));
 
         @<Prepare a new code page@>@;
-        if (pthread_mutex_lock(&Program_Lock) != 0)
-                goto_Trap_INTERNAL;
-        @<Ensure there is space in |ObjectDB|@>@;
+        pthread_mutex_lock(&Program_Lock);
+        @<Copy constant objects into |Program_ObjectDB|@>@;
         @<Look for required address symbols@>@;
         @<Add exported address symbols to a copy of |Program_Export_Table|@>@;
-        @<Copy constant objects into a copy of |ObjectDB|@>@;
         @<Install instructions as bytecode and commentary@>@;
 
-        ObjectDB = new_objectdb;
-        ObjectDB_Free += objectdb_length;
-        printf("odb len %d\n", array_length(ObjectDB));
-        Program_Export_Table = new_export;
+        Program_Export_Table = new_table;
+        Program_Export_Free = next_export;
+        Program_ObjectDB_Free = new_objectdb_length;
         *ret = new_program;
-        reason = LERR_NONE;
-Trap:
         pthread_mutex_unlock(&Program_Lock);
-        if (failure_p(reason))
-                mem_free((void *) page);
+        return LERR_NONE;
+
+Trap:
+        while (new_objectdb_length > Program_ObjectDB_Free)
+                array_base(Program_ObjectDB)[--new_objectdb_length] = NIL;
+        pthread_mutex_unlock(&Program_Lock);
+        free_mem((void *) page);
         return reason;
 }
 
 @ @<Prepare a new code page@>=
-orreturn(mem_alloc(NULL, PROGRAM_LENGTH, PROGRAM_LENGTH, (void **) &page));
-reason = new_atom((cell) page, NIL, FORM_PROGRAM, &new_program);
+orreturn(alloc_mem(NULL, CODE_PAGE_LENGTH, CODE_PAGE_LENGTH, (void **) &page));
+reason = new_array_imp(ASSEMBLY_PROGRESS_LENGTH, fix(0), NIL,
+        FORM_ASSEMBLY, &new_program);
 if (failure_p(reason)) {
-        mem_free((void *) page);
+        free_mem((void *) page);
         return reason;
 }
-*((cell *) page) = new_program;
-ioffset = sizeof (cell) / sizeof (instruction);
-assert(ioffset * sizeof (instruction) == sizeof (cell));
-blob = assembly_blob(o);
-if (!null_p(blob)) {
-        memmove((void *) (page + sizeof (cell)), segment_base(blob),
-                segment_length(blob));
-        ioffset += segment_length(blob) / sizeof (instruction);
-        if (ioffset * sizeof (instruction) < segment_length(blob) + sizeof (cell))
-                ioffset++;
-}
+array_base(new_program)[ASSEMBLY_STATUS] = fix(ASSEMBLY_STATUS_INSTALLED);
+*((cell *) page) = new_program; /* Point to the program atom at offset 0. */
+blob = array_base(o)[ASSEMBLY_READY_BLOB]; /* Copy binary data to the
+                                                beginning of the page. */
+memmove((void *) (page + sizeof (cell)), segment_base(blob),
+        segment_length_c(blob));
+ioffset = segment_length_c(blob) / sizeof (instruction);
+if (segment_length_c(blob) % sizeof (instruction))
+        ioffset++;
+ioffset += sizeof (cell) / sizeof (instruction);
 boffset = ioffset * sizeof (instruction);
-printf("  > %u:%u\n", boffset, ioffset);
 
-@ @<Ensure there is space in |ObjectDB|@>=
-objectdb_length = (assembly_objectdb_length(o) & ~OBJECTDB_TABLE_LENGTH);
-objectdb_length += OBJECTDB_TABLE_LENGTH;
-printf("new objs %d .. %d\n", assembly_objectdb_length(o), objectdb_length);
-if (objectdb_length > OBJECTDB_MAX - ObjectDB_Free) {
+@ Does not increment |Program_ObjectDB_Free| until the code page is completed.
+
+TODO: memmove occasionally segfaults.
+
+@<Copy constant objects into |Program_ObjectDB|@>=
+objectdb = array_base(o)[ASSEMBLY_READY_OBJECTDB];
+new_objectdb_length = Program_ObjectDB_Free;
+i = new_objectdb_length + array_length_c(objectdb);
+if (i > OBJECTDB_MAX) {
         reason = LERR_LIMIT;
         goto Trap;
 }
+if (i >= array_length_c(Program_ObjectDB))
+        ortrap(array_resize_m(Program_ObjectDB, i, NIL));
+new_objectdb_length = i;
+memmove(array_base(Program_ObjectDB) + (Program_ObjectDB_Free * sizeof (cell)),
+        array_base(objectdb), array_length_c(objectdb) * sizeof (cell));
 
-@ @<Look for required address symbols@>=
-label = assembly_requiredb(o);
-while (!null_p(label)) {
-        ortrap(hashtable_search(Program_Export_Table, symbol_key(lsin(label)),
-                env_match,@| (void *) lsin(label), &found));
+@ Table of (label . list-of-statements). It might be marginally
+more efficient to perform this scan (and the subsequent one) during
+the process of building each instruction.
+
+@<Look for required address symbols@>=
+for (i = 0; i < hashtable_length_c(array_base(o)[ASSEMBLY_READY_REQUIRE]); i++) {
+        label = hashtable_base(array_base(o)[ASSEMBLY_READY_REQUIRE])[i];
+        if (null_p(label) || !defined_p(label))
+                continue;
+        ortrap(hashtable_search(Program_Export_Table, A(label)->sin, &found));
         if (undefined_p(found)) {
+#if 1
+                printf("missing: "); psym(A(label)->sin); printf(".\n");
+#endif
                 reason = LERR_MISSING;
                 goto Trap;
         }
-        label = ldex(label);
 }
 
-@ It is safe to write the real addresses in |Program_Export_Base|
-because if this installation fails |Program_Export_Free| will not
-be increased the the written-on locations will be ignored and
-eventually overwritten. The record of the address' location is saved
-to a temporary new hashtable which will replace |Program_Export_Table|
-if all goes well.
+@ Table of (label . address). No need to save/copy |Program_Export_Base|,
+only the table and |Program_Export_Free|.
+
+Links to the address' location in |Program_Export_Base| is saved
+in the next free slot in |page|, beginning above the blob (and
+back-link pointer that shouldn't be there): |boffset|/|ioffset|.
+
+Page layout is:
+
+        Pointer to program object
+
+        Blob with padding to instruction-size boundary
+
+        Program code, instruction 0 is at |0 + ioffset|.
+
+The real address (ie. (0 + ioffset OR page)) is put in the next
+free slot in |Program_Export_Base| and the hashtable is adjusted
+to point to that offset in place of the bytecode offset (née address).
+
+Does not increment |Program_Export_Free| until the code page is ready.
 
 @<Add exported address symbols to a copy of |Program_Export_Table|@>=
-ortrap(copy_hashtable(Program_Export_Table, env_rehash, &new_export));
-next = Program_Export_Free;
-for (i = 0; i < hashtable_length(assembly_exportdb(o)); i++) {
-        label = hashtable_ref(assembly_exportdb(o), i); /* \.{(label . offset)} */
+ortrap(copy_hashtable(Program_Export_Table, &new_table));
+next_export = Program_Export_Free;
+for (i = 0; i < hashtable_length_c(array_base(o)[ASSEMBLY_READY_EXPORT]); i++) {
+        label = hashtable_base(array_base(o)[ASSEMBLY_READY_EXPORT])[i];
         if (null_p(label) || undefined_p(label))
                 continue;
 @#
-        ortrap(int_value(ldex(label), &ito));
-        if (ito < 0 || ito >= (intmax_t) ((PROGRAM_LENGTH / sizeof (instruction))
-                    - ioffset))
-                goto_Trap_INCOMPATIBLE;
-
+        assert(pair_p(label));
+        assert(fixed_p(A(label)->dex)); /* destination offset from
+                                                start of program code */
+        ito = fixed_value(A(label)->dex);
+        assert(ito >= 0 && (address) ito < INSTRUCTION_LENGTH);
+        if ((address) ito >= INSTRUCTION_LENGTH - ioffset) {
+                reason = LERR_OUT_OF_BOUNDS;
+                goto Trap;
+        }
+@#
         real = ito * sizeof (instruction);
         real += boffset;
         real |= page;
-        printf("%2d      '", next); psym(lsin(label)); printf("'\tat %p (%d)\n", real, ito);
-        Program_Export_Base[next] = real; /* Real location. */
+        Program_Export_Base[next_export] = real; /* Real location. */
 @#
-        ortrap(new_int_c(next, true, &link)); /* Link offset. */
-        ortrap(cons(lsin(label), link, &link));
-        ortrap(hashtable_save_m(new_export, symbol_key(lsin(label)), link,
-                env_rehash, env_match,@| (void *) lsin(label), false, true));
+        ortrap(new_int_c(next_export, &link)); /* Link offset in PEB. */
+        ortrap(cons(A(label)->sin, link, &link));
+        ortrap(hashtable_save_m(new_table, link, false)); /* Will conflict
+                                        with |LERR_EXISTS| if necessary. */
 @#
-        next++;
-        label = ldex(label);
+        next_export++;
 }
 
-@ TODO: memmove?
-
-@.TODO@>
-@<Copy constant objects into a copy of |ObjectDB|@>=
-table = array_length(ObjectDB) >> OBJECTDB_TABLE_WIDTH;
-ortrap(new_array(array_length(ObjectDB) + assembly_objectdb_length(o),
-        NIL, &new_objectdb));
-for (i = 0; i < array_length(ObjectDB); i++) {
-        orassert(array_ref_c(ObjectDB, i, &tmp));
-        orassert(array_set_m_c(new_objectdb, i, tmp));
-}
-        printf("newobj %d\n", assembly_objectdb_length(o));
-for (j = 0; j < assembly_objectdb_length(o); j++) {
-        orassert(array_ref_c(assembly_objectdb(o), j, &tmp));
-        orassert(array_set_m_c(new_objectdb, j + i, tmp));
+@ @<Fun...@>=
+void fuck (void);
+@ @c
+void
+fuck (void)
+{
+        printf("---\n");
 }
 
-@ Actually the commentary is dropped here. It should be saved in
-the data half the new program object.
-
-@d pins(O) for (int _i = 0; _i < 4; _i++)
-        printf("%02hhx", ((char *) (O))[_i])
-@d psym(O) for (int _i = 0; _i < symbol_length(O); _i++)
-        putchar(symbol_label(O)[_i]);
-@<Install instructions as bytecode and commentary@>=
-printf("  > %u:%u\n", boffset, ioffset);
-for (i = 0; i < (long) assembly_length(o); i++) {
-printf("assemble line %d...\n", i);
-        lins = assembly_complete_ref(o, i);
+@ @<Install instructions as bytecode and commentary@>=
+body = array_base(o)[ASSEMBLY_READY_BODY];
+ortrap(new_statement_imp(Op[OP_HALT].owner, &statement_halt));
+for (i = 0; i < array_length_c(body); i++) {
+        lins = array_base(body)[i];
+        if (null_p(lins))
+                lins = statement_halt;
         assert(statement_p(lins));
-        op = statement_opcode(lins);
+        statement_instruction(lins, &op);
         opb = opcode_object(op);
-        ins = htobe32((opcode_id(op) & 0xff) << 24);
-        printf(" %s \t", opb->label);
-        pins(&ins);
-        printf("\n");
+        ins = htobe32((fixed_value(opcode_id_c(op)) & 0xff) << 24);
         if (opb->arg0 == NARG) {
                 assert(opb->arg1 == NARG && opb->arg2 == NARG);
-                if (!null_p(statement_argument(lins, 0)))
-                        goto_Trap_INCOMPATIBLE;
+                statement_argument(lins, fix(0), &arg);
+                if (!null_p(arg)) {
+                        reason = LERR_INCOMPATIBLE;
+                        goto Trap;
+                }
                 goto finish_arguments;
         }
         @<Encode the first argument@>@;
@@ -6855,215 +6879,229 @@ printf("assemble line %d...\n", i);
         @<Encode the third argument@>@;
 finish_arguments:
         ((instruction *) (page | boffset))[i] = ins;
-        printf(" %p\t",(((instruction *) (page | boffset)) + i));
-        pins(((instruction *) (page | boffset)) + i);
-        printf(".\n");
 }
-ioffset += i;
-boffset += i * sizeof (instruction);
 
-@ First argument.
-
-@<Encode the first argument@>=
-if (null_p(statement_argument(lins, 0)))
-        goto_Trap_INCOMPATIBLE;
-arg = statement_argument(lins, 0);
-if (opb->arg0 == AADD) {
-        @<Encode a single address argument@>
-} else if (opb->arg0 == ARGH) {
-        @<Encode an error identifier argument@>
-} else if (opb->arg0 == AREG) {
-        @<Encode the first register argument@>
-} else
-        goto_Trap_INTERNAL;
+@ @<Encode the first argument@>=
+statement_argument(lins, fix(0), &arg);
+if (null_p(arg)) {
+        reason = LERR_INCOMPATIBLE;
+        goto Trap;
+}
+switch (opb->arg0) {
+case AADD:
+        @<Encode a single address argument and |break|@>
+case ARGH:
+        @<Encode an error identifier argument and |break|@>
+case AREG:
+        @<Encode the first register argument and |break|@>
+default:
+        reason = LERR_INTERNAL;
+        goto Trap;
+}
 
 @ ie.~24 bits.
 
-@<Encode a single address argument@>=
+@<Encode a single address ...@>=
 assert(opb->arg1 == NARG && opb->arg2 == NARG);
-if (!null_p(statement_argument(lins, 1)))
-        goto_Trap_INCOMPATIBLE;
-if (lsin(arg) == Label[LBA_RELATIVE]) {
-        ortrap(assembly_encode_integer(24, true, ldex(arg), &svalue));
-        if ((svalue < 0 && svalue < -i)
-                    || svalue == 0
-                    || svalue > (intmax_t) (assembly_length(o) - i)) {
+statement_argument(lins, fix(1), &tmp);
+if (!null_p(tmp)) {
+        reason = LERR_INCOMPATIBLE;
+        goto Trap;
+}
+switch (fixed_value(A(arg)->sin)) {
+case ARGUMENT_RELATIVE:
+        ortrap(assembly_validate_integer(24, true, A(arg)->dex, &wvalue));
+        if (wvalue < -i || wvalue == 0 || wvalue > array_length_c(body) - i) {
                 reason = LERR_OUT_OF_BOUNDS;
                 goto Trap;
         }
-        ins |= htobe32((svalue & 0xffffff) | (LBC_ADDRESS_RELATIVE << 30));
-        printf(" relative\t"); pins(&ins); printf("\n");
-} else if (lsin(arg) == Label[LBA_INDIRECT]) {
-        ortrap(program_find_address(new_export, ldex(arg), &ivalue, &avalue));
-        printf(" in");
-        if (instruction_page(avalue) == page) {
-                ivalue = avalue & PROGRAM_KEY;
-                ins |= htobe32(LBC_ADDRESS_DIRECT << 30);
-                printf("\b\b");
-        } else
-                ins |= htobe32(LBC_ADDRESS_INDIRECT << 30);
+        wvalue *= sizeof (instruction);
+        ins |= htobe32((wvalue & 0xffffff) | (BYTECODE_ADDRESS_RELATIVE << 30));
+        break;
+case ARGUMENT_FAR_ADDRESS:
+        ortrap(vm_locate_entry(A(arg)->dex, &avalue));
+        assert(instruction_page(avalue) != page);
         ins |= htobe32(ivalue & 0xffffff);
-        printf("direct \t"); pins(&ins); printf("\n");
-} else {
-        ortrap(assembly_encode_AREG(0, arg, &ivalue));
+        ins |= htobe32(BYTECODE_ADDRESS_INDIRECT << 30);
+        break;
+default:
+        ortrap(assembly_encode_AREG(0, arg, &ivalue)); /* Checks for argument type. */
         ins |= ivalue;
-        ins |= htobe32(LBC_ADDRESS_REGISTER << 30);
-        printf(" target \t"); pins(&ins); printf("\n");
+        ins |= htobe32(BYTECODE_ADDRESS_REGISTER << 30);
+        break;
 }
+break;
 
 @ TODO: Allow the error object to be obtained from a register.
 
-@<Encode an error identifier argument@>=
+@.TODO@>
+@<Encode an error identifier ...@>=
 assert(opb->arg1 == NARG && opb->arg2 == NARG);
-if (!null_p(statement_argument(lins, 1)) || lsin(arg) != Label[LBA_OBJECT]
-                || !error_p(ldex(arg)))
-        goto_Trap_INCOMPATIBLE;
-ins |= htobe32(error_id(ldex(arg)) << 16);
-printf(" error  \t"); pins(&ins); printf("\n");
+if (A(arg)->sin != fix(ARGUMENT_ERROR) || !error_p(A(arg)->dex)) {
+        reason = LERR_INCOMPATIBLE;
+        goto Trap;
+}
+statement_argument(lins, fix(1), &tmp);
+if (!null_p(tmp)) {
+        reason = LERR_INCOMPATIBLE;
+        goto Trap;
+}
+ortrap(assembly_validate_integer(7, true, error_id_c(A(arg)->dex), &wvalue));
+ins |= htobe32((wvalue | 0x80) << 8);
+break;
 
-@ @<Encode the first register argument@>=
-ortrap(assembly_encode_AREG(0, statement_argument(lins, 0), &ivalue));
+@ @<Encode the first register ...@>=
+ortrap(assembly_encode_AREG(0, arg, &ivalue));
 ins |= ivalue;
-printf(" register\t"); pins(&ins); printf("\n");
+break;
 
 @ Second argument.
 
 @<Encode the second argument@>=
-if (opb->arg1 == NARG)
-        goto finish_arguments;
-arg = statement_argument(lins, 1);
-if (null_p(arg))
-        goto_Trap_INCOMPATIBLE;
-if (opb->arg1 == AADD) {
-        @<Encode a 16-bit address@>
-} else if (opb->arg1 == ALOB) {
-        @<Encode a large object or link@>
-} else if (opb->arg1 == ALOT) {
-        @<Encode the middle ALOT@>
-} else
-        goto_Trap_INTERNAL;
-
-@ // 16-bit relative only. Don't allow indirect at all (yet?).
-
-@<Encode a 16-bit address@>=
-assert(opb->arg2 == NARG);
-if (lsin(arg) == Label[LBA_RELATIVE]) {
-        ortrap(assembly_encode_integer(16, true, ldex(arg), &svalue));
-        ins |= htobe32(svalue | (LBC_ADDRESS_RELATIVE << 30));
-        printf(" relative-16\t"); pins(&ins); printf("\n");
-} else if (lsin(arg) == Label[LBA_INDIRECT]) {
-        ortrap(program_find_address(new_export, ldex(arg), &ivalue, &avalue));
-        printf(" to %p %p\n", ivalue, avalue);
-        printf(" in");
-        if (instruction_page(avalue) == page) {
-                ivalue = avalue & PROGRAM_KEY;
-                ins |= htobe32(LBC_ADDRESS_DIRECT << 30);
-                printf("\b\b");
-        } else
-                goto_Trap_INCOMPATIBLE;
-        ins |= htobe32(ivalue & 0xffff);
-        printf("direct-16\t"); pins(&ins); printf("\n");
-} else
-        goto_Trap_INCOMPATIBLE;
-
-@ // ALOB; anything: int, const, pair:reg/bool, pair:table/index
-
-@<Encode a large object or link@>=
-assert(opb->arg2 == NARG);
-if (lsin(arg) == Label[LBA_TABLE]) {
-        ortrap(assembly_encode_integer(OBJECTDB_DB_WIDTH, false, lsin(ldex(arg)), &uvalue));
-        uvalue += table;
-printf(" tbl-%u", uvalue);
-        uvalue = (uvalue & OBJECTDB_SPLIT_BOTTOM) |
-                ((uvalue & OBJECTDB_SPLIT_BOTTOM) << OBJECTDB_SPLIT_GAP);
-        uvalue <<= OBJECTDB_TABLE_WIDTH;
-        ins |= htobe32(uvalue);
-        ortrap(assembly_encode_integer(OBJECTDB_TABLE_WIDTH, false,
-                ldex(ldex(arg)), &uvalue));
-printf(" idx-%u", uvalue);
-        ins |= htobe32(uvalue | (LBC_OBJECT_TABLE << 30));
-        printf("\t"); pins(&ins); printf("\n");
-} else if (lsin(arg) == Label[LBA_ASIS] && integer_p(ldex(arg))) {
-        ortrap(int_value(ldex(arg), &svalue));
-        if (svalue < INT16_MIN || svalue > INT16_MAX) {
+statement_argument(lins, fix(1), &arg);
+if (opb->arg1 == NARG) {
+        if (null_p(arg))
+                goto finish_arguments;
+        else {
                 reason = LERR_INCOMPATIBLE;
                 goto Trap;
         }
-        ins |= htobe32(svalue | (LBC_OBJECT_INTEGER << 30));
-        printf(" const-16\t"); pins(&ins); printf("\n");
-} else {
-        ortrap(assembly_encode_ALOT(1, arg, &ivalue));
-        ins |= ivalue;
-        if (lsin(arg) == Label[LBA_ASIS])
-                ins |= (LBC_OBJECT_CONSTANT << 30);
-        else
-                ins |= (LBC_OBJECT_REGISTER << 30);
-        printf(" ALOT-0 \t"); pins(&ins); printf("\n");
+} else if (null_p(arg)) {
+        reason = LERR_INCOMPATIBLE;
+        goto Trap;
+}
+switch (opb->arg1) {
+case AADD:
+        @<Encode a 16-bit address and |break|@>
+case ALOB:
+        @<Encode a large object and |break|@>
+case ALOT:
+        @<Encode the middle ALOT and |break|@>
+default:
+        reason = LERR_INTERNAL;
+        goto Trap;
 }
 
-@ @<Encode the middle ALOT@>=
-assert(opb->arg2 != NARG);
+@ 16-bit relative only. No 16 bit indirect jumps (yet?).
+
+@<Encode a 16-bit address ...@>=
+assert(opb->arg2 == NARG);
+switch (fixed_value(A(arg)->sin)) {
+case ARGUMENT_RELATIVE:
+        ortrap(assembly_validate_integer(16, true, A(arg)->dex, &wvalue));
+        if (wvalue < -i || wvalue == 0 || wvalue > array_length_c(body) - i) {
+                reason = LERR_OUT_OF_BOUNDS;
+                goto Trap;
+        }
+        wvalue *= sizeof (instruction);
+        ins |= htobe32((wvalue & 0xffff) | (BYTECODE_ADDRESS_RELATIVE << 30));
+        break;
+default:
+        reason = LERR_INCOMPATIBLE;
+        goto Trap;
+}
+break;
+
+@ ALOB; anything: int, const, pair:reg/bool, pair:table/index
+
+@<Encode a large object ...@>=
+assert(opb->arg2 == NARG);
+switch (fixed_value(A(arg)->sin)) {
+case ARGUMENT_TABLE:
+        assert(integer_p(A(arg)->dex)); // assembly table offset
+        if (!fixed_p(A(arg)->dex)
+                    || (wvalue = fixed_value(A(arg)->dex)) < 0
+                    || wvalue > OBJECTDB_MAX) {
+                reason = LERR_INCOMPATIBLE;
+                goto Trap;
+        } else if ((wvalue += Program_ObjectDB_Free) > OBJECTDB_MAX) {
+                reason = LERR_OUT_OF_BOUNDS;
+                goto Trap;
+        }
+        wvalue = (wvalue & (OBJECTDB_SPLIT_BOTTOM | OBJECTDB_ROW))
+                | ((wvalue & (OBJECTDB_SPLIT_TOP)) << OBJECTDB_SPLIT_GAP);
+        ins |= htobe32(wvalue | (BYTECODE_OBJECT_TABLE << 30));
+        break;
+case ARGUMENT_OBJECT:
+        if (fixed_p(A(arg)->dex)
+                    && fixed_value(A(arg)->dex) >= TINY_MIN
+                    && fixed_value(A(arg)->dex) <= TINY_MAX) {
+                ortrap(assembly_encode_ALOT(1, arg, &ivalue)); /* Checks for argument type. */
+                ins |= ivalue;
+        } else if (integer_p(A(arg)->dex)) {
+                orassert(int_value(A(arg)->dex, &wvalue));
+                assert(wvalue >= INT16_MIN && wvalue <= INT16_MAX);
+                ins |= htobe32((wvalue & 0xffff) | (BYTECODE_OBJECT_INTEGER << 30));
+        } else {
+                assert(special_p(A(arg)->dex));
+case ARGUMENT_REGISTER:
+case ARGUMENT_REGISTER_POPPING:
+                ortrap(assembly_encode_ALOT(1, arg, &ivalue)); /* Checks for argument type. */
+                ins |= ivalue;
+        }
+        break;
+default:
+        reason = LERR_INCOMPATIBLE;
+        goto Trap;
+}
+break;
+
+@ @<Encode the middle ALOT ...@>=
+assert(opb->arg2 == ALOT);
 ortrap(assembly_encode_ALOT(1, arg, &ivalue));
 ins |= ivalue;
-printf(" ALOT-1 \t"); pins(&ins);
-printf(" "); psym(lsin(arg));
-printf(" %d\n", ldex(arg));
-if (opb->arg2 != ALOT)
-        goto_Trap_INTERNAL;
+break;
 
 @ @<Encode the third argument@>=
 if (opb->arg2 != NARG) {
-        if (opb->arg2 != ALOT)
-                goto_Trap_INTERNAL;
-        if (null_p(statement_argument(lins, 2)))
-                goto_Trap_INCOMPATIBLE;
-        ortrap(assembly_encode_ALOT(2, statement_argument(lins, 2), &ivalue));
+        statement_argument(lins, fix(2), &arg);
+        if (null_p(arg)) {
+                reason = LERR_INCOMPATIBLE;
+                goto Trap;
+        }
+        ortrap(assembly_encode_ALOT(2, arg, &ivalue));
         ins |= ivalue;
-        printf(" ALOT-2 \t"); pins(&ins);
-printf(" "); psym(lsin(statement_argument(lins, 2)));
-printf(" %d\n", ldex(statement_argument(lins, 2)));
 }
 
-@ @d PROGRAM_LINK_MAX (PROGRAM_LENGTH / sizeof (address))
+@ 24 bits are used to encode relative address offsets and the error
+number to |OP_TRAP|. 16 bits encode relative offsets and any 16 bit
+integer.
+
 @c
 error_code
-program_find_link (cell         db,
-                   cell         label,
-                   instruction *ret)
+assembly_validate_integer (int   width,
+                           bool  signed_p,
+                           cell  lvalue,
+                           word *ret)
 {
-        cell loffset;
-        intmax_t voffset;
+        word min, max, cvalue;
         error_code reason;
 
-        if (!hashtable_p(db) || !symbol_p(label))
+        switch (width) {
+        case 7:
+                assert(signed_p);
+                min = ASR(INT8_MIN, 1);
+                max = ASR(INT8_MAX, 1);
+                break;
+        case 16:
+                min = signed_p ? INT16_MIN : 0;
+                max = signed_p ? INT16_MAX : UINT16_MAX;
+                break;
+        case 24:
+                min = ASR(signed_p ? INT32_MIN : 0, 8);
+                max = ASR(signed_p ? INT32_MAX : UINT32_MAX, 8);
+                break;
+        }
+        orreturn(int_value(lvalue, &cvalue));
+        if (cvalue < min || cvalue > max)
                 return LERR_INCOMPATIBLE;
-        hashtable_search(db, symbol_key(label), env_match, (void *) label,
-                &loffset);
-        if (undefined_p(loffset))
-                return LERR_MISSING;
-        orreturn(int_value(ldex(loffset), &voffset));
-        if (voffset < 0 || voffset >= (intmax_t) PROGRAM_LINK_MAX)
-                return LERR_INTERNAL;
-        *ret = voffset;
+        *ret = cvalue;
         return LERR_NONE;
 }
 
-@ @c
-error_code
-program_find_address (cell         db,
-                      cell         label,
-                      instruction *link, /* Offset in |Program_Export_Base|. */
-                      address     *ret) /* Destination address. */
-{
-        instruction ignore;
-        error_code reason;
-
-        if (link == NULL)
-                link = &ignore;
-        orreturn(program_find_link(db, label, link));
-        *ret = Program_Export_Base[*link];
-        return LERR_NONE;
-}
+@ @d TINY_MIN -0x40
+  @d TINY_MAX  0x3f
+  @d TINY_MASK 0x7f
 
 @ @c
 error_code
@@ -7072,18 +7110,18 @@ assembly_encode_ALOT (int          argc,
                       instruction *ret)
 {
         assert(argc >= 0 && argc <= 2);
-        assert(pair_p(argv));
-        if (lsin(argv) != Label[LBA_ASIS])
+        assert(argument_p(argv));
+        if (A(argv)->sin != fix(ARGUMENT_OBJECT))
                 return assembly_encode_AREG(argc, argv, ret);
-        if (fixed_p(ldex(argv)) && fixed_value(ldex(argv)) >= TINY_MIN
-                        && fixed_value(ldex(argv)) <= TINY_MAX) {
-                argv = fixed_value(ldex(argv)) + (-TINY_MIN);
-                argv <<= 4;
-                argv |= FIXED;
-        } else if (fixed_p(argv) || !special_p(ldex(argv)))
-                return LERR_INCOMPATIBLE;
-                printf("LOT %x\n", ldex(argv));
-        *ret = htobe32((ldex(argv) & 0xff) << ((2 - argc) * 8));
+        assert(special_p(A(argv)->dex));
+        if (fixed_p(A(argv)->dex)) {
+                assert((fixed_value(A(argv)->dex) >= TINY_MIN
+                    && fixed_value(A(argv)->dex) <= TINY_MAX));
+                argv = BYTECODE_CONSTANT_INTEGER | (fixed_value(A(argv)->dex) & TINY_MASK);
+        } else
+                argv = BYTECODE_CONSTANT_SPECIAL | (((A(argv)->dex + 1) / 2) & TINY_MASK);
+        assert(BYTECODE_OBJECT_CONSTANT == 0);
+        *ret = htobe32(argv << ((2 - argc) * 8));
         return LERR_NONE;
 }
 
@@ -7094,86 +7132,100 @@ assembly_encode_AREG (int          argc,
                       instruction *ret)
 {
         bool popping;
-        instruction rval;
 
         assert(argc >= 0 && argc <= 2);
-        assert(pair_p(argv));
-        popping = lsin(argv) == Label[LBA_REGISTER_POP];
-        if (!popping && lsin(argv) != Label[LBA_REGISTER])
-                return LERR_INCOMPATIBLE;
-        assert(register_p(ldex(argv)));
-        rval = popping << 7;
-        rval |= register_id(ldex(argv));
-        rval <<= ((2 - argc) * 8);
+        assert(argument_p(argv));
+        popping = A(argv)->sin == fix(ARGUMENT_REGISTER_POPPING);
+        assert(popping || A(argv)->sin == fix(ARGUMENT_REGISTER));
+        assert(register_p(A(argv)->dex));
+        argv = fixed_value(register_id_c(A(argv)->dex)) | (popping << 7);
+        argv <<= ((2 - argc) * 8);
+        assert(BYTECODE_FIRST_REGISTER == BYTECODE_OBJECT_REGISTER);
         if (argc == 1)
-                rval |= LBC_FIRST_REGISTER << 30;
+                argv |= BYTECODE_FIRST_REGISTER << 30;
         else if (argc == 2)
-                rval |= LBC_SECOND_REGISTER << 30;
-        *ret = htobe32(rval);
+                argv |= BYTECODE_SECOND_REGISTER << 30;
+        *ret = htobe32(argv);
         return LERR_NONE;
 }
 
-@ Not really `encoding', actually.
-
-@c
+@ @c
 error_code
-assembly_encode_integer (int       width,
-                         bool      signed_p,
-                         cell      lvalue,
-                         intmax_t *ret)
+new_assembly_buffer (byte *source,
+                     word  length,
+                     cell *ret)
 {
-        intmax_t min, max, cvalue;
+        cell dupe;
         error_code reason;
 
-        if (width == OBJECTDB_DB_WIDTH) {
-                assert(!signed_p);
-                min = 0;
-                max = OBJECTDB_DB_LENGTH;
-        } else if (width == OBJECTDB_TABLE_WIDTH) {
-                assert(!signed_p);
-                min = 0;
-                max = OBJECTDB_TABLE_LENGTH;
-        } else if (width == 16) {
-                min = signed_p ? INT16_MIN : 0;
-                max = signed_p ? INT16_MAX : UINT16_MAX;
-        } else if (width == 24) {
-                min = signed_p ? INT32_MIN : 0;
-                max = signed_p ? INT32_MAX : UINT32_MAX;
-                min /= 256, max /= 256; /* |>>= 8|. */
-        }
-        orreturn(int_value(lvalue, &cvalue));
-        if (cvalue < min || cvalue > max)
-                return LERR_INCOMPATIBLE;
-        *ret = cvalue;
-        return LERR_NONE;
+        assert(length <= HALF_MAX);
+        orreturn(new_segment(length, 0, &dupe));
+        memmove(segment_base(dupe), source, length);
+        return new_assembly_segment(dupe, ret);
 }
 
+@ @c
+error_code
+new_assembly_segment (cell  source,
+                      cell *ret)
+{
+        cell ass, statement;
+        cell lconsume, llength, loffset;
+        error_code reason;
+
+        assert(segment_p(source));
+        orreturn(new_int_c(segment_length_c(source), &llength));
+        if (!fixed_p(llength))
+                return LERR_LIMIT;
+        orreturn(new_assembly_progress(&ass));
+        loffset = fix(0);
+        int l = 1;
+        while (fixed_value(loffset) < segment_length_c(source)) {
+                orreturn(parse_segment_to_statement(source, loffset,
+                        llength, &lconsume, &statement));
+                assert(fixed_p(lconsume) && lconsume != fix(0));
+                orreturn(assembly_append_line_m(ass, statement));
+#if 0
+                printf("       %5d ", l);
+                for (int i = fixed_value(loffset);
+                     i < fixed_value(loffset) + fixed_value(lconsume);
+                     i++)
+                     if (segment_base(source)[i] != '\n')
+                     putchar(segment_base(source)[i]);
+                printf("\r0x%4x\n",
+                (void *) ((fixed_value(array_base(ass)[ASSEMBLY_PROGRESS_NEXT_ADDRESS]) -1)
+                * 4 + 8));
+#endif
+                llength = fix(fixed_value(llength) - fixed_value(lconsume));
+                loffset = fix(fixed_value(loffset) + fixed_value(lconsume));
+                l++;
+        }
+        return assembly_finish_m(ass, ret);
+}
+
+@* Evaluator.
+
+@<Global...@>=
+shared cell Evaluate_Program;
+
+@ @<Data...@>=
+#include "evaluate.c"
+
+@ These symbols are defined in \.{evaluate.c}, which embeds the
+contents of \.{evaluate.la} in a \CEE/ variable.
+
+@<Extern...@>=
+extern shared cell Evaluate_Program;
+extern shared char Evaluate_Source[];
+extern shared long Evaluate_Source_Length;
+
+@ @<Initialise evaluator and other bytecode@>=
+orreturn(new_assembly_buffer((byte *) Evaluate_Source,
+        Evaluate_Source_Length, &ltmp));
+orreturn(assembly_install_m(ltmp, &ltmp));
+Evaluate_Program = ltmp;
+
 @** Threads.
-
-@<Fun...@>=
-error_code init_osthread_mutex (pthread_mutex_t *, bool, bool);
-error_code new_osthread (cell, address, heap_access *, cell *);
-void * osthread_main (void *);
-error_code osthread_wait (cell, cell *);
-
-@ @<Global...@>=
-shared cell *Thread_DB = NULL;
-shared int Thread_DB_Length = 0;
-shared pthread_mutex_t Thread_DB_Lock;
-shared pthread_barrier_t Thready;
-
-@ @<Extern...@>=
-extern shared cell *Thread_DB;
-extern shared int Thread_DB_Length;
-extern shared pthread_mutex_t Thread_DB_Lock;
-extern shared pthread_barrier_t Thready;
-
-@ @<Finish init...@>=
-orabort(init_osthread_mutex(&Thread_DB_Lock, false, true));
-if (pthread_barrier_init(&Thready, NULL, 2))
-        just_abort(LERR_INTERNAL, "failed to intialise Thread Ready barrier");
-orabort(mem_alloc(NULL, Thread_DB_Length * sizeof (cell), 0,
-        (void **) &Thread_DB));
 
 @ @<Type def...@>=
 struct osthread {
@@ -7187,18 +7239,46 @@ struct osthread {
 };
 typedef struct osthread osthread;
 
-@ @<Global...@>=
+@ Why |Threads| and |Thread_DB|? I can't remember.
+
+@<Global...@>=
 shared osthread *Threads = NULL;
+shared cell *Thread_DB = NULL;
+shared int Thread_DB_Length = 0;
+shared pthread_mutex_t Thread_DB_Lock;
+shared pthread_barrier_t Thready;
 
 @ @<Extern...@>=
 extern shared osthread *Threads;
+extern shared cell *Thread_DB;
+extern shared int Thread_DB_Length;
+extern shared pthread_mutex_t Thread_DB_Lock;
+extern shared pthread_barrier_t Thready;
 
-@ @<Finish init...@>=
-orabort(mem_alloc(NULL, SCOW_Length * sizeof (scow), 0,
-        (void **) &SCOW_Attributes));
+@ @<Fun...@>=
+error_code init_osthread (void);
+error_code init_osthread_mutex (pthread_mutex_t *, bool, bool);
+
+@ @<Initialise threading@>=
+orabort(init_osthread_mutex(&Thread_DB_Lock, false, true));
+if (pthread_barrier_init(&Thready, NULL, 2))
+        just_abort(LERR_INTERNAL, "failed to intialise Thread Ready barrier");
+orabort(alloc_mem(NULL, Thread_DB_Length * sizeof (cell), 0,
+        (void **) &Thread_DB));
 SCOW_Attributes[LSCOW_PTHREAD_T].length = sizeof (osthread); /* Wrapper around
                                                                 |pthread_t|. */
 SCOW_Attributes[LSCOW_PTHREAD_T].align = sizeof (void *);
+
+@ @c
+error_code
+init_osthread (void)
+{
+        int i;
+        Thread_Ready = false;
+        @<(Re-)Initialise thread register pointers@>@;
+        Thread_Ready = true;
+        return LERR_NONE;
+}
 
 @ Errors: |EINVAL|, attributes are invalid, or |ENOMEM|.
 
@@ -7220,148 +7300,6 @@ init_osthread_mutex (pthread_mutex_t *mx,
         if (pthread_mutex_init(mx, &mutex_attr) != 0)
                 return LERR_OOM;
         return LERR_NONE;
-}
-
-@ Also function pointers for GC and more; collect into a struct
-pointer/object?
-
-@c
-error_code
-new_osthread (cell         thread_attr,
-              address      new_ip,
-              heap_access *heap_attr,
-              cell        *ret)
-{
-        cell thread_box;
-        int rv;
-        intmax_t start_address;
-        osthread *new_thread;
-        segment *heap_segment;
-        error_code reason;
-
-        if (!null_p(thread_attr)) /* | && !thread_attributes_p(thread_attr)| */
-                return LERR_INCOMPATIBLE;
-@#
-        orreturn(new_scow(LSCOW_PTHREAD_T, -1, &thread_box));
-        new_thread = (osthread *) scow_object(thread_box);
-        new_thread->owner = thread_box;
-        new_thread->pending = false;
-@#
-        orreturn(alloc_segment(-HEAP_CHUNK, 1, HEAP_CHUNK, &heap_segment));
-        new_thread->root = (heap_pun *) SEGMENT_TO_HEAP(heap_segment);
-        orreturn(heap_attr->init((heap *) new_thread->root, NULL, NULL, NULL));
-        orreturn(mem_alloc(NULL, sizeof (heap_access),
-                sizeof (void *),@| (void **) &new_thread->root->fun));
-        new_thread->root->fun = heap_attr;
-@#
-        orreturn(int_value(new_ip, &start_address));
-        if (start_address < 0 || start_address >= (intmax_t) PROGRAM_INVALID)
-                new_thread->ip = PROGRAM_INVALID;
-        else
-                new_thread->ip = start_address;
-@#
-        rv = pthread_mutex_lock(&Thread_DB_Lock);
-        switch (rv) {
-#ifdef pthread_mutexattr_setrobust
-        case EOWNERDEAD:
-                return LERR_INTERNAL;
-                /* What do? Impossible? */
-#endif /* |pthread_mutexattr_setrobust| */
-        case EDEADLK:
-                return LERR_INTERNAL;
-        default:
-                return LERR_INTERNAL;
-        case 0:
-                break;
-        }
-        if (Threads == NULL)
-                Threads = new_thread->next = new_thread->prev = new_thread;
-        else {
-                new_thread->next = Threads;
-                new_thread->prev = Threads->prev;
-                Threads->prev->next = new_thread;
-                Threads->prev = new_thread;
-        }
-        rv = pthread_create(&new_thread->tobj, NULL, osthread_main,
-                (void *) thread_box);
-        switch (rv) {
-        case 0:
-                new_thread->pending = true;
-                pthread_barrier_wait(&Thready);
-                *ret = thread_box;
-                reason = LERR_NONE;
-        case EAGAIN:
-                reason = LERR_LIMIT;
-        case EINVAL:
-                reason = LERR_INCOMPATIBLE;
-        default:
-                reason = LERR_INTERNAL;
-        }
-        pthread_mutex_unlock(&Thread_DB_Lock);
-        return reason;
-}
-
-@ @c
-void *
-osthread_main (void *carg)
-{
-        osthread *thread_box;
-        error_code reason;
-
-        thread_box = (osthread *) scow_object((cell) carg);
-        ortrap(mem_init_thread());
-        if (!special_p(Accumulator))
-                ; // |Accumulator| Needs copying to |Heap_Shared|.
-        Control_Link = NIL;
-        ; // |Environment|?
-        VM_Arg1 = VM_Arg2 = VM_Result = NIL;
-        Trap_Arg1 = Trap_Arg2 = Trap_Result = NIL;
-        Ip = thread_box->ip;
-        Trap_Ip = PROGRAM_INVALID;
-        Trapped = false;
-        ; // |Trap_Handler|?
-        Heap_Thread = (heap *) thread_box->root;
-        Heap_Trap = NULL;
-        pthread_barrier_wait(&Thready);
-        interpret();
-        pthread_exit((void *) (intptr_t) LERR_NONE);
-
-Trap:
-        pthread_barrier_wait(&Thready);
-        pthread_exit((void *) (intptr_t) reason);
-}
-
-@ @c
-error_code
-osthread_wait (cell  o,
-               cell *ret)
-{
-        osthread *thread_box;
-        void *prv;
-        error_code reason;
-
-        if (!scow_id_p(o, LSCOW_PTHREAD_T))
-                return LERR_INCOMPATIBLE;
-        thread_box = (osthread *) scow_object(o);
-        if (!thread_box->pending)
-                return LERR_FINISHED;
-        switch (pthread_join(thread_box->tobj, &prv)) {
-                case 0:
-                        thread_box->pending = false;
-                        *ret = thread_box->ret;
-                        reason = (error_code) (intptr_t) prv;
-                        break;
-                case EDEADLK:
-                        *ret = UNDEFINED;
-                        reason = LERR_SELF;
-                        break;
-                case EINVAL:
-                case ESRCH:
-                        *ret = UNDEFINED;
-                        reason = LERR_INTERNAL;
-                        break;
-        }
-        return reason;
 }
 
 @** Testing.
@@ -7403,6 +7341,8 @@ forward by the correct size.
 @f llt_forward llt_thunk /* A \CEE/ type-mangling hack. */
 @d llt_fixture_fetch(O,I) ((llt_header *) (((char *) (O)) +
         Test_Fixture_Size * (I)))
+@d llt_fixture_grow(O,L,D) (alloc_mem((O), Test_Fixture_Size * ((L) + (D)), 0,
+        (void **) &(O)))
 @<Test fixture header@>=
 #define LLT_FIXTURE_HEADER                                                    \
         char       *name;      /* Name of this test unit. */                  \
@@ -7413,7 +7353,7 @@ forward by the correct size.
         llt_forward prepare;   /* Preparation function. */                    \
         llt_forward run;       /* Carrying out the test. */                   \
         llt_forward validate;  /* Verifying the result. */                    \
-        llt_forward end;       /* Cleaning up after. */                       \
+        llt_forward clean;     /* Cleaning up after. */                       \
         int         progress;  /* The unit's progress through the harness. */ \
         int         tap;       /* The ID of the ``current'' test tap. */      \
         int         taps;      /* The number of taps in this unit. */         \
@@ -7429,22 +7369,22 @@ forward by the correct size.
         int         ok;        /* The final result of this unit. */
 
 @ @<Test fun...@>=
+error_code llt_appendf (llt_header *, char *, char **, char *, ...);
 void llt_fixture__init_common (llt_header *, int, llt_thunk, llt_thunk,
         llt_thunk, llt_thunk);
 void llt_fixture_free (llt_header *);
-error_code llt_fixture_grow (llt_header *, int *, int, llt_header **);
-error_code llt_fixture_leak_imp (void ***, int *);
-error_code llt_fixture_alloc (llt_header *, size_t, size_t, void **);
+error_code llt_fixture_leak (llt_header *, int *);
 error_code llt_list_suite (llt_header *);
 error_code llt_load_tests (bool, llt_header **);
 error_code llt_main (int, char **, bool);
-error_code llt_perform_test (int, int *, llt_header *, int *);
+int llt_perform_test (int *, llt_header *);
 void llt_print_test (llt_header *);
 error_code llt_run_suite (llt_header *);
 error_code llt_skip_test (int *, llt_header *, char *);
-error_code llt_sprintf (void ***, char **, char *, ...);
+error_code llt_sprintf (llt_header *, char **, char *, ...);
 error_code llt_usage (char *, bool);
-void tap_ok (llt_header *, char *, bool, cell);
+error_code llt_vsprintf (llt_header *, int, char **, char *, va_list);
+bool tap_ok (llt_header *, char *, bool, cell);
 void tap_out (char *, ...);
 void tap_plan (int);
 
@@ -7514,10 +7454,9 @@ llt_main (int    argc,
                 @<Parse command line options@>
         }
 
+        orreturn(init_mem());
         if (init)
-                orreturn(mem_init());
-        else
-                orreturn(mem_init_thread());
+                orreturn(init_vm());
         orreturn(llt_load_tests(act == LLT_DO_TESTS, &suite));
         if (argc != 1) {
                 @<Parse a test run specification from the command line@>
@@ -7616,7 +7555,7 @@ llt_load_tests (bool         full,
         int before, i, num_tests, tap;
         error_code reason;
 
-        orreturn(mem_alloc(NULL, Test_Fixture_Size, 0,
+        orreturn(alloc_mem(NULL, Test_Fixture_Size, 0,
                 (void **) &r));
         num_tests = 0;
         tap = 1;
@@ -7679,8 +7618,9 @@ vigorously enforce incrementing the output tap id?
 @d LLT_RUN_ABORT   -1
 @d LLT_RUN_FAIL     1
 @d LLT_RUN_CONTINUE 0
-@d LLT_RUN_OK       LLT_RUN_CONTINUE /* There is no try. */
 @d LLT_RUN_PANIC    2
+@#
+@d orfail(E) if (failure_p(E)) return LLT_RUN_FAIL;
 @(testless.c@>=
 error_code
 llt_run_suite (llt_header *suite)
@@ -7697,11 +7637,14 @@ llt_run_suite (llt_header *suite)
         for (i = 0; run != LLT_RUN_ABORT && i < suite->total; i++) {
                 if (llt_fixture_fetch(suite, i)->perform) {
                         t = llt_fixture_fetch(suite, i)->tap_start;
-                        orreturn(llt_perform_test(run, &t,
-                                llt_fixture_fetch(suite, i), &run));
-                        if (t != llt_fixture_fetch(suite, i)->tap_start
+                        if (run == LLT_RUN_CONTINUE)
+                                run = llt_perform_test(&t,
+                                        llt_fixture_fetch(suite, i));
+                        if (run != LLT_RUN_CONTINUE)
+                                warnx("Unknown test failure");
+                        else if (t != llt_fixture_fetch(suite, i)->tap_start
                                     + llt_fixture_fetch(suite, i)->taps)
-                                warn("Test tap mismatch: %d != %d", t,
+                                warnx("Test tap mismatch: %d != %d", t,
                                         llt_fixture_fetch(suite, i)->tap_start
                                             + llt_fixture_fetch(suite, i)->taps);
                  } else {
@@ -7725,8 +7668,7 @@ llt_skip_test (int        *tap,
         char *msg;
         error_code reason;
 
-        orreturn(llt_sprintf(&testcase->leaks, &msg,
-                "--- # SKIP %s", excuse));
+        orreturn(llt_sprintf(testcase, &msg, "--- # SKIP %s", excuse));
         testcase->tap = *tap;
         testcase->progress = LLT_PROGRESS_SKIP;
         for (i = 0; i < testcase->taps; i++)
@@ -7751,55 +7693,50 @@ because the only difference from |llt_forward| is that the latter
 uses |void *| for its pointer argument types.
 
 @(testless.c@>=
-error_code
-llt_perform_test (int         runok,
-                  int        *tap,
-                  llt_header *testcase,
-                  int        *ret)
+int
+llt_perform_test (int        *tap,
+                  llt_header *testcase)
 {
         bool allocating;
         int n, r;
 
-        if (runok == LLT_RUN_ABORT || testcase->progress != LLT_PROGRESS_INIT)
-                return LERR_INTERNAL;
+        if (testcase->progress != LLT_PROGRESS_INIT)
+                return LLT_RUN_ABORT;
 @#
         n = testcase->prepare == NULL ? LLT_RUN_CONTINUE
                 : testcase->prepare(testcase);
-        if (n != LLT_RUN_CONTINUE) {
-                *ret = n;
-                return LERR_NONE;
-        }
+        if (n != LLT_RUN_CONTINUE)
+                return n;
         testcase->progress = LLT_PROGRESS_PREPARE;
 @#
         if (testcase->run == NULL)
-                return LERR_INTERNAL;
+                return LLT_RUN_ABORT;
         n = testcase->run(testcase);
-        if (n != LLT_RUN_CONTINUE) {
-                *ret = n;
-                return LERR_NONE;
-        }
+        if (n != LLT_RUN_CONTINUE)
+                return n;
         testcase->progress = LLT_PROGRESS_RUN;
 @#
         if (testcase->validate == NULL)
-                return LERR_INTERNAL;
-        if (Test_Memory != NULL) {
-                allocating = Test_Memory->active;
-                Test_Memory->active = false;
+                r = LLT_RUN_ABORT;
+        else {
+                if (Test_Memory != NULL) {
+                        allocating = Test_Memory->active;
+                        Test_Memory->active = false;
+                }
+                testcase->tap = *tap;
+                r = testcase->validate(testcase);
+                *tap = testcase->tap;
+                if (Test_Memory != NULL)
+                        Test_Memory->active = allocating;
         }
-        testcase->tap = *tap;
-        r = testcase->validate(testcase);
-        *tap = testcase->tap;
-        if (runok != LLT_RUN_OK)
-                r = runok;
-        if (Test_Memory != NULL)
-                Test_Memory->active = allocating;
 @#
-        n = testcase->end == NULL ? LLT_RUN_CONTINUE
-                : testcase->end(testcase);
-        if (n != LLT_RUN_CONTINUE)
-                return LLT_RUN_PANIC;
-        *ret = r;
-        return LERR_NONE;
+        if (r < LLT_RUN_PANIC)
+                n = testcase->clean == NULL ? LLT_RUN_CONTINUE
+                        : testcase->clean(testcase);
+        if (r != LLT_RUN_CONTINUE)
+                return r;
+        else
+                return n;
 }
 
 @* Testing memory allocation. Those tests which need to mock the
@@ -7809,7 +7746,7 @@ pointers to alternative allocation and release functions.
 
 @ @<Type def...@>=
 typedef struct {
-        bool active; /* Whether |mem_alloc| should revert to these. */
+        bool active; /* Whether |alloc_mem| should revert to these. */
         bool available; /* Whether the false allocation should succeed. */
         error_code (*alloc)(void *, size_t, size_t, void **);
         error_code (*free)(void *);
@@ -7837,22 +7774,11 @@ if (Test_Memory != NULL && Test_Memory->active)
 
 Increase the size of the budding test suite by |delta| unit fixtures.
 
-@(testless.c@>=
-error_code
-llt_fixture_grow (llt_header  *o,
-                  int         *length,
-                  int          delta,
-                  llt_header **ret)
-{
-        return mem_alloc(o, Test_Fixture_Size * (*length + delta), 0,
-                (void **) ret);
-}
-
 @ @d LLT_PROGRESS_INIT   0
 @d LLT_PROGRESS_PREPARE  1
 @d LLT_PROGRESS_RUN      2
 @d LLT_PROGRESS_VALIDATE 3
-@d LLT_PROGRESS_END      4
+@d LLT_PROGRESS_CLEAN    4
 @d LLT_PROGRESS_SKIP     5
 @(testless.c@>=
 void
@@ -7861,7 +7787,7 @@ llt_fixture__init_common (llt_header *fixture,
                           llt_thunk   prepare,
                           llt_thunk   run,
                           llt_thunk   validate,
-                          llt_thunk   end)
+                          llt_thunk   clean)
 {
         fixture->name = "";
         fixture->id = id;
@@ -7871,7 +7797,7 @@ llt_fixture__init_common (llt_header *fixture,
         fixture->prepare = (llt_forward) prepare;
         fixture->run = (llt_forward) run;
         fixture->validate = (llt_forward) validate;
-        fixture->end = (llt_forward) end;
+        fixture->clean = (llt_forward) clean;
         fixture->progress = LLT_PROGRESS_INIT;
         fixture->taps = 1;
         fixture->tap = fixture->tap_start = 0;
@@ -7890,45 +7816,24 @@ made from such an allocation the first time one is requested.
 
 @(testless.c@>=
 error_code
-llt_fixture_leak_imp (void ***abuf,
-                      int    *ret)
+llt_leak (llt_header  *fixture,
+          size_t       length,
+          void       **ret)
 {
-        int length;
+        int lid;
         error_code reason;
 
-        if (*abuf == NULL) {
-                orreturn(mem_alloc(NULL, sizeof (void *) * 2,
-                        0, (void **) abuf));
-                length = 1;
-        } else {
-                length = ((long) (*abuf)[0]) + 1;
-                if (length >= INT_MAX)
-                        return LERR_LIMIT;
-                orreturn(mem_alloc(*abuf,
-                        sizeof (void *) * length + 1, 0, (void **) abuf));
-        }
-        (*abuf)[0] = (void *) (long) length;
-        (*abuf)[length] = NULL;
-        *ret = length;
-        return LERR_NONE;
-}
-
-@ To also get the allocation's ID (index into |abuf|) take |(*abuf)[0]|
-immediately after calling this.
-
-@(testless.c@>=
-error_code
-llt_fixture_alloc (llt_header  *tc,
-                   size_t       length,
-                   size_t       stride,
-                   void       **ret)
-{
-        int idx;
-        error_code reason;
-
-        orreturn(llt_fixture_leak_imp(&tc->leaks, &idx));
-        orreturn(mem_alloc(NULL, length, stride, &tc->leaks[idx]));
-        *ret = tc->leaks[idx];
+        if (fixture->leaks == NULL)
+                lid = 1;
+        else
+                lid = (word) fixture->leaks[0];
+        orreturn(alloc_mem(fixture->leaks, sizeof (void *) * (lid + 1),
+                0, (void **) &fixture->leaks));
+        fixture->leaks[0] = lid;
+        fixture->leaks[lid] = NULL;
+        orreturn(alloc_mem(NULL, length, 0, ret));
+        fixture->leaks[lid] = *ret;
+        fixture->leaks[0] = lid + 1;
         return LERR_NONE;
 }
 
@@ -7939,52 +7844,80 @@ Ignores error returns but |free| doesn't fail anyway.
 
 @(testless.c@>=
 void
-llt_fixture_free (llt_header *testcase)
+llt_fixture_free (llt_header *fixture)
 {
         int i;
 
-        if (testcase->leaks != NULL) {
-                for (i = 0; i < (long) testcase->leaks[0]; i++)
-                        mem_free(testcase->leaks[i]);
-                mem_free(testcase->leaks);
+        if (fixture->leaks != NULL) {
+                for (i = 0; i < (long) fixture->leaks[0]; i++)
+                        if (fixture->leaks[i] != NULL)
+                                free_mem(fixture->leaks[i]);
+                free_mem(fixture->leaks);
         }
+        fixture->leaks = NULL;
 }
 
-@ The main consumer of |llt_fixture_leak| thus far is this wrapper
-around \.{printf}, which repeatedly enlarges a buffer until a
-short-ish message can be formatted into it, then reduces the
-allocation to the minimum size and returns it.
+@ The main consumer of |llt_fixture_leak| is this wrapper around
+\.{printf} and its two users |llt_sprintf| and |llt_appendf|.
 
 @(testless.c@>=
 error_code
-llt_sprintf (void     ***abuf,
-             char      **ret,
-             char       *fmt, ...)
+llt_vsprintf (llt_header  *fixture,
+              int          length,
+              char       **ret,
+              char        *fmt,
+              va_list      args)
 {
-        int length, pret, pidx;
+        char *buf;
+        error_code reason;
+
+        orreturn(llt_leak(fixture, length + 1, (void **) &buf));
+        if (vsnprintf(buf, length + 1, fmt, args) < 0)
+                return LERR_INTERNAL;
+        *ret = buf;
+        return LERR_NONE;
+}
+
+@ @(testless.c@>=
+error_code
+llt_sprintf (llt_header  *fixture,
+             char       **ret,
+             char        *fmt, ...)
+{
+        int length;
         va_list args;
         error_code reason;
 
-        orreturn(llt_fixture_leak_imp(abuf, &pidx));
-        length = 0;
-        (*abuf)[pidx] = NULL;
-        while (1) {
-                length += 128;
-                orreturn(mem_alloc((*abuf)[pidx],
-                        sizeof (char) * length, 0, (void **) &((*abuf)[pidx])));
-                va_start(args, fmt);
-                pret = vsnprintf((*abuf)[pidx], length, fmt, args);
-                va_end(args);
-                if (pret < 0)
-                        return LERR_SYSTEM;
-                else if (pret < length)
-                        break;
-        }
-        orreturn(mem_alloc((*abuf)[pidx],
-                sizeof (char) * (pret + 1), 0,
-                (void **) &((*abuf)[pidx])));
-        *ret = (*abuf)[pidx];
-        return LERR_NONE;
+        va_start(args, fmt);
+        length = vsnprintf(NULL, 0, fmt, args);
+        va_end(args);
+        va_start(args, fmt);
+        reason = llt_vsprintf(fixture, length, ret, fmt, args);
+        va_end(args);
+        return reason;
+}
+
+@ @(testless.c@>=
+error_code
+llt_appendf (llt_header  *fixture,
+             char        *prior,
+             char       **ret,
+             char        *fmt, ...)
+{
+        char *append;
+        int length;
+        va_list args;
+        error_code reason;
+
+        va_start(args, fmt);
+        length = vsnprintf(NULL, 0, fmt, args);
+        va_end(args);
+        va_start(args, fmt);
+        reason = llt_vsprintf(fixture, length, &append, fmt, args);
+        va_end(args);
+        if (failure_p(reason))
+                return reason;
+        return llt_sprintf(fixture, ret, "%s%s", prior, append);
 }
 
 @* TAP. Tap routines to implement a rudimentary stream of test
@@ -7999,8 +7932,10 @@ tap_plan (int length)
         printf("1..%d\n", length);
 }
 
-@ @(testless.c@>=
-void
+@ @d tap_fail(C,T,M) tap_ok((C), (T), false, (M))
+@d tap_pass(C,T,M) tap_ok((C), (T), true, (M))
+@(testless.c@>=
+bool
 tap_ok (llt_header *testcase,
         char       *title,
         bool        result,
@@ -8009,7 +7944,7 @@ tap_ok (llt_header *testcase,
         assert(testcase->progress == LLT_PROGRESS_RUN
                 || testcase->progress == LLT_PROGRESS_SKIP);
         testcase->meta = meta;
-        testcase->ok = result ? LLT_RUN_OK : LLT_RUN_FAIL;
+        testcase->ok = result ? LLT_RUN_CONTINUE : LLT_RUN_FAIL;
         if (result)
                 tap_out("ok");
         else
@@ -8018,7 +7953,14 @@ tap_ok (llt_header *testcase,
         if (testcase->name != NULL)
                 tap_out("%s: ", testcase->name);
         tap_out("%s\n", title);
+        return result;
 }
+
+@ Like |tap_ok| but the unit result so far must be a success.
+
+@d tap_and(C,T,R,M) ((th->ok == LLT_RUN_CONTINUE)
+        ? tap_ok((C), (T), (R), (M))
+        : tap_fail((C), (T), (M)))
 
 @ @(testless.c@>=
 void
@@ -8084,7 +8026,7 @@ llt_Sanity__Nothing (llt_header  *suite,
         llt_fixture *tc;
         error_code reason;
 
-        orreturn(llt_fixture_grow(suite, count, 1, &suite));
+        orreturn(llt_fixture_grow(suite, *count, 1));
         tc = (llt_fixture *) suite;
         llt_fixture__init_common((llt_header *) (tc + *count), *count,
                 NULL,
@@ -8099,8 +8041,7 @@ llt_Sanity__Nothing (llt_header  *suite,
         return LERR_NONE;
 }
 
-@
-@(t/insanity.c@>=
+@ @(t/insanity.c@>=
 error_code
 llt_Sanity__Halt (llt_header  *suite,
                   int         *count,
@@ -8109,9 +8050,9 @@ llt_Sanity__Halt (llt_header  *suite,
 {
         llt_fixture *tc;
         error_code reason;
-        instruction *pins;
+        instruction *ins;
 
-        orreturn(llt_fixture_grow(suite, count, 1, &suite));
+        orreturn(llt_fixture_grow(suite, *count, 1));
         tc = (llt_fixture *) suite;
         llt_fixture__init_common((llt_header *) (tc + *count), *count,
                 llt_Sanity__prepare,
@@ -8119,10 +8060,9 @@ llt_Sanity__Halt (llt_header  *suite,
                 llt_Sanity__validate,
                 NULL);
         tc[*count].name = "HALT";
-        orreturn(llt_fixture_alloc((llt_header *) (tc + *count),
-                sizeof (instruction), 0, (void **) &pins));
-        pins[0] = htobe32(OP_HALT);
-        tc[*count].program = pins;
+        orreturn(llt_leak(suite, sizeof (instruction), (void **) &ins));
+        ins[0] = htobe32(OP_HALT << 24);
+        tc[*count].program = ins;
         tc[*count].taps = 2;
         (*count)++;
         *ret = suite;
@@ -8137,7 +8077,7 @@ llt_Sanity__prepare (llt_header *testcase_ptr @[unused@])
 
         Ip = (address) tc->program;
 
-        return LLT_RUN_OK;
+        return LLT_RUN_CONTINUE;
 }
 
 @ Nothing in \Ls/ is tested by this test although the parts used
@@ -8147,7 +8087,7 @@ by the test harness are exercised.
 int
 llt_Sanity__noop (llt_header *testcase_ptr @[unused@])
 {
-        return LLT_RUN_OK;
+        return LLT_RUN_CONTINUE;
 }
 
 @ @(t/insanity.c@>=
@@ -8155,7 +8095,7 @@ int
 llt_Sanity__interpret (llt_header *testcase_ptr @[unused@])
 {
         interpret();
-        return LLT_RUN_OK;
+        return LLT_RUN_CONTINUE;
 }
 
 @ @(t/insanity.c@>=
@@ -8163,70 +8103,723 @@ int
 llt_Sanity__validate (llt_header *testcase_ptr)
 {
         tap_ok(testcase_ptr, "done", true, NIL);
-        tap_ok(testcase_ptr, "VPU is not trapped", !Trapped, NIL);
+        tap_ok(testcase_ptr, "VPU is not trapped", !failure_p(Trapped), NIL);
         return testcase_ptr->ok;
 }
 
-@* Memory allocator tests.
+@* Hashtable tests.
 
+@d LLT_HASHTABLE_SEED (HASHTABLE_TINY + 1)
+@d LLT_HASHTABLE_FACTOR 24
+@(t/hashtable.c@>=
+@<Test common preamble@>@;
 
-
-
-
-
-
-
-
-
-
-@** Hacks and other trivia.
-
-@<Fun...@>=
-int high_bit (digit);
-
-@ @<Const...@>=
-
-@ @d rune_valid_p(O)   true
-@ @d rune_codepoint(O) 42
-@ @d UNICODE_MAX       0x10ffffl
-
-@ @c
 int
-high_bit (digit o)
-{
-        int i = CELL_BITS;
-
-        while (--i)@+
-                if (o & (1ull << i))
-                        return i + 1;
-        return o;
+main (int    argc,
+      char **argv)
+{@+
+        return llt_main(argc, argv, false);@+
 }
 
-@ @<Portability hacks@>=
-#ifdef __GNUC__ /* \AM\ clang */
-#       define unused __attribute__ ((__unused__))
-#else
-#       define unused /* noisy compiler */
-#endif
-@#
-#ifdef __GNUC__ /* \AM clang */
-#       define Lnoreturn __attribute__ ((__noreturn__))
-#else
-#       ifdef _Noreturn
-#               define Lnoreturn _Noreturn
-#       else
-#               define Lnoreturn /* noisy compiler */
-#       endif
-#endif
-@#
-#if EOF == -1
-#       define FAIL -2
-#else
-#       define FAIL -1
-#endif
+typedef struct {
+        LLT_FIXTURE_HEADER@;
+        word new_length; /* How long a hashtable to create. */
+        word pre_length; /* The pre-test size actually created. */
+        cell test_table; /* Prepared hashtable to run a test against. */
+        cell test_datum; /* Combined key/value to test with. */
+        bool test_replace; /* Replace flag to |hashtable_save_m|. */
+        cell seed[LLT_HASHTABLE_SEED]; /* To insert prior to testing. */
+} llt_fixture;
 
-#define ckd_add(r,x,y) @[__builtin_add_overflow((x), (y), (r))@]
-#define ckd_sub(r,x,y) @[__builtin_sub_overflow((x), (y), (r))@]
-#define ckd_mul(r,x,y) @[__builtin_mul_overflow((x), (y), (r))@]
+int Test_Fixture_Size = sizeof (llt_fixture);
 
-@** Index.
+error_code llt_Hashtable__New (llt_header *, int *, bool, llt_header **);
+error_code llt_Hashtable__Save (llt_header *, int *, bool, llt_header **);
+
+llt_initialise Test_Suite[] = {
+        llt_Hashtable__New,
+        llt_Hashtable__Save,
+        NULL
+};
+
+@ To test hashtable creation a new hashtable of various sizes is
+created and probed.
+
+TODO: Remove boilerplate from \.{*\_\_New} functions.
+
+@(t/hashtable.c@>=
+int
+llt_Hashtable__New_run (llt_header *th)
+{
+        llt_fixture *tc = (llt_fixture *) th;
+        tc->reason = new_hashtable(tc->new_length, &tc->res);
+        return LLT_RUN_CONTINUE;
+}
+
+int
+llt_Hashtable__New_validate (llt_header *th)
+{
+        llt_fixture *tc = (llt_fixture *) th;
+        char *title;
+        error_code reason;
+
+        tap_ok(th, "success", !failure_p(tc->reason), NIL);
+        tap_and(th, "hashtable?", hashtable_p(tc->res), NIL);
+        if (tc->new_length == 0)@/
+                tap_and(th, "length is 0", hashtable_length_c(tc->res) == 0, NIL);
+        else@/
+                tap_and(th, "length is a power of 2", hashtable_length_c(tc->res)
+                        == (1 << high_bit(hashtable_length_c(tc->res))), NIL);
+        orassert(llt_sprintf(th, &title, "available slots >= %d",
+                tc->new_length));
+        tap_and(th, title, hashtable_free_c(tc->res)
+                >= tc->new_length, NIL);
+        return LLT_RUN_CONTINUE;
+}
+
+@.TODO@>
+error_code
+llt_Hashtable__New (llt_header  *suite,
+                    int         *count,
+                    bool         full @[unused@],
+                    llt_header **ret)
+{
+        llt_fixture *tc;
+        llt_header *th;
+        error_code reason;
+        int i;
+
+        orreturn(llt_fixture_grow(suite, *count, HASHTABLE_TINY * 2 + 1));
+        tc = (llt_fixture *) suite;
+        for (i = 0; i < HASHTABLE_TINY * 2 + 1; i++) {
+                tc = ((llt_fixture *) suite) + *count + i;
+                th = (llt_header *) tc;
+                llt_fixture__init_common(th, *count + i,
+                        NULL,
+                        llt_Hashtable__New_run,
+                        llt_Hashtable__New_validate,
+                        NULL);
+                orreturn(llt_sprintf(th, &tc->name,
+                        "new hashtable, length %d", i));
+                tc->taps = 4;
+                tc->new_length = i;
+        }
+        (*count) += HASHTABLE_TINY * 2 + 1;
+        *ret = suite;
+        return LERR_NONE;
+}
+
+@ @(t/hashtable.c@>=
+error_code
+llt_Hashtable__datumfn (half  idx,
+                        cell  seed,
+                        cell *ret)
+{
+        cell label;
+        error_code reason;
+        orreturn(int_to_symbol(fix(idx), &label));
+        return cons(label, seed, ret);
+}
+
+@ Prepare tests which save into a hashtable by creating a hashtable
+and preseeding it.
+
+@(t/hashtable.c@>=
+int
+llt_Hashtable__Save_prepare (llt_header *th)
+{
+        llt_fixture *tc = (llt_fixture *) th;
+        cell tmp;
+        int i, j;
+
+        orfail(new_hashtable(tc->new_length, &tc->test_table));
+        tc->pre_length = hashtable_length_c(tc->test_table);
+        for (i = 0; i < LLT_HASHTABLE_SEED; i++) {
+                if (defined_p(tc->seed[i])) {
+                        j = i * LLT_HASHTABLE_FACTOR;
+                        orfail(llt_Hashtable__datumfn(j, tc->seed[i], &tmp));
+                        orfail(hashtable_save_m(tc->test_table, tmp, false));
+                }
+        }
+        return LLT_RUN_CONTINUE;
+}
+
+@ @(t/hashtable.c@>=
+int
+llt_Hashtable__Save_run (llt_header *th)
+{
+        llt_fixture *tc = (llt_fixture *) th;
+        tc->reason = hashtable_save_m(tc->test_table, tc->test_datum,
+                tc->test_replace);
+        return LLT_RUN_CONTINUE;
+}
+
+@ When this routine was first written the key was passed to the
+hashtable routines rather than being discovered within them which
+allowed a simple scanning mechanism; the variable |hack| allows the
+hashtable to be scanned in a similar manner.
+
+@(t/hashtable.c@>=
+int
+llt_Hashtable__Save_validate_success (llt_header *th)
+{
+        llt_fixture *tc = (llt_fixture *) th;
+        bool scanned;
+        cell hack, found;
+        int i, j;
+
+        tap_ok(th, "success", !failure_p(tc->reason), fix(tc->reason));
+        orfail(hashtable_search(tc->test_table, A(tc->test_datum)->sin, &found));
+        tap_ok(th, "key is found", defined_p(found), found);
+        tap_and(th, "saved datum is returned", found == tc->test_datum, found);
+@#
+        scanned = true;
+        for (i = 0; scanned && i < LLT_HASHTABLE_SEED; i++) {
+                if (defined_p(tc->seed[i])) {
+                        j = i * LLT_HASHTABLE_FACTOR;
+                        if (failure_p(llt_Hashtable__datumfn(j, NIL, &hack)))
+                                return LLT_RUN_ABORT;
+                        if (failure_p(hashtable_search(tc->test_table,
+                                    A(hack)->sin, &found)))
+                                scanned = false;
+                        else if (!tc->test_replace)
+                                scanned = pair_p(found)
+                                        && A(found)->dex == tc->seed[i];
+                }
+        }
+        tap_ok(th, "other entries remain unchanged", scanned, NIL);
+        return LLT_RUN_CONTINUE;
+}
+
+@ @(t/hashtable.c@>=
+int
+llt_Hashtable__Save_validate_failure (llt_header *th)
+{
+        llt_fixture *tc = (llt_fixture *) th;
+        cell found;
+
+        tap_ok(th, "fails", tc->reason == tc->expect, NIL);
+        orfail(hashtable_search(tc->test_table, A(tc->test_datum)->sin,
+                &found));
+        tap_ok(th, "nothing is saved", found != tc->test_datum, found);
+        return LLT_RUN_CONTINUE;
+}
+
+@ @(t/hashtable.c@>=
+error_code
+llt_Hashtable__Save (llt_header  *suite,
+                     int         *count,
+                     bool         full @[unused@],
+                     llt_header **ret)
+{
+        llt_fixture *tc;
+        llt_header *th;
+        error_code reason;
+        int i, j;
+
+        orreturn(llt_fixture_grow(suite, *count, 8));
+        tc = (llt_fixture *) suite;
+        for (i = 0; i < 8; i++) {
+                tc = ((llt_fixture *) suite) + *count + i;
+                th = (llt_header *) tc;
+
+                llt_fixture__init_common(th, *count + i,
+                        llt_Hashtable__Save_prepare,
+                        llt_Hashtable__Save_run,
+                        llt_Hashtable__Save_validate_success,
+                        NULL);
+                tc->taps = 4;
+                tc->new_length = HASHTABLE_TINY - 1;
+                tc->test_replace = false;
+                for (j = 0; j < LLT_HASHTABLE_SEED; j++)
+                        tc->seed[j] = UNDEFINED;
+                orfail(llt_Hashtable__datumfn(2 * LLT_HASHTABLE_FACTOR,
+                        fix(-1), &tc->test_datum));
+        }
+
+        tc = ((llt_fixture *) suite) + *count;
+        tc[0].name = "save into hashtable, length 0";
+        tc[0].new_length = 0;
+        tc[1].name = "save into hashtable, empty";
+        tc[2].name = "save into hashtable, seeded";
+        for (i = 1; i < LLT_HASHTABLE_SEED; i += 2)
+                tc[2].seed[i] = fix(i * 2);
+        tc[3].name = "save into hashtable, replacing";
+        for (i = 0; i < LLT_HASHTABLE_SEED; i += 2)
+                tc[3].seed[i] = fix(i * 2);
+        tc[3].test_replace = true;
+
+        tc[4].name = "insert in full hashtable";
+        tc[5].name = "replace in full hashtable";
+        assert(LLT_HASHTABLE_SEED > HASHTABLE_TINY);
+        tc[4].seed[0] = tc[5].seed[0] = fix(0);
+        tc[4].seed[1] = tc[5].seed[1] = fix(2);
+        for (i = 3; i < HASHTABLE_TINY - 1; i++)
+                tc[4].seed[i] = tc[5].seed[i] = fix(i * 2);
+        tc[4].seed[i] = fix(i * 2);
+        tc[5].seed[2] = fix(4);
+        tc[5].test_replace = true;
+
+        tc[6].name = "insert in hashtable, conflicting";
+        tc[6].seed[2] = fix(4);
+        tc[6].validate = (llt_forward) llt_Hashtable__Save_validate_failure,
+        tc[6].expect = LERR_EXISTS;
+        tc[7].name = "replace in hashtable, missing";
+        tc[7].validate = (llt_forward) llt_Hashtable__Save_validate_failure,
+        tc[7].expect = LERR_MISSING;
+        tc[7].test_replace = true;
+        tc[6].taps = tc[7].taps = 2;
+
+        (*count) += 8;
+        *ret = suite;
+        return LERR_NONE;
+}
+
+@* Evaluator tests.
+
+@(t/evaluator.c@>=
+@<Test common preamble@>@;
+
+int
+main (int    argc,
+      char **argv)
+{@+
+        return llt_main(argc, argv, true);@+
+}
+
+typedef struct {
+        LLT_FIXTURE_HEADER@;
+
+        cell expression;
+        cell want;
+        cell save_environment;
+        half interpret_limit;
+} llt_fixture;
+
+int Test_Fixture_Size = sizeof (llt_fixture);
+
+error_code llt_Evaluator__Immediate (llt_header *, int *, bool, llt_header **);
+error_code llt_Evaluator__Simple (llt_header *, int *, bool, llt_header **);
+@#
+int llt_Evaluator__prepare (llt_header *);
+int llt_Evaluator__run (llt_header *);
+int llt_Evaluator__validate (llt_header *);
+
+llt_initialise Test_Suite[] = {
+        llt_Evaluator__Immediate,
+        llt_Evaluator__Simple,
+        NULL
+};
+
+@ @(t/evaluator.c@>=
+int
+llt_Evaluator__prepare (llt_header *th)
+{
+        llt_fixture *tc = (llt_fixture *) th;
+        address fin;
+        cell extended, label, tmp;
+        error_code reason;
+
+        ortrap(new_symbol_const(LLT_LOOKUP_MISSING, &label));
+        reason = env_search(Environment, label, &tmp);
+        if (failure_p(reason) && reason != LERR_MISSING) {
+                printf("# " LLT_LOOKUP_MISSING " is bound.\n");
+                goto Trap;
+        }
+        tc->save_environment = Environment;
+        ortrap(new_env(Environment, &extended));
+        ortrap(new_symbol_const(LLT_LOOKUP_PRESENT, &label));
+        ortrap(new_symbol_const(LLT_LOOKUP_CORRECT, &tmp));
+        ortrap(env_save_m(extended, label, tmp, false));
+@#
+        Interpret_Count = 0;
+        Interpret_Limit = tc->interpret_limit;
+        ortrap(new_symbol_const(PROGRAM_EVALUATE, &label));
+        ortrap(vm_locate_entry(label, &Ip));
+        ortrap(new_symbol_const(PROGRAM_EXIT, &label));
+        ortrap(vm_locate_entry(label, &fin));
+        ortrap(new_int_c(fin, &label));
+        ortrap(stack_array_push(&Control_Link, label));
+@#
+        Environment = extended;
+        Expression = tc->expression;
+        return LLT_RUN_CONTINUE;
+Trap:
+        return LLT_RUN_FAIL;
+}
+
+@ @(t/evaluator.c@>=
+int
+llt_Evaluator__run (llt_header *th)
+{
+        llt_fixture *tc = (llt_fixture *) th;
+        tc->reason = interpret();
+        return LLT_RUN_CONTINUE;
+}
+
+@ @(t/evaluator.c@>=
+int
+llt_Evaluator__validate (llt_header *th)
+{
+        llt_fixture *tc = (llt_fixture *) th;
+
+        tap_ok(th, "success", !failure_p(tc->reason), fix(tc->reason));
+        tap_ok(th, "correct result", Accumulator == tc->want, Accumulator);
+        return LLT_RUN_CONTINUE;
+}
+
+@ @(t/evaluator.c@>=
+int
+llt_Evaluator__failure (llt_header *th)
+{
+        llt_fixture *tc = (llt_fixture *) th;
+
+        tap_ok(th, "fails", tc->reason == tc->expect, fix(tc->reason));
+
+        return LLT_RUN_CONTINUE;
+}
+
+@ @(t/evaluator.c@>=
+int
+llt_Evaluator__clean (llt_header *th @[unused@])
+{
+        Environment = ((llt_fixture *) th)->save_environment;
+        return LLT_RUN_CONTINUE;
+}
+
+@ @(t/evaluator.c@>=
+error_code
+llt_Evaluator__Immediate (llt_header  *suite,
+                          int         *count,
+                          bool         full,
+                          llt_header **ret)
+{
+        llt_fixture *tc;
+        llt_header *th;
+        error_code reason;
+        int i;
+
+        orreturn(llt_fixture_grow(suite, *count, 4));
+        tc = (llt_fixture *) suite;
+        for (i = 0; i < 4; i++) {
+                tc = ((llt_fixture *) suite) + *count + i;
+                th = (llt_header *) tc;
+                llt_fixture__init_common(th, *count + i,
+                        llt_Evaluator__prepare,
+                        llt_Evaluator__run,
+                        llt_Evaluator__validate,
+                        llt_Evaluator__clean);
+                tc->taps = 2;
+                tc->expression = tc->want = NIL;
+                tc->interpret_limit = 42;
+        }
+        tc = ((llt_fixture *) suite) + *count;
+
+        tc[0].name = "evaluate nil";
+        tc[0].want = tc[0].expression = NIL;
+
+        tc[1].name = "evaluate constant";
+        tc[1].want = tc[1].expression = fix(42);
+
+        tc[2].name = "evaluate symbol, present";
+        if (full) {
+                orreturn(new_symbol_const(LLT_LOOKUP_CORRECT, &tc[2].want));
+                orreturn(new_symbol_const(LLT_LOOKUP_PRESENT,
+                        &tc[2].expression));
+        }
+
+        tc[3].name = "evaluate symbol, missing";
+        tc[3].want = UNDEFINED;
+        if (full)
+                orreturn(new_symbol_const(LLT_LOOKUP_MISSING,
+                        &tc[3].expression));
+        tc[3].expect = LERR_MISSING;
+        tc[3].validate = (llt_forward) llt_Evaluator__failure;
+        tc[3].taps = 1;
+
+        (*count) += 4;
+        *ret = suite;
+        return LERR_NONE;
+}
+
+@ @(t/evaluator.c@>=
+error_code
+llt_Evaluator__Simple (llt_header  *suite,
+                       int         *count,
+                       bool         full,
+                       llt_header **ret)
+{
+        llt_fixture *tc;
+        llt_header *th;
+        error_code reason;
+        int i;
+
+        orreturn(llt_fixture_grow(suite, *count, 1));
+        tc = (llt_fixture *) suite;
+        for (i = 0; i < 1; i++) {
+                tc = ((llt_fixture *) suite) + *count + i;
+                th = (llt_header *) tc;
+                llt_fixture__init_common(th, *count + i,
+                        llt_Evaluator__prepare,
+                        llt_Evaluator__run,
+                        llt_Evaluator__validate,
+                        llt_Evaluator__clean);
+                tc->taps = 2;
+                tc->expression = tc->want = NIL;
+                tc->interpret_limit = 128;
+        }
+        tc = ((llt_fixture *) suite) + *count;
+
+        tc[0].name = "evaluate (root-environment)";
+        tc[0].want = Environment;
+        if (full) {
+                orreturn(new_symbol_const("root-environment", &tc[0].expression));
+                orreturn(cons(tc[0].expression, NIL, &tc[0].expression));
+        }
+
+        (*count) += 1;
+        *ret = suite;
+        return LERR_NONE;
+}
+
+@* Reader tests.
+
+@(t/reader.c@>=
+#include <string.h>
+@<Test common preamble@>@;
+
+int
+main (int    argc,
+      char **argv)
+{@+
+        return llt_main(argc, argv, true);@+
+}
+
+typedef struct {
+        LLT_FIXTURE_HEADER@;
+
+        half interpret_limit;
+        cell source;
+        cell start_offset;
+        cell want;
+} llt_fixture;
+
+int Test_Fixture_Size = sizeof (llt_fixture);
+
+error_code llt_Reader__Simple (llt_header *, int *, bool, llt_header **);
+@#
+int llt_Reader__prepare (llt_header *);
+int llt_Reader__run (llt_header *);
+int llt_Reader__validate (llt_header *);
+int llt_Reader__clean (llt_header *);
+@#
+bool llt_Reader__match_p (cell, cell);
+@#
+@<Object constructors for reader tests@>@;
+
+@ @(t/reader.c@>=
+char LLT_Glyph_Tab[] = { 0xe2, 0xad, 0xbe, 0x00 }; /* \.{\#u2b7e} */
+char LLT_Glyph_Newline[] = { 0xe2, 0x90, 0xa4, 0x00 }; /* \.{\#u2424} */
+@#
+struct {
+        char        *source;
+        error_code (*build)(cell *);
+} LLT_Reader_Rules[] = {
+        { "42",                 llt_Reader__construct_integer_42 },
+        { "()",                 llt_Reader__construct_NIL },
+        { "( )",                llt_Reader__construct_NIL },
+        { "(\t)",               llt_Reader__construct_NIL },
+        { "(\n\t)",             llt_Reader__construct_NIL },
+        { "#f",                 llt_Reader__construct_FALSE },
+        { "#t",                 llt_Reader__construct_TRUE },
+        { "(())",               llt_Reader__construct_pair_NIL_NIL },
+        { "( ())",              llt_Reader__construct_pair_NIL_NIL },
+        { "(() . ())",          llt_Reader__construct_pair_NIL_NIL },
+        { NULL, NULL }
+};
+
+llt_initialise Test_Suite[] = {
+        llt_Reader__Simple,
+        NULL
+};
+
+@ @(t/reader.c@>=
+int
+llt_Reader__prepare (llt_header *th)
+{
+        llt_fixture *tc = (llt_fixture *) th;
+        address fin;
+        cell label;
+        error_code reason;
+
+        Interpret_Count = 0;
+        Interpret_Limit = tc->interpret_limit;
+        ortrap(new_symbol_const(PROGRAM_READ, &label));
+        ortrap(vm_locate_entry(label, &Ip));
+        ortrap(new_symbol_const(PROGRAM_EXIT, &label));
+        ortrap(vm_locate_entry(label, &fin));
+        ortrap(new_int_c(fin, &label));
+        ortrap(stack_array_push(&Control_Link, label));
+@#
+        General[0] = tc->source;
+        General[1] = tc->start_offset;
+        return LLT_RUN_CONTINUE;
+Trap:
+        return LLT_RUN_FAIL;
+}
+
+@ @(t/reader.c@>=
+int
+llt_Reader__run (llt_header *th)
+{
+        llt_fixture *tc = (llt_fixture *) th;
+        tc->reason = interpret();
+        return LLT_RUN_CONTINUE;
+}
+
+@ @(t/reader.c@>=
+int
+llt_Reader__validate (llt_header *th)
+{
+        llt_fixture *tc = (llt_fixture *) th;
+
+        tap_ok(th, "success", !failure_p(tc->reason), fix(tc->reason));
+        tap_ok(th, "correct result",
+                llt_Reader__match_p(Accumulator, tc->want), Accumulator);
+        return LLT_RUN_CONTINUE;
+}
+
+@ @(t/reader.c@>=
+int
+llt_Reader__clean (llt_header *th @[unused@])
+{
+        return LLT_RUN_CONTINUE;
+}
+
+@ @(t/reader.c@>=
+error_code
+llt_Reader__Simple (llt_header  *suite,
+                    int         *count,
+                    bool         full,
+                    llt_header **ret)
+{
+        llt_fixture *tc;
+        llt_header *th;
+        char *name;
+        error_code reason;
+        int i, length, rules;
+
+        for (rules = 0; LLT_Reader_Rules[rules].source; rules++)
+                ;
+        orreturn(llt_fixture_grow(suite, *count, rules));
+        tc = (llt_fixture *) suite;
+        for (i = 0; i < rules; i++) {
+                tc = ((llt_fixture *) suite) + *count + i;
+                th = (llt_header *) tc;
+                llt_fixture__init_common(th, *count + i,
+                        llt_Reader__prepare,
+                        llt_Reader__run,
+                        llt_Reader__validate,
+                        llt_Reader__clean);
+                tc->taps = 2;
+                tc->want = NIL;
+                tc->interpret_limit = 1024;
+                orreturn(llt_sprintf(th, &tc->name, "read `"));
+                name = LLT_Reader_Rules[i].source;
+                while (*name) { /* This is horrifically inefficient. */
+                        switch (*name) {
+                        case '\n':
+                                orreturn(llt_appendf(th, tc->name, &tc->name,
+                                        "%s", LLT_Glyph_Newline));
+                                break;
+                        case '\t':
+                                orreturn(llt_appendf(th, tc->name, &tc->name,
+                                        "%s", LLT_Glyph_Tab));
+                                break;
+                        default:
+                                orreturn(llt_appendf(th, tc->name, &tc->name,
+                                        "%c", *name));
+                                break;
+                        }
+                        name++;
+                }
+                orreturn(llt_appendf(th, tc->name, &tc->name, "'"));
+        }
+        if (full)
+                for (i = 0; i < rules; i++) {
+                        tc = ((llt_fixture *) suite) + *count + i;
+                        th = (llt_header *) tc;
+                        length = strlen(LLT_Reader_Rules[i].source);
+                        orreturn(new_segment(length, 0, &tc->source));
+                        memmove(segment_base(tc->source),
+                                LLT_Reader_Rules[i].source, length);
+                        tc->start_offset = fix(0);
+                        orreturn(LLT_Reader_Rules[i].build(&tc->want));
+                }
+        (*count) += rules;
+        *ret = suite;
+        return LERR_NONE;
+}
+
+@ @(t/reader.c@>=
+bool
+llt_Reader__match_p (cell got,
+                     cell want)
+{
+        if (special_p(want))
+                return got == want;
+        if (special_p(got))
+                return false;
+        if (T(got) != T(want))
+                return false;
+        if (pair_p(want))
+                return llt_Reader__match_p(A(got)->sin, A(want)->sin)
+                        && llt_Reader__match_p(A(got)->dex, A(want)->dex);
+        assert(!"unsupported match type");
+}
+
+@ @<Object constructors for reader tests@>=
+error_code
+llt_Reader__construct_integer_42 (cell *ret)
+{
+        *ret = fix(42);
+        return LERR_NONE;
+}
+
+error_code
+llt_Reader__construct_NIL (cell *ret)
+{
+        *ret = NIL;
+        return LERR_NONE;
+}
+
+error_code
+llt_Reader__construct_FALSE (cell *ret)
+{
+        *ret = LFALSE;
+        return LERR_NONE;
+}
+
+error_code
+llt_Reader__construct_TRUE (cell *ret)
+{
+        *ret = LTRUE;
+        return LERR_NONE;
+}
+
+@ @<Object constructors for reader tests@>=
+error_code
+llt_Reader__construct_pair_NIL_NIL (cell *ret)
+{
+        return cons(NIL, NIL, ret);
+}
+
+@** Index. And some remaining bits \AM\ pieces.
+
+@d PROGRAM_EVALUATE "!Evaluate"
+@d PROGRAM_EXIT     "!Exit"
+@d PROGRAM_READ     "!Primitive/read-expression"
+@d LLT_LOOKUP_MISSING "absent-binding"
+@d LLT_LOOKUP_PRESENT "existing-binding"
+@d LLT_LOOKUP_CORRECT "polo!"
+@d LLT_LOOKUP_STALE   "marco"

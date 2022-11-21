@@ -1,15 +1,16 @@
-#       To evaluate an expression place it in the Expression register
-#       and jump to the !Begin or --- if the return address has
-#       already been pushed onto the stack --- !Evaluate.
+#       To evaluate an expression push the continuation address
+#       onto the Control-Link and then the unevaluated expression
+#       and jump to !Evaluate.
+#
+#       (In) Expression: The expression to evaluate
+#
+#       (Out) Accumulator: The evaluated result
 
-!Begin  PEND    clink,@!Exit    Prepare the stack to exit when empty.
 !Evaluate
-        LOAD    clink,expr      Save the expression being evaluated.
-        SLO     acc,'symbol?    Call (symbol?) on it, popping the stack.
-        TEST    acc,@!Lookup    Jump to !Lookup if the value is a symbol.
-        LOAD    clink,expr      Save the expression on the stack again.
-        SLO     acc,'pair?      Call (pair?) on it this time.
-        TEST    acc,@Combine-Start
+        SYMBOL? acc,expr
+        BRANCH  acc,@!Lookup    Jump to !Lookup if the value is a symbol.
+        PAIR?   acc,expr
+        BRANCH  acc,@Combine-Start
 
 #       When evaluation of an expression is finished, or if the
 #       expression is not being evaluated, control returns to !Finish
@@ -17,28 +18,45 @@
 #
 #       Alternatively the value of a binding is placed directly
 #       into the Accumulator and control flows into !Return.
+#
+#       This is the collection of final routines reached after
+#       !Evaluate. The result is in either Expression or Accumulator
+#       and the routine to branch to after ensuring the value is in
+#       Accumulator is on the stack.
 
 !Finish LOAD    acc,expr        Save the expression in the Accumulator.
-        JUMP    @!Return
+!Return JUMP    =clink          The most common continuation address.
 !Lookup LOOKUP  acc,expr        Look for symbols in Environment
-!Return JUMP    =clink
+        JUMP    =clink          No need to jump via !Return.
 !Exit   HALT
 
 #       In order to evaluate (combine) a list the first item in the
 #       list is evaluated to determine how to continue. The stack
 #       is prepared so that interpretation will continue from
 #       Combine-Dispatch when the first item is known.
+#
+#       The Environment is saved on the stack to be restored after
+#       evaluation has finished.
+#
+#       (In) Argument-List: A list of arguments to a combiner in the process
+#                  of being built and into which the result of
+#                  evaluating THIS combiner will be placed.
+#       (In) Expression: The combination expression (list) being evaluated.
+#       (In) Control-Link: ...
+#
+#       (Out) Expression: The combination's arguments.
+#       (Out) Control-Link: @Combine-Dispatch Uncombined-Arguments <Frame> ...
 
 Combine-Start
         LOAD    clink,args      Stack any arguments which are currently
-        -                       being evaluated in a previous stack frame.
+;                               being evaluated in a previous stack frame.
         LOAD    clink,env       Also stack the current run-time environment.
         CDR     clink,expr      Extract and stack the remainder of the
-        -                       (uncombined) list.
-        PEND    clink,@Combine-Dispatch Continue from Combine-Dispatch
-        -                       after evaluation.
+;                               (uncombined) list.
+        PEND    clink,@Combine-Dispatch   Continue from Combine-Dispatch
+;                               after evaluation.
         CAR     expr,expr       The expression which should evaluate to a
-        -                       combiner (including primitives & continuations).
+;                               combiner (including primitives & continuations).
         JUMP    @!Evaluate      Restart the evaluation process.
 
 #       Evaluation leaves its result in the Accumulator which should
@@ -50,21 +68,37 @@ Combine-Start
 #       is headed by the list's remaining (unevaluated) arguments
 #       followed by a frame header (the saved Environment followed
 #       by pending Arguments).
+#
+#       (In) Accumulator: Combiner (combination's first list item, evaluated).
+#       (In) Control-Link: Uncombined-Arguments <Frame>
+#
+#       (Out) Expression: Combiner.
 
 Combine-Dispatch
-        LOAD    expr,acc        Save the combiner in Expression.
-        SLO     acc,'primitive? Test if the combiner is a primitive operator.
-        TEST    acc,@Combine-Primitive
-        LOAD    clink,expr      Copy the combiner to test for an applicative.
-        SLO     acc,'applicative?
-        TEST    acc,@Combine-Applicative
-        LOAD    clink,expr      Copy the combiner to test for an operative.
-        SLO     acc,'operative?
-        TEST    acc,@Combine-Operative
-        LOAD    clink,expr      Copy the combiner to test for a continuation.
-        SLO     acc,'resumption?
-        TEST    acc,@Combine-Primitive
-        TRAP    'uncombinable   Give up trying to combine with this.
+        LOAD          expr,acc
+        PRIMITIVE?    tmp,expr
+        BRANCH        tmp,@Combine-Primitive
+        APPLICATIVE?  tmp,expr
+        BRANCH        tmp,@Combine-Applicative
+        OPERATIVE?    tmp,expr
+        BRANCH        tmp,@Combine-Operative
+        RESUMPTION?   tmp,expr
+        BRANCH        tmp,@Combine-Primitive
+        TRAP          'uncombinable
+
+#       After a combination has been fully evaluated the result is
+#       in Accumulator and the environment and partial arguments
+#       saved as a frame header are restored.
+#
+#       (In) Accumulator: Combined result.
+#       (In) Control-Link: <Frame> ...
+#
+#       (Out) Control-Link: ...
+
+Combine-Finish
+        LOAD    env,=clink
+        LOAD    args,=clink
+        JUMP    =clink
 
 #       An operative closure is the simplest environment to enter.
 #
@@ -78,39 +112,39 @@ Combine-Dispatch
 #       Expression and the stack is unchanged from the
 #       description for Combine-Dispatch (ie. it is topped by the
 #       combiner's unevaluated arguments and a frame header).
+#
+#       (In) Expression: Operative closure combiner.
+#       (In) Control-Link: Uncombined-Arguments <Frame>
+#
+#       (Out) Environment: Closure's environment, extended & populated.
+#       (Out) Expression: Closure's executable content.
+#       (Out) Control-Link: @Combine-Finish <Frame>
 
 Combine-Operative
         LOAD    r0,env          Save the current environment.
-        LOAD    r3,=clink       Remove the arguments from the stack.
-        OPEN    acc,expr        Open (activate) the closure; puts (formals
-        -                       . body) in the Accumulator.
-        EXTEND  env,env         Extend the closure's saved environment.
-        CDR     expr,acc        The program to eventually evaluate.
-        CAR     r1,acc          Save the full list of `informals'.
-        CAR     acc,r1          This informal's name (or null).
-        SLO     r2,'null?       Is the first informal (un)wanted?
-        TEST    r2,@1f
-        DEFINE! env,acc,r3      The first informal names a variable to
-        -                       bind to the caller's arguments in the closure.
-
-1h      CDR     r1,r1           The rest of the informals.
-        CAR     acc,r1          The second informal binding name.
-        CAR     clink,r1
-        SLO     r3,'null?       Use r3 for the result to obliterate the
-        -                       argument list stored there previously.
-        TEST    r3,@2f
-        DEFINE! env,acc,r0      The second informal names the binding
-        -                       variable for the caller's environment.
-
-2h      CDR     r1,r1           The last of the informals, a list of one.
-        CAR     acc,r1          The third informal binding name.
-        CAR     clink,r1
-        SLO     r2,'null?
-        TEST    r2,@3f
-        DELIMIT r2              Magic.
-        DEFINE! env,acc,r2      The last informal names a continuation delimiter.
-
-3h      CDR     expr,expr       The closure body.
+        LOAD    args,=clink     Remove the arguments from the stack.
+        OPEN    acc,expr
+        LOAD    r1,=acc         `Formals'.
+        LOAD    env,=acc
+        EXTEND  env,env
+        CAR     expr,acc        The closure body.
+        LOAD    acc,=r1         This informal's name (or nil).
+        CMPIS?  r2,acc,()       Is the first informal (un)wanted?
+        BRANCH  r2,@1f
+        DEFINE! env,acc,args    The first informal names a variable to
+;                               bind to the caller's arguments in the
+;                               closure.
+1h      LOAD    acc,=r1         The second informal binding name.
+        CMPIS?  r2,acc,()
+        BRANCH  r2,@2f
+        DEFINE! env,acc,r0      The second informal names the variable to
+;                               bind to the caller's environment.
+2h      LOAD    acc,=r1         The third informal binding name.
+        CMPIS?  r2,acc,()
+        BRANCH  r2,@3f
+        DELIMIT r0              Magic, also clobber r0.
+        DEFINE! env,acc,r0      The last informal names a continuation delimiter.
+3h      PEND    =clink,@Combine-Finish
         JUMP    @!Evaluate
 
 #       The goal here is to prepare the stack to build a list out
@@ -120,60 +154,118 @@ Combine-Operative
 #       This program is entered from Combine-Dispatch, which has
 #       the unevaluated arguments sitting on top of a frame header
 #       and the combiner in Expression.
+#
+#       (In) Expression: Applicative closure combiner.
+#       (In) Control-Link: Uncombined-Arguments <Frame>
+#
+#       (Out) Control-Link: @Applicative-Ready Closure <Frame>
 
 Combine-Applicative
-        LOAD    args,=clink     Remove the (unevaluated) arguments from
-        -                       the stack.
-        LOAD    clink,expr      Stack the combiner until the arguments
-        -                       are evaluated.
-        PEND    clink,@Combine-Ready
-        LOAD    expr,args       Save the full argument list in case of errors.
-        LOAD    r0,#f           Flag that nothing has been stacked yet.
-1h      LOAD    clink,args
-        SLO     acc,'null?      Is the (remaining) argument list finished?
-        TEST    acc,@8f
-        LOAD    clink,args
-        SLO     acc,'pair?      Something remains, is it still a proper list?
-        TEST    acc,@2f
-        CAR     clink,args      A list, register the next item for evaluation.
-        PEND    clink,@Combine-Evaluate
-        LOAD    r0,#t           There is now at least 1 argument on the stack.
-        CDR     args,args
-        JUMP    @1b             Continue with the next argument.
+        LOAD    args,=clink     Pop off the (unevaluated) arguments.
+        LOAD    clink,expr      Save the closure.
+        PEND    clink,@Applicative-Ready
+        JUMP    @Combine-Arguments
 
-2h      TEST    =r0,@4f         If nothing was stacked yet there is nothing to remove.
-        PEND    acc,@Combine-Ready
-        LOAD    r0,=clink       Remove Combine-Evaluate.
-3h      LOAD    r0,=clink       Remove the argument.
-4h      CMPIS?  r0,=clink,acc   Compare the next stack item with Combine-Ready.
-        TEST    =r0,@3b         Repeat if the marker was Combine-Evaluate.
-        LOAD    args,expr       Restore the unevaluated arguments.
-        LOAD    expr,=clink     Restore the (failed) combiner.
-        TRAP    'improper-list  Abort.
+#       If there are no arguments then evaluation proceeds directly
+#       to the target (eg. @Applicative-Ready) otherwise the stack
+#       dictates where to go to begin evaluation of the arguments.
+#
+#       (In) Argument-List: Combination's unevaluated arguments.
+#       (In) Control-Link: @Applicative-Ready Closure <Frame>
+#
+#       (Out) Control-Link: ... @Applicative-Ready Closure <Frame>
+#
+#       The Control-Link is additionally headed by zero or more
+#       combinations of: @Combine-Evaluate Expression
+#
+#       @Combine-Arguments is also reached from @Combine-Primitive
+#       in which case the primitive and @Primitive-Ready will be
+#       atop the stack instead and some links may be @Combine-Verbatim
+#       instead.
+#
+#       If there are no arguments control proceeds directly to
+#       @Applicative-Ready or @Primitive-Ready.
+#
+#       (Error) Control-Link: Reconstructed-Expression <Frame> ...
 
-8h      LOAD    args,()         Prepare the list of evaluated arguments.
-        JUMP    =clink          If there were no arguments jump straight to Combine-Ready.
+1h      LOAD    args,=clink     Restore the original argument list.
+        LOAD    tmp,=clink      Pop & discard the evaluation target.
+        CONS    clink,=clink,args Reconstruct combination.
+        TRAP    'incompatible-operand
+Combine-Arguments
+        LOAD    clink,args      Save unevaluated arguments.
+        LOAD    acc,()
+2h      CMPIS?  tmp,args,()
+        BRANCH  tmp,@3f
+        PAIR?   tmp,args        Something remains, is it still a proper list?
+        BRANCH  =tmp,@1b
+        PEND    tmp,@Combine-Evaluate
+        CONS    acc,tmp,acc
+        LOAD    tmp,=args       First/next unevaluated argument.
+        CONS    acc,tmp,acc     Build the reversed list.
+        JUMP    @2b
 
-#       Arguments has the tail of arguments which have already been evaluated.
-#       Combine-Evaluate has been popped
-#       The stack is topped by the argument followed by the next destination.
+#       After scanning the argument list prepare to jump straight
+#       to @Applicative-Ready if it turned out there were no arguments.
+#
+#       If there were arguments then they are in a list, reversed,
+#       in Accession. Copy them onto the stack and proceed to
+#       evaluate them.
 
-#       Prepare the stack so that the evaluated result will be used
-#       to build the combination's argument list then evaluate the
-#       next argument from Expression.
+3h      LOAD    tmp,=clink      Discard saved arguments.
+        CMPIS?  tmp,acc,()      Were there no arguments?
+        BRANCH  tmp,@2f
+        CONS    args,0,()       Prepare a new argument list.
+1h      CAR     tmp,acc
+        LOAD    clink,tmp       The unevaluated argument Expression.
+        CDR     acc,acc
+        CAR     tmp,acc         @Combine-Evaluate or @Combine-Verbatim.
+        LOAD    clink,tmp
+        CDR     acc,acc
+        CMPIS?  tmp,acc,()
+        BRANCH  tmp,@3f
+        JUMP    @1b
+2h      CONS    args,0,()
+3h      JUMP    =clink          @Applicative-Ready
+
+#       Prepare to evaluate the next argument in a combination.
+#
+#       (In) Control-Link: Expression ...
+#
+#       (Out) Control-Link: @Combine-Build ...
+#       (Out) Expression: Unevaluated expression.
 
 Combine-Evaluate
         LOAD    expr,=clink     Load the next argument to evaluate.
-        PEND    clink,@Combine-Build    Prepare to build the evaluated
-        -                       result into the argument list.
+        PEND    clink,@Combine-Build    Prepare to build the next result
+;                               into the argument list when it's ready.
         JUMP    @!Evaluate
 
-#       Value in Acc, args in Args.
+#       Build the argument list with one more result. In the case
+#       of an argument which is being copied as-is control can start
+#       at @Combine-Verbatim rather than @Combine-Evaluate to copy
+#       the argument and proceed directly without recursing through
+#       @!Evaluate and @!Return.
+#
+#       (In) Argument-List: A pair of the list size and the growing arguments.
+#       (In) Accumulator: Next result.
+#       (In) Control-Link: @Continuation ...
+#
+#       In case entering through @Combine-Verbatim the result is
+#       the unevaluated argument waiting on top of Control-Link
+#       which is first moved to the Accumulator.
+#
+#       (Out) Argument-List: Grown by one (evaluated) argument.
+#       (Out) Control-Link: ...
 
+Combine-Verbatim
+        LOAD    acc,=clink
 Combine-Build
-        CONS    args,acc,args   Prepend the value to the arguments.
-        JUMP    =clink          Or via !Return, continue with
-        -                       Combine-Evaluate or Combine-Ready.
+        LOAD    expr,=args      Strip off the argument count.
+        CONS    args,acc,args   Prepend the new argument.
+        ADD     expr,expr,1     Increment the argument count.
+        CONS    args,expr,args
+        JUMP    =clink
 
 #       The complete argument list is ready in Arguments. Now it
 #       can be validated against the closure's formals list (the
@@ -181,41 +273,1313 @@ Combine-Build
 #       in the Environment which has been extended in Operate-Applicative.
 #
 #       The formals list has already been validated as a list of symbols.
+#
+#       (In) Argument-List: (n . (reversed-arguments))
+#       (In) Control-Link: Closure <Frame>
+#
+#       If the closure is variadic control proceeds to
+#       @Applicative-Collecting otherwise n is removed from arguments
+#       into @Applicative-Bind.
 
-Combine-Ready
-        LOAD    expr,=clink     Restore the closure.
-        LOAD    r0,env          Save the state registers.
-        LOAD    r1,expr          " "
-        LOAD    r2,args          " "
-        OPEN    acc,expr        Activate the closure.
-        EXTEND  env,env         Extend the closure's saved environment,
-        -                       discarding the current one (it was
-        -                       previously saved on the stack in the
-        -                       frame header).
-        CDR     clink,acc       Extract the closure's program for
-        -                       evaluation, to the stack so that
-        -                       Expression is usable.
-        CAR     expr,acc        Load the formals list.
-1h      CMPIS?  acc,expr,()     Is the formals list finished?
-        TEST    acc,@4f
-        LOAD    clink,expr
-        SLO     acc,'symbol?    Do we capture all of the remaining arguments?
-        TEST    acc,@3f
-        CMPIS?  acc,args,()     Is the arguments list finished?
-        TEST    acc,@2f         Abort if the arguments finish prematurely.
-        DEFINE! env,=expr,=args
+1h      TRAP    'incompatible-operand
+Applicative-Ready
+        SIGNATURE expr,clink  (min . max)
+        CAR     expr,expr     Minimum arguments required.
+        CAR     tmp,args      How many arguments there are
+        CMPLT?  tmp,tmp,expr
+        BRANCH  tmp,@1b
+        SIGNATURE expr,clink
+        CDR     expr,expr     Maximum arguments permitted (or -1 in
+;                             lieu of infinity).
+        CMPEQ?  tmp,expr,-1   Collect all remaining arguments?
+        BRANCH  tmp,@Applicative-Collecting
+        CAR     tmp,=args
+        CMPGT?  tmp,tmp,expr
+        BRANCH  tmp,@1b
+
+#       The closure is reached with the right number of arguments
+#       and does not collect any remainder. The closure was created
+#       with the bindings in reverse to match the reversed order
+#       in Arguments after evaluation.
+#
+#       (In) Argument-List: (reversed-arguments)
+#       (In) Control-Link: Closure <Frame>
+#
+#       (Out) Environment: Closure's environment, extended & populated.
+#       (Out) Expression: Closure's code.
+#       (Out) Control-Link: @Combine-Finish <Frame>
+#
+#       If there are no arguments control proceeds to @!Evaluate
+#       directly.
+
+Applicative-Bind
+        CMPIS?  tmp,args,()     Skip binding if there are no arguments.
+        BRANCH  =tmp,@1f
+        OPEN    expr,=clink
+        LOAD    tmp,=expr       Discard formals (nil).
+        EXTEND  env,=expr       Load and extend the closure environments.
+        CAR     expr,expr       Load closure body.
+        PEND    clink,@Combine-Finish
+        JUMP    @!Evaluate
+1h      OPEN    expr,=clink     Remove the closure from the stack and
+;                               open it in Accumulator: a three-item
+;                               list of the closure's reversed formals,
+;                               environment and code.
+        LOAD    acc,=expr       Formals (in reverse).
+        EXTEND  env,=expr       Load and extend the closure environments.
+        LOAD    clink,=expr     Save closure body.
+1h      PAIR?   expr,args       Loop over the arguments & formals.
+        BRANCH  =expr,@2f
+        DEFINE! env,=acc,=args
         JUMP    @1b
-
-#       Restore to the state prior to validating and binding the
-#       arguments and abort.
-2h      LOAD    env,r0
-        LOAD    expr,r1
-        LOAD    args,r2
-        TRAP    'incompatible-operand
-
-3h      DEFINE! env,expr,args
-4h      LOAD    expr,=clink
+2h      LOAD    expr,=clink     Restore closure body.
+        PEND    clink,@Combine-Finish
         JUMP    @!Evaluate
 
+#       The extra arguments to a variadic closure are built into a
+#       list, which will now be in the correct order, then prepended
+#       to Arguments so that @Applicative-Bind can bind them in the
+#       extended closure environment.
+#
+#       (In) Argument-List: (n . (reversed-arguments))
+#       (In) Control-Link: Closure <Frame>
+#
+#       (Out) Argument-List: (reversed-arguments)
+#
+#       Extra arguments to a variadic function are removed from the
+#       Argument-List to form a new list (in the correct order)
+#       which is then prepended back onto Argument-List.
+#
+#       TODO: Invert this loop; zero isn't so special.
+
+Applicative-Collecting
+        SIGNATURE expr,clink
+        CAR     expr,expr       Min
+        CAR     acc,args        Got
+        CMPEQ?  tmp,expr,args
+        BRANCH  =tmp,@1f
+        CDR     args,args
+        CONS    args,(),args
+        JUMP    @Applicative-Bind
+
+1h      CAR     acc,args        Got
+        CDR     args,args       Args
+        SUB     expr,acc,expr   How many extra arguments there are.
+        LOAD    acc,()          Captured arguments.
+1h      CAR     tmp,=args
+        CONS    acc,tmp,acc
+        SUB     expr,expr,1
+        CMPEQ?  tmp,clink,0
+        BRANCH  =tmp,@1b
+
+        CONS    args,acc,args
+        JUMP    @Applicative-Bind
+
+#       Check the primitive's signature to see whether the primitive
+#       is pure applicative --- (min . max) --- or complex. A pure
+#       applicative primitive's arguments are processed in the same
+#       way as an applicative closure in @Combine-Arguments except
+#       that control will eventually proceed to @Primitive-Ready.
+#
+#       (In) Expression: Primitive object.
+#       (In) Control-Link: Uncombined-Arguments <Frame>
+#
+#       (Out) Arguments: Uncombined-Arguments
+#       (Out) Expression: Primitive object.
+#       (Out) Control-Link: @Primitive-Ready Primitive <Frame>
+
 Combine-Primitive
+        LOAD    args,=clink
+        LOAD    clink,expr      Save primitive.
+        PEND    clink,@Primitive-Ready
+        SIGNATURE acc,expr      A pair of two integers (min . max)
+;                               indicates an applicative primitive.
+        CDR     tmp,acc
+        INTEGER? tmp,tmp        Or the CDR can be nil or a symbol if
+;                               the primitive may capture its arguments
+;                               without evaluation.
+        BRANCH  tmp,@Combine-Arguments
+        JUMP    @Combine-Complex-Primitive
+
+#       A complex primitive's signature is a list of one or more
+#       symbols each one directing how to interpret the corresponding
+#       argument.
+#
+#       - evaluate: An argument is required and will be evaluated
+#                   before passing it to the primitive.
+#       - verbatim: An argument is required and is passed to the
+#                   primitive as-is.
+#       - optional: An argument may or may not be present and is
+#                   not evaluated. No more arguments may be present.
+#       - capture:  Stop scanning the arguments and pass any that
+#                   remain as-is in a (possibly empty) list.
+#
+#       If optional or capture is used it must be the last item in
+#       the signature, and the signature must consist of at least
+#       one symbol.
+#
+#       (In) Arguments: Uncombined-Arguments
+#       (In) Expression: Primitive
+#       (In) Control-Link: @Primitive-Ready Primitive <Frame>
+#
+#       After processing the argument list all registers are unused except:
+#
+#       (Out) Control-Link: ... @Primitive-Ready Primitive <Frame>
+#
+#       As with @Combine-Arguments the Control-Link is preceeded
+#       by pairs of a link followed by an expression; in this case
+#       the link may be @Combine-Evaluate or @Combine-Verbatim.
+#
+#       Processing the argument list uses these registers:
+#
+#       (-) Accumulator: Reverse work list.
+#       (-) Arguments: Remaining unevaluated arguments
+#       (-) Expression: Next interpreter symbol.
+#       (-) Control-Link: (Signature) Unevaluated-Arguments
+#                         @Primitive-Ready Primitive <Frame>
+
+Combine-Complex/Failure
+        LOAD    tmp,=clink      Discard signature.
+        LOAD    args,=clink     Restore unevaluated arguments.
+        LOAD    acc,=clink      Discard target.
+        CONS    clink,=clink,args Reconstruct combination.
+        TRAP    'incompatible-operand
+
+Combine-Complex-Primitive
+        LOAD    clink,args      Unevaluated arguments.
+        CDR     clink,acc       Remaining signature.
+        CAR     expr,acc        First signature item.
+        LOAD    acc,()
+        JUMP    @Combine-Complex/Item
+
+Combine-Complex/Next
+        CMPIS?  tmp,clink,()    Finished interpreting?
+        BRANCH  tmp,@Combine-Complex/Processed
+        CAR     expr,clink
+        CDR     clink,=clink
+
+Combine-Complex/Item
+        LOAD    tmp,'evaluate
+        CMPIS?  tmp,tmp,expr
+        BRANCH  tmp,@Combine-Complex/Evaluate
+        LOAD    tmp,'verbatim
+        CMPIS?  tmp,tmp,expr
+        BRANCH  tmp,@Combine-Complex/Verbatim
+        LOAD    tmp,'capture     Or it's 'optional.
+        CMPIS?  tmp,tmp,expr
+        BRANCH  tmp,@Combine-Complex/Capture
+
+Combine-Complex/Optional
+        CMPIS?  tmp,args,()      No more arguments at all?
+        BRANCH  tmp,@Combine-Complex/Capture
+        PAIR?   tmp,args
+        BRANCH  =tmp,@Combine-Complex/Failure
+        CDR     tmp,args
+        CMPIS?  tmp,tmp,()
+        BRANCH  =tmp,@Combine-Complex/Failure
+
+Combine-Complex/Capture
+        PEND    expr,@Combine-Verbatim
+        CONS    acc,expr,acc
+        CONS    acc,args,acc    If coming from @Combine-Complex/Optional
+;                               Arguments will be nil or a list of one.
+        LOAD    args,()
+        JUMP    @Combine-Complex/Processed
+
+Combine-Complex/Evaluate
+        PAIR?   tmp,args        Are there more arguments?
+        BRANCH  =tmp,@Combine-Complex/Failure
+        PEND    tmp,@Combine-Evaluate
+        CONS    acc,tmp,acc
+        LOAD    tmp,=args
+        CONS    acc,tmp,acc
+        JUMP    @Combine-Complex/Next
+Combine-Complex/Verbatim
+        PAIR?   tmp,args        Are there more arguments?
+        BRANCH  =tmp,@Combine-Complex/Failure
+        PEND    tmp,@Combine-Verbatim
+        CONS    acc,tmp,acc
+        LOAD    tmp,=args
+        CONS    acc,tmp,acc
+        JUMP    @Combine-Complex/Next
+
+#       Epilogue. Move the prepared work from Expression to the
+#       stack and jump to the first.
+
+#       (In) Accumulator: Reverse work list
+#       (In) Arguments: Should be nil.
+#       (In) Control-Link: () Unevaluated-Arguments @Primitive-Ready
+#                          Primitive <Frame>
+
+Combine-Complex/Processed
+        CMPIS?  tmp,args,()     Processed all arguments?
+        BRANCH  =tmp,@Combine-Complex/Failure
+        LOAD    tmp,=clink      Discard (empty) signature.
+        LOAD    expr,=clink     Discard unevaluated arguments.
+        LOAD    expr,acc
+1h      LOAD    clink,=expr     Copy expression.
+        LOAD    clink,=expr     Copy link.
+        CMPIS?  acc,expr,()
+        BRANCH  =acc,@1b
+        CONS    args,0,()
+        JUMP    =clink
+
+#       Unlike a closure a primitive does not have its variadic
+#       arguments collected into a list nor are any of the arguments
+#       bound in an environment.
+#
+#       If the primitive is complex then the arguments are not
+#       placed in registers but are left in Argument-List along
+#       with the list size.
+#
+#       (In) Argument-List: (n . (reversed-arguments))
+#       (In) Control-Link: Primitive <Frame>
+#
+#       (Out) Accumulator: Primitive.
+#       (Out) Control-Link: @Combine-Finish <Frame>
+#
+#       When performing a pure applicative primitive the registers
+#       clobbered to fit the primitive's arguments are saved onto
+#       the Control-Link ahead of @Combine-Finish with the appropriate
+#       @!Restore/r... link to put them back.
+
+1h      TRAP    'incompatible-operand
+Primitive-Ready
+        LOAD    expr,=clink     Restore the primitive object.
+        PEND    clink,@Combine-Finish
+        SIGNATURE acc,expr
+        CDR     tmp,acc
+        INTEGER? tmp,tmp
+        BRANCH  =tmp,@Primitive-Ready/Complex
+        CDR     tmp,acc         Maximum arguments allowed.
+        LOAD    acc,=args       How many arguments there are.
+        CMPGT?  tmp,acc,tmp     Too many?
+        BRANCH  tmp,@1b
+        SIGNATURE tmp,expr
+        CAR     tmp,tmp         Minimum arguments required.
+        CMPLT?  tmp,acc,tmp     Not enough?
+        BRANCH  tmp,@1b
+
+        CMPEQ?  tmp,acc,0
+        BRANCH  tmp,@Primitive-Ready/Go
+        CMPEQ?  tmp,acc,1
+        BRANCH  =tmp,@1f
+        LOAD    clink,r0
+        PEND    clink,@!Restore/r0
+        LOAD    r0,=args
+        JUMP    @Primitive-Ready/Go
+1h      CMPEQ?  tmp,acc,2
+        BRANCH  =tmp,@1f
+        LOAD    clink,r0
+        LOAD    clink,r1
+        PEND    clink,@!Restore/r1
+        LOAD    r1,=args
+        LOAD    r0,=args
+        JUMP    @Primitive-Ready/Go
+1h      CMPEQ?  tmp,acc,3
+        BRANCH  =tmp,@1f
+        LOAD    clink,r0
+        LOAD    clink,r1
+        LOAD    clink,r2
+        PEND    clink,@!Restore/r2
+        LOAD    r2,=args
+        LOAD    r1,=args
+        LOAD    r0,=args
+        JUMP    @Primitive-Ready/Go
+##      No primitive (yet?) accepts more than four arguments.
+##      CMPEQ?  tmp,acc,4
+##      BRANCH  =tmp,@1f
+1h      LOAD    clink,r0
+        LOAD    clink,r1
+        LOAD    clink,r2
+        LOAD    clink,r3
+        PEND    clink,@!Restore/r3
+        LOAD    r3,=args
+        LOAD    r2,=args
+        LOAD    r1,=args
+        LOAD    r0,=args
+Primitive-Ready/Go
+        LOAD    args,acc        Note how many arguments there were.
+Primitive-Ready/Complex
+        LOAD    acc,expr        Save the primitive object.
+        OPEN    expr,expr       Locate primitive's wrapper.
+        JUMP    expr            Perform the primitive operation.
+
+########
+
+!Primitive.Default
+        TRAP    'unimplemented
+
+!Restore/r7
+        LOAD    r7,=clink
+!Restore/r6
+        LOAD    r6,=clink
+!Restore/r5
+        LOAD    r5,=clink
+!Restore/r4
+        LOAD    r4,=clink
+!Restore/r3
+        LOAD    r3,=clink
+!Restore/r2
+        LOAD    r2,=clink
+!Restore/r1
+        LOAD    r1,=clink
+!Restore/r0
+        LOAD    r0,=clink
+        JUMP    =clink
+
+!Restore/r7-1
+        LOAD    r7,=clink
+!Restore/r6-1
+        LOAD    r6,=clink
+!Restore/r5-1
+        LOAD    r5,=clink
+!Restore/r4-1
+        LOAD    r4,=clink
+!Restore/r3-1
+        LOAD    r3,=clink
+!Restore/r2-1
+        LOAD    r2,=clink
+!Restore/r1-1
+        LOAD    r1,=clink
+        JUMP    =clink
+
+!Restore/r7-2
+        LOAD    r7,=clink
+!Restore/r6-2
+        LOAD    r6,=clink
+!Restore/r5-2
+        LOAD    r5,=clink
+!Restore/r4-2
+        LOAD    r4,=clink
+!Restore/r3-2
+        LOAD    r3,=clink
+!Restore/r2-2
+        LOAD    r2,=clink
+        JUMP    =clink
+
+!Restore/r7-3
+        LOAD    r7,=clink
+!Restore/r6-3
+        LOAD    r6,=clink
+!Restore/r5-3
+        LOAD    r5,=clink
+!Restore/r4-3
+        LOAD    r4,=clink
+!Restore/r3-3
+        LOAD    r3,=clink
+        JUMP    =clink
+
+!Restore/r7-4
+        LOAD    r7,=clink
+!Restore/r6-4
+        LOAD    r6,=clink
+!Restore/r5-4
+        LOAD    r5,=clink
+!Restore/r4-4
+        LOAD    r4,=clink
+        JUMP    =clink
+
+!Restore/r7-5
+        LOAD    r7,=clink
+!Restore/r6-5
+        LOAD    r6,=clink
+!Restore/r5-5
+        LOAD    r5,=clink
+        JUMP    =clink
+
+!Restore/r7-6
+        LOAD    r7,=clink
+!Restore/r6-6
+        LOAD    r6,=clink
+        JUMP    =clink
+
+!Primitive/null?
+        CMPIS?  acc,r0,()
+        JUMP    =clink
+!Primitive/pair?
+        PAIR?   acc,r0
+        JUMP    =clink
+!Primitive/symbol?
+        SYMBOL? acc,r0
+        JUMP    =clink
+!Primitive/segment?
+        SEGMENT? acc,r0
+        JUMP    =clink
+!Primitive/array?
+        ARRAY?  acc,0
+        JUMP    =clink
+
+!Primitive/false?
+        CMPIS?  acc,r0,#f
+        JUMP    =clink
+!Primitive/true?
+        CMPIS?  acc,r0,#t
+        JUMP    =clink
+!Primitive/boolean?
+        CMPIS?  acc,r0,#f
+        BRANCH  acc,@1f
+        CMPIS?  acc,r0,#t
+1h      JUMP    =clink
+
+!Primitive/is?
+        CMPIS?  acc,r0,r1
+        JUMP    =clink
+
+1h      TRAP    'incompatible-operand
+!Primitive/cons
+        CONS    acc,r0,r1
+        JUMP    =clink
+!Primitive/car
+        PAIR?   acc,r0
+        BRANCH  =acc,@1b
+        CAR     acc,r0
+        JUMP    =clink
+!Primitive/cdr
+        PAIR?   acc,r0
+        BRANCH  =acc,@1b
+        CDR     acc,r0
+        JUMP    =clink
+
+1h      TRAP    'incompatible-operand
+!Primitive/symbol/key
+        SYMBOL? acc,r0
+        BRANCH  =acc,@1b
+#       SLO     acc,'symbol/key
+        JUMP    =clink
+!Primitive/symbol/segment
+        SYMBOL? acc,r0
+        BRANCH  =acc,@1b
+#       SLO     acc,'symbol/segment     Read-only
+        JUMP    =clink
+
+#       r0: length
+#       r1: alignment
+1h      TRAP    'incompatible-operand
+!Primitive/new-segment
+        CMPLE?  tmp,r0,0
+        BRANCH  tmp,@1b
+        CMPLE?  tmp,r1,0
+        BRANCH  tmp,@1b
+#       SLO     acc,'new-segment
+        JUMP    =clink
+
+1h      TRAP    'incompatible-operand
+!Primitive/segment/resize!
+        SEGMENT? tmp,r0
+        BRANCH  =tmp,@1b
+        CMPLE?  tmp,r1,0
+        BRANCH  tmp,@1b
+#       SLO     acc,'segment/resize!
+        JUMP    =clink
+
+1h      TRAP    'incompatible-operand
+!Primitive/segment/length
+        SEGMENT? tmp,r0
+        BRANCH  =tmp,@1b
+#       SLO     acc,'segment/length
+        JUMP    =clink
+
+1h      LOAD    r4,=clink
+2h      LOAD    r3,=clink
+        TRAP    'incompatible-operand
+!Primitive/segment->symbol
+        PEND    clink,@3f
+        JUMP    @!Primitive/segment/length
+3h      LOAD    clink,r3        Prepare to clobber r3
+        LOAD    r3,acc          Segment length
+        CMPGE?  tmp,r1,0
+        BRANCH  =tmp,@2b        !(off >= 0)?
+        CMPGE?  tmp,r1,r3
+        BRANCH  tmp,@2b         off >= max?
+        CMPGE?  tmp,r2,0
+        BRANCH  =tmp,@2b        !(length >= 0)?
+        LOAD    clink,r4        Prepare to clobber r4
+        ADD     r4,r1,r2
+        CMPLE?  tmp,r4,r3
+        BRANCH  tmp,@1b         (off + length >= max)?
+        LOAD    r4,=clink       Restore clobbered registers.
+        LOAD    r3,=clink
+#       SLO     acc,'segment->symbol
+        JUMP    =clink
+
+#       r0: length
+#       r1: offset
+#       r2: filler
+1h      TRAP    'incompatible-operand
+!Primitive/new-array
+        CMPGE?  tmp,r0,0
+        BRANCH  =tmp,@1b
+        INTEGER? tmp,r1
+        BRANCH  =tmp,@1b
+#       SLO     acc,'new-array
+        JUMP    =clink
+
+#       r0: array
+#       r1: new length
+#       r2: new offset
+#       r3: new filler
+1h      TRAP    'incompatible-operand
+!Primitive/array/resize!
+        ARRAY?  tmp,r0
+        BRANCH  =tmp,@1b
+        CMPGE?  tmp,r1,0
+        BRANCH  =tmp,@1b
+        INTEGER? tmp,r2
+        BRANCH  =tmp,@1b
+#       SLO     acc,'array/resize!
+        JUMP    =clink
+
+1h      TRAP    'incompatible-operand
+!Primitive/array/length
+        ARRAY?  tmp,r0
+        BRANCH  =tmp,@1b
+#       SLO     acc,'array/length
+        JUMP    =clink
+
+1h      TRAP    'incompatible-operand
+!Primitive/array/offset
+        ARRAY?  tmp,r0
+        BRANCH  =tmp,@1b
+#       SLO     acc,'array/offset
+        JUMP    =clink
+
+#       r0: array
+#       r1: index + offset
+#       r2 (set!): value
+1h      LOAD    r2,=clink
+        TRAP    'incompatible-operand
+!Primitive/array/ref
+#       SLO     acc,'array/offset
+        PEND    clink,@Primitive/array/ref/imp
+Primitive/array/ref/find
+        LOAD    clink,r2
+        SUB     r2,r1,acc
+        CMPLT?  tmp,r2,0
+        BRANCH  tmp,@1b
+#       SLO     acc,'array/length
+        CMPGE?  tmp,r2,acc
+        BRANCH  tmp,@1b
+        LOAD    r1,r2
+        LOAD    r2,=clink
+        JUMP    =clink
+!Primitive/array/set!
+#       SLO     acc,'array/offset
+        PEND    clink,@Primitive/array/set!/imp
+        JUMP    @Primitive/array/ref/find
+Primitive/array/ref/imp
+#       SLO     acc,'array/ref
+        JUMP    =clink
+Primitive/array/set!/imp
+#       SLO     acc,'array/set!
+        JUMP    =clink
+
+# TODO: Hashtables
+
+########
+
+!Primitive/+
+        ADD     acc,r0,r1
+        JUMP    =clink
+!Primitive/-
+        SUB     acc,r0,r1
+        JUMP    =clink
+!Primitive/*
+        MUL     acc,r0,r1
+        JUMP    =clink
+
+!Primitive/current-environment
+        LOAD    acc,env
+        JUMP    =clink
+
+!Primitive/root-environment
+        LOAD    acc,root
+        JUMP    =clink
+
+!Primitive/do
+#       CAR     tmp,args        Not used: The number of arguments _to the
+#                               primitive_ (ie. matching the _signature_),
+#                               which in this case is 1.
+        CDR     acc,args        Primitive's argument[s].
+        CAR     acc,acc         The only primitive argument is the full
+;                               captured list of expressions to evaluate
+;                               sequentially.
+        CMPIS?  tmp,acc,()      Do nothing?
+        BRANCH  =tmp,@1f
+        LOAD    acc,#VOID       If there is nothing to do then load #VOID
+;                               and return directly.
+        JUMP    =clink
+#       Build a work queue in in reverse in Arguments while validating
+#       that the `do' expression is a proper list.
+1h      LOAD    args,()
+1h      PAIR?   tmp,acc         Looks like a list?
+        BRANCH  tmp,@2f
+        TRAP    'improper-list
+2h      PEND    tmp,@Primitive/do/next Prepend evaluation of this item to the list.
+        CONS    args,tmp,args
+        CONS    args,=acc,args
+        CMPIS?  tmp,acc,()      Is the list finished?
+        BRANCH  tmp,@3f
+        JUMP    @1b             Repeat with the next item.
+#       Enqueue the Arguments list onto the stack in the original order.
+3h      LOAD    clink,=args
+        LOAD    clink,=args
+        CMPIS?  tmp,args,()
+        BRANCH  =tmp,@3b
+        JUMP    =clink          Jump to the first @!Evaluate.
+Primitive/do/next
+        LOAD    expr,=clink
+        JUMP    @!Evaluate
+
+#       (In) Argument-List: (2 formals body)
+#
+#       (Out) Accumulator: Applicative Closure
+
+# arguments to APPLICATIVE/new_applicative:
+#
+#       formals: reverse list, made proper if capturing
+#       body: no idea, should probably make a deep copy?
+#
+#       Operations on a closure:
+#               SIGNATURE: pair of (min . max) (applicative)
+#                          list of (capture) (operative)
+#               OPEN: (reverse-formals environment body)
+
+#       In-progress: Acc: Formals
+#               Args: Reverse
+#               Expr: Next
+#               r0: count
+#               r1: duplicate scan
+
+Primitive/lambda/Failure
+        LOAD    tmp,=clink      Discard body
+        LOAD    r1,=clink
+        LOAD    r0,=clink
+        TRAP    'incompatible-operand
+!Primitive/lambda
+        LOAD    clink,r1
+        LOAD    clink,r0
+        CDR     args,args       (body formals)
+        CAR     clink,args      body
+        CDR     acc,args        (formals)
+        CAR     acc,acc         formals
+        LOAD    r0,0            Prepare reverse formals.
+        LOAD    args,()
+        CMPIS?  tmp,acc,()
+        BRANCH  tmp,@Primitive/lambda/capture-none
+        SYMBOL? tmp,acc
+        BRANCH  tmp,@Primitive/lambda/capture-every
+        PAIR?   tmp,acc
+        BRANCH  =tmp,@Primitive/lambda/Failure
+
+1h      LOAD    expr,=acc       Next formal.
+        SYMBOL? tmp,expr
+        BRANCH  =tmp,@Primitive/lambda/Failure
+
+        LOAD    r1,args         Scan for duplicates.
+2h      CMPIS?  tmp,r1,()
+        BRANCH  =tmp,@2f
+        LOAD    tmp,=r1
+        CMPIS?  tmp,tmp,expr
+        BRANCH  tmp,@Primitive/lambda/Failure
+        JUMP    @2b
+2h      CONS    args,expr,args  Prepend the new symbol to Arguments.
+        ADD     r0,r0,1
+
+        CMPIS?  tmp,acc,()      Finished?
+        BRANCH  tmp,@3f
+        PAIR?   tmp,acc
+        BRANCH  tmp,@1b
+        SYMBOL? tmp,acc         Finished and capture?
+        BRANCH  =tmp,@Primitive/lambda/Failure
+
+        LOAD    r1,args         Scan for duplicates
+2h      CMPIS?  tmp,r1,()
+        BRANCH  =tmp,@2f
+        LOAD    tmp,=r1
+        CMPIS?  tmp,tmp,expr
+        BRANCH  tmp,@Primitive/lambda/Failure
+        JUMP    @2b
+2h      CONS    args,expr,args  Prepend the new symbol to Arguments
+        CONS    r0,r0,-1        Variadic signature.
+        JUMP    @4f
+
+3h      CONS    r0,r0,r0        Static signature.
+#       Reverse formals now ready in args, r0 has signature, (body) on clink
+#       acc, expr, r1 usable
+4h      CAR     acc,clink       Restore body.
+        LOAD    expr,()
+5h      CMPIS?  tmp,acc,()      Loop to check body is a proper list (should be turtle&hare).
+        BRANCH  tmp,@5f
+        PAIR?   tmp,acc
+        BRANCH  =tmp,@Primitive/lambda/Failure
+        CONS    expr,=acc,expr
+        JUMP    @5b
+
+5h      CMPIS?  tmp,expr,()     Loop to put the body back in the correct
+;                               order (also copied); no `do' primitive prepended.
+        BRANCH  tmp,@6f
+        CONS    acc,=expr,acc
+        JUMP    @5b
+
+#       To branch here the Accumulator has the capture binding name.
+Primitive/lambda/capture-every
+        CONS    args,acc,()     Formals
+        SUB     r0,0,1          # TODO: BUG: LOAD r0,-1 segfaults (also single-char symbols).
+
+#       To branch here the Accumulator is nil and r0 is 0.
+Primitive/lambda/capture-none
+        CONS    r0,0,r0         Signature
+
+6h      LOAD    tmp,=clink      Discard saved body.
+        CONS    acc,env,acc     Current environment.
+        CONS    acc,args,acc    Reversed formals.
+        APPLICATIVE acc,r0,acc
+        JUMP    @!Restore/r1
+
+
+
+
+
+
+
+
+
+Primitive/read-expression/terminator?
+        CMPEQ?  acc,r3,#x28     (
+        BRANCH  acc,@1f
+        CMPEQ?  acc,r3,#x29     )
+        BRANCH  acc,@1f
+Primitive/read-expression/space?
+        CMPEQ?  acc,r3,#x20     Space
+        BRANCH  acc,@1f
+        CMPEQ?  acc,r3,#x0a     Line Feed
+        BRANCH  acc,@1f
+        CMPEQ?  acc,r3,#x09     Horizontal Tab
+1h      JUMP    =clink
+
+Primitive/read-expression/digit?
+        CMPLT?  acc,r3,#x30     0
+        BRANCH  acc,@1f
+        CMPLE?  acc,r3,#x39     9
+1h      JUMP    =clink
+
+Primitive/read-expression/printable?
+        CMPGT?  acc,r3,#x20     Control codes & space
+        BRANCH  =acc,@1f
+        LOAD    tmp,#x7f        Delete & Non-ASCII
+        CMPLT?  acc,r3,tmp
+1h      JUMP    =clink
+
+#       These characters will become unforbidden as their feature
+#       is implemented.
+Primitive/read-expression/unimplemented-or-forbidden?
+        LOAD    tmp,#x7b        {
+        CMPEQ?  acc,r3,tmp
+        BRANCH  acc,@1f
+        LOAD    tmp,#x7d        }
+        CMPEQ?  acc,r3,tmp
+        BRANCH  acc,@1f
+        LOAD    tmp,#x5b        [
+        CMPEQ?  acc,r3,tmp
+        BRANCH  acc,@1f
+        LOAD    tmp,#x5d        ]
+        CMPEQ?  acc,r3,tmp
+        BRANCH  acc,@1f
+        CMPEQ?  acc,r3,#x24     $
+        BRANCH  acc,@1f
+        CMPEQ?  acc,r3,#x27     '
+        BRANCH  acc,@1f
+        CMPEQ?  acc,r3,#x2c     ,
+        BRANCH  acc,@1f
+        LOAD    tmp,#x60        `
+        CMPEQ?  acc,r3,tmp
+        BRANCH  acc,@1f
+        CMPEQ?  acc,r3,#x3b     ;
+        BRANCH  acc,@1f
+Primitive/read-expression/forbidden?
+        LOAD    tmp,#x5c        \
+        CMPEQ?  acc,r3,tmp
+1h      JUMP    =clink
+
+
+#       (In) r0: segment
+#       (In) r1: position
+#       (In) r2: length
+#
+#       (Out) Accumulator: Attempt to read past the end?
+#       (Out) r3: (if not) the byte.
+#
+Primitive/read-expression/source-byte
+        CMPGE?  acc,r1,r2
+        BRANCH  acc,@1f
+        PEEK    r3,r0,r1
+1h      JUMP    =clink
+
+#       (In) r0: segment
+#       (In) r1: start/offset
+#
+#       (Out) Accumulator: Object
+#       (Out) r0: segment
+#       (Out) r1: consumed
+#
+#       -: r2: segment length
+#       -: r3: byte, result type
+#       -: r4: base offset, object
+#       -: r5: negative?
+#       -: r6: numeric sum
+#       -: r7: numeric multiplier
+#
+!Primitive/read-expression
+        SEGMENT? tmp,r0
+        BRANCH  tmp,@1f
+0h      TRAP    'incompatible-operand
+1h      INTEGER? tmp,r1
+        BRANCH  =tmp,@0b
+        CMPLT?  tmp,r1,0
+        BRANCH  tmp,@0b
+        LENGTH  acc,r0
+        CMPGE?  tmp,r1,acc
+        BRANCH  tmp,@0b
+#       SLO     acc,'segment/length
+#       CMPGE?  tmp,r1,acc
+#       BRANCH  tmp,@0b
+        LOAD    clink,r2
+        LOAD    clink,r3
+        LOAD    clink,r4
+        LOAD    clink,r5
+        LOAD    clink,r6
+        LOAD    clink,r7
+        LOAD    r2,acc
+        PEND    clink,@Primitive/read-expression/finished
+        JUMP    @Primitive/read-expression/imp
+
+#       (In)    Accumulator: Expression
+#       (In)    r1: offset
+#       (In)    r3: type of expression
+#                   close
+#                   dot
+#                   eof
+#                   finish
+#
+Primitive/read-expression/finished
+        LOAD    tmp,'object
+        CMPIS?  tmp,r3,tmp
+        BRANCH  =tmp,@1f
+        JUMP    @!Restore/r7-2
+1h      LOAD    tmp,'close
+        CMPIS?  tmp,r3,tmp
+        BRANCH  =tmp,@1f
+        TRAP    'unopened-list
+1h      LOAD    tmp,'dot
+        CMPIS?  tmp,r3,tmp
+        BRANCH  =tmp,@1f
+        TRAP    'non-list-tail
+#       Is eof
+1h      TRAP    'missing
+
+
+
+#       This is the heart of the read function.
+#
+Primitive/read-expression/next
+        ADD     r1,r1,1
+Primitive/read-expression/imp
+        PEND    clink,@1f
+        JUMP    @Primitive/read-expression/source-byte
+1h      BRANCH  =acc,@1f
+        LOAD    r3,'eof
+        JUMP    =clink
+1h      PEND    clink,@1f
+        JUMP    @Primitive/read-expression/space?
+1h      BRANCH  acc,@Primitive/read-expression/next
+        PEND    clink,@1f
+        JUMP    @Primitive/read-expression/printable?
+1h      BRANCH  acc,@1f
+        TRAP    'unprintable
+1h      PEND    clink,@1f
+        JUMP    @Primitive/read-expression/unimplemented-or-forbidden?
+1h      BRANCH  =acc,@1f
+        TRAP    'syntax-error
+#
+#       In r3 is a printable, non-space character that's valid to
+#       begin an expression.
+1h      CMPIS?  tmp,r3,#x28     (
+        BRANCH  tmp,@Primitive/read-expression/begin-list
+1h      CMPIS?  tmp,r3,#x2e     .
+        BRANCH  =tmp,@1f
+        ADD     r1,r1,1
+        LOAD    r3,'dot
+        JUMP    =clink
+1h      CMPIS?  tmp,r3,#x29     )
+        BRANCH  =tmp,@1f
+#       ADD     r1,r1,1
+        LOAD    acc,()
+        LOAD    r3,'close
+        JUMP    =clink
+1h      CMPIS?  tmp,r3,#x23     #
+        BRANCH  tmp,@Primitive/read-expression/special
+1h      CMPIS?  tmp,r3,#x2d     -; offset is not incremented yet
+        BRANCH  =tmp,@1f
+        LOAD    r5,#t
+        JUMP    @Primitive/read-expression/possible-number
+1h      CMPIS?  tmp,r3,#x2b     +; offset is not incremented yet
+        BRANCH  =tmp,@1f
+        LOAD    r5,#f
+        JUMP    @Primitive/read-expression/possible-number
+1h      PEND    clink,@1f
+        JUMP    @Primitive/read-expression/digit?
+1h      BRANCH  acc,@Primitive/read-expression/number
+        JUMP    @Primitive/read-expression/symbol
+
+#       This is the other heart which recursively reads expressions
+#       to form them into lists.
+#
+Primitive/read-expression/begin-list
+        LOAD    clink,()
+        PEND    clink,@Primitive/read-expression/continue-list
+        JUMP    @Primitive/read-expression/next
+
+#       (In)    Accumulator: Expression
+#       (In)    r1: offset
+#       (In)    r3: type of expression
+#
+Primitive/read-expression/continue-list
+        LOAD    tmp,'object
+        CMPIS?  tmp,r3,tmp
+        BRANCH  tmp,@1f
+        LOAD    tmp,'close
+        CMPIS?  tmp,r3,tmp
+        BRANCH  tmp,@Primitive/read-expression/close-list
+        LOAD    tmp,'dot
+        CMPIS?  tmp,r3,tmp
+        BRANCH  tmp,@Primitive/read-expression/list-tail
+        TRAP    'unclosed-list  From eof.
+
+1h      CONS    clink,acc,=clink
+        PEND    clink,@Primitive/read-expression/continue-list
+        JUMP    @Primitive/read-expression/next
+
+#       The close symbol has placed () in the accumulator, when
+#       reached from Primitive/read-expression/list-tail/finish
+#       that is replaced with the dotted tail.
+#
+Primitive/read-expression/close-list
+        LOAD    r3,=clink
+1h      CMPIS?  tmp,r3,()
+        BRANCH  tmp,@2f
+        LOAD    tmp,=r3
+        CONS    acc,r3,acc
+        JUMP    @1b
+2h      LOAD    r3,'object
+        JUMP    =clink
+
+#       Expects two more 'expressions'; a finished expression
+#       followed by close.
+#
+Primitive/read-expression/list-tail
+        CMPIS?  tmp,clink,()    Just started?
+        BRANCH  =tmp,@1f
+        TRAP    'non-list-tail
+1h      PEND    clink,@Primitive/read-expression/list-tail/expression
+        JUMP    @Primitive/read-expression/next
+
+Primitive/read-expression/list-tail/expression
+        LOAD    tmp,'object
+        CMPIS?  tmp,r3,tmp
+        BRANCH  tmp,@2f
+        LOAD    tmp,'dot
+        CMPIS?  tmp,r3,tmp
+        BRANCH  =tmp,@1f
+        TRAP    'double-tail
+1h      LOAD    tmp,'close
+        CMPIS?  tmp,r3,tmp
+        BRANCH  =tmp,@1f
+        TRAP    'unterminated-tail
+1h      TRAP    'unclosed-list  Is EOF.
+2h      LOAD    clink,acc
+        PEND    clink,@Primitive/read-expression/list-tail/finish
+        JUMP    @Primitive/read-expression/next
+
+Primitive/read-expression/list-tail/finish
+        LOAD    tmp,'close
+        CMPIS?  tmp,r3,tmp
+        BRANCH  tmp,@2f
+        LOAD    tmp,'dot
+        CMPIS?  tmp,r3,tmp
+        BRANCH  =tmp,@1f
+        TRAP    'double-tail
+1h      LOAD    tmp,'eof
+        CMPIS?  tmp,r3,tmp
+        BRANCH  =tmp,@1f
+        TRAP    'unclosed-list
+1h      TRAP    'tail-mid-list
+2h      LOAD    acc,=clink      Restore the dotted tail.
+        JUMP    @Primitive/read-expression/close-list
+
+
+
+
+
+
+
+
+
+
+
+
+
+#       It's all just boring text parsing from here.
+#
+#       (In)    r0: segment
+#       (In)    r1: first byte offset
+#
+Primitive/read-expression/symbol
+        LOAD    r4,r1
+Primitive/read-expression/symbol/next
+        ADD     r1,r1,1
+        PEND    clink,@1f
+        JUMP    @Primitive/read-expression/source-byte
+1h      BRANCH  acc,@Primitive/read-expression/symbol/finish ... if #eof.
+        PEND    clink,@1f
+        JUMP    @Primitive/read-expression/printable?
+1h      BRANCH  acc,@2f
+        TRAP    'unprintable
+2h      PEND    clink,@1f
+        JUMP    @Primitive/read-expression/forbidden?
+1h      BRANCH  =acc,@2f
+        TRAP    'syntax-error
+2h      PEND    clink,@1f
+        JUMP    @Primitive/read-expression/terminator?
+1h      BRANCH  =acc,@Primitive/read-expression/symbol/next
+
+#       (In)    r0: segment
+#       (In)    r1: terminal offset
+#       (In)    r4: starting offset
+
+#       (Out)   Accumulator: symbol
+#       (Out)   r0: segment
+#       (Out)   r1: terminal offset
+#       (Out)   r2: segment length
+#       (Out)   r3: 'object
+
+Primitive/read-expression/symbol/finish
+#       LOAD    r3,r1           Save terminal offset
+#       SUB     r2,r1,r4        Symbol length
+#       LOAD    r1,r4           Starting offset
+#       SLO     acc,'segment->symbol
+#       S->S    r0,r4,r2
+#       SLO     r2,'segment/length      Restore r2
+#       LENGTH  r2,r0           Restore r2
+#       LOAD    r1,r3           Restore offset
+#
+        SUB     r3,r1,r4        Symbol length
+        SYMBOL  r0,r4,r3
+        LOAD    r3,'object
+        JUMP    =clink
+
+#       (In)    r0: segment
+#       (In)    r1: starting (sign) offset
+#
+#       -       r4: negate?
+
+Primitive/read-expression/special
+        ADD     r1,r1,1
+        PEND    clink,@1f
+        JUMP    @Primitive/read-expression/source-byte
+1h      BRANCH  =acc,@2f        if !#eof.
+        TRAP    'syntax-error
+2h      PEND    clink,@1f
+        JUMP    @Primitive/read-expression/printable?
+1h      BRANCH  acc,@2f
+        TRAP    'unprintable
+2h      LOAD    tmp,#x46        F
+        CMPIS?  tmp,r3,tmp
+        BRANCH  =tmp,@1f
+2h      LOAD    r4,#f
+        JUMP    @Primitive/read-expression/boolean
+1h      LOAD    tmp,#x66        f
+        CMPIS?  tmp,r3,tmp
+        BRANCH  tmp,@2b
+        LOAD    tmp,#x54        T; use r4 to save a few ops
+        CMPIS?  r4,r3,tmp
+        BRANCH  r4,@Primitive/read-expression/boolean
+        LOAD    tmp,#x74        t
+        CMPIS?  r4,r3,tmp
+        BRANCH  r4,@Primitive/read-expression/boolean
+        LOAD    tmp,#x5c        \
+        CMPIS?  tmp,r3,tmp
+        BRANCH  tmp,@Primitive/read-expression/rune
+        JUMP    @Primitive/read-expression/special-number
+
+Primitive/read-expression/boolean
+3h      ADD     r1,r1,1
+        PEND    clink,@1f
+        JUMP    @Primitive/read-expression/source-byte
+1h      BRANCH  acc,@2f         if #eof.
+        PEND    clink,@1f
+        JUMP    @Primitive/read-expression/terminator?
+1h      BRANCH  acc,@2f
+        TRAP    'syntax-error
+2h      LOAD    acc,r4
+        LOAD    r3,'object
+        JUMP    =clink
+
+Primitive/read-expression/possible-number
+        LOAD    r4,r1
+        ADD     r1,r1,1
+        PEND    clink,@1f
+        JUMP    @Primitive/read-expression/source-byte
+1h      BRANCH  acc,@Primitive/read-expression/symbol/finish ... if #eof.
+        PEND    clink,@1f
+        JUMP    @Primitive/read-expression/digit?
+1h      BRANCH  acc,@Primitive/read-expression/number
+        CMPIS?  acc,r3,#x23     #
+        BRANCH  =acc,@1f
+        ADD     r1,r1,1
+        PEND    clink,@Primitive/read-expression/special-number/imp
+        JUMP    @Primitive/read-expression/source-byte
+1h      LOAD    r1,r4           Move back to [-+]
+        JUMP    @Primitive/read-expression/symbol/next
+
+Primitive/read-expression/special-number
+        LOAD    r5,#f
+        JUMP    @1f
+Primitive/read-expression/special-number/imp
+        BRANCH  =acc,@1f        COMEFROM @Primitive/read-expression/source-byte
+        TRAP    'syntax-error   [-+]#
+1h      LOAD    tmp,#x42        B
+        CMPIS?  tmp,r3,tmp
+        BRANCH  tmp,@Primitive/read-expression/binary
+        LOAD    tmp,#x62        b
+        CMPIS?  tmp,r3,tmp
+        BRANCH  tmp,@Primitive/read-expression/binary
+        LOAD    tmp,#x64        D
+        CMPIS?  tmp,r3,tmp
+        BRANCH  tmp,@Primitive/read-expression/decimal
+        LOAD    tmp,#x64        d
+        CMPIS?  tmp,r3,tmp
+        BRANCH  tmp,@Primitive/read-expression/decimal
+        LOAD    tmp,#x6f        O
+        CMPIS?  tmp,r3,tmp
+        BRANCH  tmp,@Primitive/read-expression/octal
+        LOAD    tmp,#x6f        o
+        CMPIS?  tmp,r3,tmp
+        BRANCH  tmp,@Primitive/read-expression/octal
+        LOAD    tmp,#x58        X
+        CMPIS?  tmp,r3,tmp
+        BRANCH  tmp,@Primitive/read-expression/hex
+        LOAD    tmp,#x78        x
+        CMPIS?  tmp,r3,tmp
+        BRANCH  tmp,@Primitive/read-expression/hex
+        TRAP    'syntax-error
+
+Primitive/read-expression/binary
+        LOAD    r7,2
+        LOAD    r6,0
+        ADD     r4,r1,1
+        JUMP    @Primitive/read-expression/number/next
+Primitive/read-expression/octal
+        LOAD    r7,8
+        LOAD    r6,0
+        ADD     r4,r1,1
+        JUMP    @Primitive/read-expression/number/next
+Primitive/read-expression/decimal
+        LOAD    r7,10
+        LOAD    r6,0
+        ADD     r4,r1,1
+        JUMP    @Primitive/read-expression/number/next
+
+Primitive/read-expression/number
+        LOAD    r7,10
+        SUB     r6,r3,#x30      0
+        LOAD    r5,#f           Negate?
+        LOAD    r4,r1
+Primitive/read-expression/number/next
+        ADD     r1,r1,1
+        PEND    clink,@1f
+        JUMP    @Primitive/read-expression/source-byte
+1h      BRANCH  =acc,@1f        ... unless eof.
+2h      CMPEQ?  acc,r1,r4
+        BRANCH  =acc,@Primitive/read-expression/number/finish
+        TRAP    'syntax-error
+1h      PEND    clink,@1f
+        JUMP    @Primitive/read-expression/terminator?
+1h      BRANCH  acc,@2b
+        CMPGE?  tmp,r3,#x30     0
+        BRANCH  tmp,@3f         Possibly a digit.
+2h      PEND    clink,@1f       Wrong, but how?
+        JUMP    @Primitive/read-expression/printable?
+1h      BRANCH  acc,@1f
+        TRAP    'unprintable
+1h      TRAP    'syntax-error
+3h      SUB     r3,r3,#x30      0
+        CMPLT?  tmp,r3,r7       Small enough?
+        BRANCH  tmp,@1f
+        ADD     r3,r3,#x30
+        JUMP    @2b
+1h      MUL     r6,r6,r7
+        ADD     r6,r6,r3
+        JUMP    @Primitive/read-expression/number/next
+
+Primitive/read-expression/hex
+        LOAD    r6,0
+        ADD     r1,r1,1
+        PEND    clink,@1f
+        JUMP    @Primitive/read-expression/source-byte
+1h      BRANCH  =acc,@1f
+        TRAP    'syntax-error
+        PEND    clink,@1f
+        JUMP    @Primitive/read-expression/terminator?
+1h      BRANCH  =acc,@1f
+        TRAP    'syntax-error
+Primitive/read-expression/hex/digit
+1h      LOAD    tmp,#x66        f
+        CMPLE?  acc,r3,tmp
+        BRANCH  acc,@1f
+        TRAP    'syntax-error
+1h      LOAD    acc,#x61        a
+        CMPGE?  tmp,r3,acc
+        BRANCH  =tmp,@1f
+        SUB     r4,r3,acc
+        JUMP    @2f
+
+1h      LOAD    tmp,#x46        F
+        CMPLE?  tmp,r3,tmp
+        BRANCH  tmp,@1f
+        TRAP    'syntax-error
+1h      LOAD    acc,#x41        A
+        CMPGE?  tmp,r3,acc
+        BRANCH  tmp,@1f
+        SUB     r4,r3,acc
+        JUMP    @2f
+
+1h      CMPLE?  tmp,r3,#x39     9
+        BRANCH  tmp,@1f
+        TRAP    'syntax-error
+1h      LOAD    acc,#x30        0; put in the accumulator to match the letters' algorithm.
+        CMPGE?  tmp,r3,acc
+        BRANCH  tmp,@1f
+        TRAP    'syntax-error
+2h      MUL     r6,r6,#x10
+        SUB     r4,r3,acc
+        ADD     r6,r6,r4
+        ADD     r1,r1,1
+        PEND    clink,@1f
+        JUMP    @Primitive/read-expression/source-byte
+1h      BRANCH  acc,@Primitive/read-expression/number/finish
+        PEND    clink,@1f
+        JUMP    @Primitive/read-expression/terminator?
+1h      BRANCH  acc,@Primitive/read-expression/number/finish
+        JUMP    @Primitive/read-expression/hex/digit
+
+Primitive/read-expression/number/finish
+        BRANCH  =r5,@1f         Negate?
+        SUB     r6,0,r6
+1h      LOAD    acc,r6          Number
+        LOAD    r1,r4           Terminal offset
+        LOAD    r3,'object
+        JUMP    =clink
+
+Primitive/read-expression/rune
         TRAP    'unimplemented

@@ -7,22 +7,23 @@ LCPPFLAGS?=
 LLDFLAGS?=      -lpthread -ledit -lcurses
 LTFLAGS?=       -v
 
-OBJECTS:=       lossless.o
+OBJECTS:=       lossless.o initialise.o
+TEST_OBJECTS:=  memless.o testless.o initialise.o
 SOURCES:=       lossless.c lossless.h
-REPL_OBJECTS:=  repl.o
-REPL_SOURCES:=  repl.c
-BOOT_OBJECTS:=  boot.o
-BOOT_SOURCES:=  boot.c
 LIB_OBJECTS:=
 LIB_SOURCES:=
 
-TEST_SCRIPTS:=  t/insanity.t
+TEST_SCRIPTS:=  t/insanity.t \
+        t/evaluator.t        \
+        t/hashtable.t        \
+        t/reader.t
 
 LLCOMPILE:=     $(CC) $(DEBUG) $(CFLAGS) $(LCFLAGS) $(CPPFLAGS) $(LCPPFLAGS)
 
 
 # Major build targets:
-all: lossless liblossless.so lossless.pdf boot.pdf repl.pdf ffi.perl man/mandoc.db
+all: lossless liblossless.so lossless.pdf
+# more: ffi.perl man/mandoc.db
 
 full: test all
 
@@ -30,49 +31,37 @@ test: $(TEST_SCRIPTS)
 	$(TEST) $(LTFLAGS) -e '' $(TEST_SCRIPTS)
 
 # Dependencies:
-boot.c: boot.w
-boot.o: boot.c lossless.h
-boot.tex: boot.w
-boot.idx-in: boot.tex
-boot.pdf: boot.idx
-
-repl.c: repl.w
-repl.o: repl.c lossless.h
-repl.tex: repl.w
-repl.idx-in: repl.tex
-repl.pdf: repl.idx
-
 lossless.c lossless.h: lossless.w
 lossless.o: lossless.c lossless.h
 lossless.tex: lossless.w
 lossless.idx-in: lossless.tex
 lossless.pdf: lossless.idx llfig-1.pdf
 
+initialise.c: lossless.w
+initialise.o: initialise.c evaluate.c
+
+barbaroi.c: bin/bin2c barbaroi.ll
+	bin/bin2c LL_BARBAROI_C Barbaroi_Source barbaroi.ll >barbaroi.c
+
+evaluate.c: bin/bin2c evaluate.la
+	bin/bin2c LL_EVALUATE_C Evaluate_Source evaluate.la >evaluate.c
+
+#llfig-1.pdf: llfig.mp
+#	mpost llfig.mp
+#	mptopdf llfig.?
+
 testless.c testless.h: lossless.c
 testless.o: testless.c testless.h
 
 $(TEST_SCRIPTS:.t=.c): lossless.w
 
-llfig-1.pdf: llfig.mp
-	mpost llfig.mp
-	mptopdf llfig.?
-
-repl.o: barbaroi.h
-
-barbaroi.h: barbaroi.ll
-	bin/lloader INITIALISE <barbaroi.ll >barbaroi.h
-
 # Compilers:
 # The LDFLAGS are repeated here to build on linux; there's likely a better way
-lossless: lossless.o repl.o
-	$(LLCOMPILE) $(OBJECTS) $(REPL_OBJECTS) $(LDFLAGS) $(LLDFLAGS) \
+lossless: $(OBJECTS)
+	$(LLCOMPILE) $(OBJECTS) $(LDFLAGS) $(LLDFLAGS) \
 		-o lossless
 
-bootless: lossless.o boot.o
-	$(LLCOMPILE) $(OBJECTS) $(BOOT_OBJECTS) $(LDFLAGS) $(LLDFLAGS) \
-		-o bootless
-
-liblossless.so: lossless.o
+liblossless.so: $(OBJECTS)
 	$(LLCOMPILE) $(OBJECTS) $(LIB_OBJECTS) $(LDFLAGS) $(LLDFLAGS) \
 		-shared -o liblossless.so
 
@@ -111,9 +100,8 @@ pack:
 clean:
 	rm -f core *.core *.idx *.idx-in *.log *.scn *.toc *.o
 	rm -f liblossless.so lossless
-	rm -f lossless.[ch] testless.[ch] repl.c
+	rm -f lossless.[ch] initialise.c testless.[ch] evaluate.c
 	rm -f lossless.tex lossless.pdf
-	rm -f repl.tex repl.pdf
 	rm -f lossless*tgz
 	rm -fr t
 	rm -f man/mandoc.db
@@ -145,5 +133,5 @@ clean:
 .c.o:
 	$(LLCOMPILE) -c $< -o $@
 
-.c.t: memless.o testless.o
-	$(LLCOMPILE) $(LDFLAGS) $(LLDFLAGS) memless.o testless.o $< -o $@
+.c.t: $(TEST_OBJECTS)
+	$(LLCOMPILE) $(LDFLAGS) $(LLDFLAGS) $(TEST_OBJECTS) $< -o $@
