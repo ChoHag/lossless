@@ -14,6 +14,7 @@ LIB_OBJECTS:=
 LIB_SOURCES:=
 
 TEST_SCRIPTS:=  t/insanity.t \
+        t/closure.t          \
         t/evaluator.t        \
         t/hashtable.t        \
         t/reader.t

@@ -1,0 +1,31 @@
+GNU. The gift that keeps on giving.
+
+The unprintable character sitting on its own on the line before the
+content starts is named 'us' and has value 0x1f, for reasons which
+I'm sure make perfect sense but I genuinely do not wish to know.
+
+This is lossless.info, produced by makeinfo version who cares then
+hacked by hand.
+
+INFO-DIR-SECTION GNU Mockery
+
+File: lossless.info,  Node: Top,  Up: (dir)
+
+Lossless
+********
+
+Lossless documentation is maintained in several formats which are
+not texinfo manuals, composed using the ancient art of writing words
+in order from start to finish.
+
+If your system has Lossless installed then they are likely found in
+
+    /usr/local/share/doc/lossless/
+
+If they are ever written unix manual pages can be found by typing
+
+    man lossless
+
+Finally Lossless has an unofficial home on the web at
+
+    http://zeus.jtan.com/~chohag/lossless/

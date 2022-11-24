@@ -882,17 +882,17 @@ typedef union {
 @d FORM_ASSEMBLY       (LTAG_PDEX | 0x01) /* (Partially) assembled bytecode. */
 @d FORM_CSTRUCT        (LTAG_PDEX | 0x02) /* A \CEE/ struct. */
 @d FORM_FILE_HANDLE    (LTAG_PDEX | 0x03) /* File descriptor or equivalent. */
-@d FORM_STATEMENT      (LTAG_PDEX | 0x04) /* A single assembled statement. */
+@d FORM_POINTER        (LTAG_PDEX | 0x04)
+@d FORM_STATEMENT      (LTAG_PDEX | 0x05) /* A single assembled statement. */
 @#
 @d FORM_PAIR           (LTAG_BOTH | 0x00) /* Two pointers (a ``cons cell''). */
-@d FORM_APPLICATIVE    (LTAG_BOTH | 0x01) /* Applicative closure. */
-@d FORM_ARGUMENT       (LTAG_BOTH | 0x02) /* An assembly statement argument. */
+@d FORM_ARGUMENT       (LTAG_BOTH | 0x01) /* An assembly statement argument. */
+@d FORM_CLOSURE        (LTAG_BOTH | 0x02) /* Applicative or operative closure. */
 @d FORM_ENVIRONMENT    (LTAG_BOTH | 0x03) /* Run-time environment. */
 @d FORM_ERROR          (LTAG_BOTH | 0x04) /* An error (above). */
 @d FORM_OPCODE         (LTAG_BOTH | 0x05) /* A virtual machine's operator. */
-@d FORM_OPERATIVE      (LTAG_BOTH | 0x06) /* Operative closure. */
-@d FORM_PRIMITIVE      (LTAG_BOTH | 0x07) /* A \Ls/ operator. */
-@d FORM_REGISTER       (LTAG_BOTH | 0x08) /* A virtual machine register. */
+@d FORM_PRIMITIVE      (LTAG_BOTH | 0x06) /* A \Ls/ operator. */
+@d FORM_REGISTER       (LTAG_BOTH | 0x07) /* A virtual machine register. */
 
 @ Each format has a corresponding test. Some also share
 implementation or are otherwise related.
@@ -911,6 +911,7 @@ implementation or are otherwise related.
 @d hashtable_p(O)      (form_p((O), HASHTABLE))
 @d heap_p(O)           (form_p((O), HEAP))
 @d opcode_p(O)         (form_p((O), OPCODE))
+@d pointer_p(O)        (form_p((O), POINTER))
 @d register_p(O)       (form_p((O), REGISTER))
 @d rune_p(O)           (form_p((O), RUNE))
 @d statement_p(O)      (form_p((O), STATEMENT))
@@ -928,13 +929,9 @@ implementation or are otherwise related.
 @#
 @d arraylike_p(O)      (array_p(O) || hashtable_p(O) || assembly_p(O)
         || statement_p(O))
-@d pointer_p(O)        (segment_stored_p(O) || symbol_stored_p(O)
-        || arraylike_p(O) || heap_p(O))
 @#
-@d applicative_p(O)    (form_p((O), APPLICATIVE))
-@d operative_p(O)      (form_p((O), OPERATIVE))
 @d primitive_p(O)      (form_p((O), PRIMITIVE))
-@d closure_p(O)        (applicative_p(O) || operative_p(O))
+@d closure_p(O)        (form_p((O), CLOSURE))
 @d program_p(O)        (closure_p(O) || primitive_p(O))
 
 @ @<Fun...@>=
@@ -1068,8 +1065,9 @@ typedef struct heap_access heap_access;
 
 @ There may be several heaps active in \Ls/. One heap is created
 initially and is where allocations usually happen. This heap is
-saved in |Heap_Thread|, is a ``thread-local'' variable which means
-that each thread has its own |Heap_Thread|, and thus its own heap.
+saved in |Heap_Thread|, which is a ``thread-local'' variable. This
+means that each operating system thread has its own |Heap_Thread|,
+and thus its own heap.
 
 The other heaps are initialised at run-time.
 
@@ -1441,13 +1439,26 @@ extern shared pthread_mutex_t Allocations_Lock;
 @ @<Fun...@>=
 error_code alloc_segment (half, intptr_t, segment  **);
 error_code claim_segment (segment *, cell, cell_tag);
+error_code new_pointer (address, cell *);
 error_code new_segment_imp (heap *, half, intptr_t, cell_tag,
         cell_tag, cell *);
 error_code segment_peek (cell, half, int, bool, cell *);
 error_code segment_poke (cell, half, int, bool, cell);
+error_code segment_resize_m (cell, half);
 
 @ @<Initialise memory...@>=
 orabort(init_osthread_mutex(&Allocations_Lock, false, false));
+
+@ Before moving on, it is helpful to be able to create pointer
+objects which aren't pointing to segments.
+
+@c
+error_code
+new_pointer (address  o,
+             cell    *ret)
+{
+        return new_atom((cell) o, NIL, FORM_POINTER, ret);
+}
 
 @ The main stage of allocating a segment is to obtain the memory
 from the operating system and fill in the header absent links to
@@ -2256,7 +2267,6 @@ int_mul (cell  yin,
          cell *ret)
 {
         word result;
-        error_code reason;
 
         assert(integer_p(yin));
         assert(integer_p(yang));
@@ -2413,8 +2423,9 @@ slots are made available to leave a single one-slot hole, anticipating,
 with prejudice not benchmarks, that at such a small size a full
 array scan will not be expensive.
 
-@d HASHTABLE_TINY  16
-@d HASHTABLE_MAX   ((HALF_MAX >> 1) + 1)
+@d HASHTABLE_TINY     16
+@d HASHTABLE_MAX      ((HALF_MAX >> 1) + 1)
+@d HASHTABLE_MAX_FREE (hashtable_default_free(HASHTABLE_MAX))
 @#
 @d hashtable_default_free(L) (((L) == HASHTABLE_TINY)@|
         ? (HASHTABLE_TINY - 1) /* Guarantee at least one |NIL|. */@t\iII@>
@@ -3004,7 +3015,7 @@ new_symbol_segment (cell  o,
         assert(segment_p(o));
         assert(offset >= 0);
         assert(length >= 0);
-        assert(length + offset < segment_length_c(o));
+        assert(length + offset <= segment_length_c(o));
         return new_symbol_buffer(segment_base(o) + offset, length, NULL, ret);
 }
 
@@ -3120,6 +3131,8 @@ env_get_root (cell o)
 
 @ Inserting or replacing a binding in an environment.
 
+@d env_save_m_imp(E,D,R) /* Environment, Datum, Replace? */
+        hashtable_save_m(env_layer(E), (D), (R))
 @c
 error_code
 env_save_m (cell o,
@@ -3130,10 +3143,11 @@ env_save_m (cell o,
         cell tmp;
         error_code reason;
 
-        if (!environment_p(o) || !symbol_p(label) || undefined_p(value))
-                return LERR_INCOMPATIBLE;
+        assert(environment_p(o));
+        assert(symbol_p(label));
+        assert(defined_p(value));
         orreturn(cons(label, value, &tmp));
-        return hashtable_save_m(env_layer(o), tmp, replace);
+        return env_save_m_imp(o, tmp, replace);
 }
 
 @ Searching an environment for a binding searches each level of the
@@ -3289,7 +3303,8 @@ error_code
 init_vm (void)
 {
         address atmp, adefault;
-        cell ltmp, capture, evaluate, optional, verbatim;
+        cell copy[3], eval[3], list[3];
+        cell ltmp, sig_copy, sig_eval, sig_list;
         cell sig[SIGNATURE_LENGTH];
         char btmp[1024], *bptr; /* Way more space than necessary. */
         int i, j, k;
@@ -3555,12 +3570,13 @@ typedef struct {
 typedef enum {
         OP_HALT, /* Instruction 0 for uninitialised memory. */
         OP_ADD,
-        OP_APPLICATIVE,
-        OP_APPLICATIVE_P,
+        OP_ADDRESS,
         OP_ARRAY_P,
+        OP_BODY,
         OP_BRANCH,
         OP_CAR,
         OP_CDR,
+        OP_CLOSURE,
         OP_CLOSURE_P,
         OP_CMP,
         OP_CMPEQ_P,
@@ -3572,7 +3588,9 @@ typedef enum {
         OP_CONS,
         OP_DEFINE_M,
         OP_DELIMIT,
+        OP_EXISTS_P,
         OP_EXTEND,
+        OP_TABLE,
         OP_INTEGER_P,
         OP_JOIN,
         OP_JUMP,
@@ -3581,8 +3599,6 @@ typedef enum {
         OP_LOOKUP,
         OP_MUL,
         OP_OPEN,
-        OP_OPERATIVE,
-        OP_OPERATIVE_P,
         OP_PAIR_P,
         OP_PEEK,
         OP_PEEK2,
@@ -3617,22 +3633,21 @@ typedef enum {
 @d ARGH 5 /* A trap code (symbol, encoded as an 8-bit iny). */
 @<Global...@>=
 shared opcode_table Op[OPCODE_LENGTH] = {@|
-        [OP_APPLICATIVE_P]  = { NIL, AREG, ALOB, NARG },@|
         [OP_RESUMPTION_P]   = { NIL, AREG, ALOB, NARG },@|
-        [OP_APPLICATIVE]    = { NIL, AREG, ALOT, ALOT },@|
-        [OP_OPERATIVE_P]    = { NIL, AREG, ALOB, NARG },@|
         [OP_PRIMITIVE_P]    = { NIL, AREG, ALOB, NARG },@|
         [OP_WIDEBRANCH]     = { NIL, AADD, NARG, NARG },@|
-        [OP_CLOSURE_P]      = { NIL, AREG, ALOT, ALOT },@|
+        [OP_CLOSURE_P]      = { NIL, AREG, ALOB, NARG },@|
         [OP_INTEGER_P]      = { NIL, AREG, ALOB, NARG },@|
-        [OP_OPERATIVE]      = { NIL, AREG, ALOT, ALOT },@|
-        [OP_REPLACE_M]      = { NIL, AREG, ALOT, ALOT },@|
+        [OP_REPLACE_M]      = { NIL, AREG, ALOB, NARG },@|
         [OP_SIGNATURE]      = { NIL, AREG, ALOB, NARG },@|
         [OP_WIDESPORK]      = { NIL, AADD, NARG, NARG },@|
         [OP_SEGMENT_P]      = { NIL, AREG, ALOB, NARG },@|
-        [OP_DEFINE_M]       = { NIL, AREG, ALOT, ALOT },@|
+        [OP_DEFINE_M]       = { NIL, AREG, ALOB, NARG },@|
+        [OP_EXISTS_P]       = { NIL, AREG, ALOT, ALOT },@|
         [OP_SYMBOL_P]       = { NIL, AREG, ALOB, NARG },@|
+        [OP_ADDRESS]        = { NIL, AREG, ALOB, NARG },@|
         [OP_ARRAY_P]        = { NIL, AREG, ALOB, NARG },@|
+        [OP_CLOSURE]        = { NIL, AREG, ALOT, ALOT },@|
         [OP_CMPEQ_P]        = { NIL, AREG, ALOT, ALOT },@|
         [OP_CMPGE_P]        = { NIL, AREG, ALOT, ALOT },@|
         [OP_CMPGT_P]        = { NIL, AREG, ALOT, ALOT },@|
@@ -3646,14 +3661,16 @@ shared opcode_table Op[OPCODE_LENGTH] = {@|
         [OP_BRANCH]         = { NIL, AREG, AADD, NARG },@|
         [OP_EXTEND]         = { NIL, AREG, ALOB, NARG },@|
         [OP_LENGTH]         = { NIL, AREG, ALOB, NARG },@|
-        [OP_LOOKUP]         = { NIL, AREG, ALOB, NARG },@|
+        [OP_LOOKUP]         = { NIL, AREG, ALOT, ALOT },@|
         [OP_PAIR_P]         = { NIL, AREG, ALOB, NARG },@|
         [OP_POKE_M]         = { NIL, AREG, ALOT, ALOT },@|
+        [OP_SYMBOL]         = { NIL, AREG, ALOT, ALOT },@|
         [OP_PEEK2]          = { NIL, AREG, ALOT, ALOT },@|
         [OP_PEEK4]          = { NIL, AREG, ALOT, ALOT },@|
         [OP_PEEK8]          = { NIL, AREG, ALOT, ALOT },@|
-        [OP_SYMBOL]         = { NIL, AREG, ALOT, ALOT },@|
         [OP_SPORK]          = { NIL, AREG, AADD, NARG },@|
+        [OP_TABLE]          = { NIL, AREG, ALOB, NARG },@|
+        [OP_BODY]           = { NIL, AREG, ALOB, NARG },@|
         [OP_CONS]           = { NIL, AREG, ALOT, ALOT },@|
         [OP_HALT]           = { NIL, NARG, NARG, NARG },@|
         [OP_JOIN]           = { NIL, AREG, ALOB, NARG },@|
@@ -3676,22 +3693,21 @@ extern shared opcode_table Op[];
 
 @ @<Data...@>=
 shared char *Opcode_Label[OPCODE_LENGTH] = {@|
-        [OP_APPLICATIVE_P]  = "VM:APPLICATIVE?",@|
         [OP_RESUMPTION_P]   = "VM:RESUMPTION?",@|
-        [OP_APPLICATIVE]    = "VM:APPLICATIVE",@|
-        [OP_OPERATIVE_P]    = "VM:OPERATIVE?",@|
         [OP_PRIMITIVE_P]    = "VM:PRIMITIVE?",@|
         [OP_WIDEBRANCH]     = "VM:WIDEBRANCH",@|
         [OP_CLOSURE_P]      = "VM:CLOSURE?",@|
         [OP_INTEGER_P]      = "VM:INTEGER?",@|
-        [OP_OPERATIVE]      = "VM:OPERATIVE",@|
         [OP_REPLACE_M]      = "VM:REPLACE!",@|
         [OP_SIGNATURE]      = "VM:SIGNATURE",@|
         [OP_WIDESPORK]      = "VM:WIDESPORK",@|
         [OP_SEGMENT_P]      = "VM:SEGMENT?",@|
         [OP_DEFINE_M]       = "VM:DEFINE!",@|
+        [OP_EXISTS_P]       = "VM:EXISTS?",@|
         [OP_SYMBOL_P]       = "VM:SYMBOL?",@|
+        [OP_ADDRESS]        = "VM:ADDRESS",@|
         [OP_ARRAY_P]        = "VM:ARRAY?",@|
+        [OP_CLOSURE]        = "VM:CLOSURE",@|
         [OP_CMPEQ_P]        = "VM:CMPEQ?",@|
         [OP_CMPGE_P]        = "VM:CMPGE?",@|
         [OP_CMPGT_P]        = "VM:CMPGT?",@|
@@ -3713,6 +3729,8 @@ shared char *Opcode_Label[OPCODE_LENGTH] = {@|
         [OP_PEEK4]          = "VM:PEEK4",@|
         [OP_PEEK8]          = "VM:PEEK8",@|
         [OP_SPORK]          = "VM:SPORK",@|
+        [OP_TABLE]          = "VM:TABLE",@|
+        [OP_BODY]           = "VM:BODY",@|
         [OP_CONS]           = "VM:CONS",@|
         [OP_HALT]           = "VM:HALT",@|
         [OP_JOIN]           = "VM:JOIN",@|
@@ -3750,6 +3768,7 @@ typedef struct {
 } primitive;
 
 @ @d primitive_object(O) (&Primitive[fixed_value(A(O)->sin)])
+@d primitive_address_c(O) (primitive_object(O)->wrapper)
 @d primitive_signature_c(O) (primitive_object(O)->signature)
 @<Type def...@>=
 typedef enum {
@@ -3796,27 +3815,26 @@ typedef enum {
 } primitive_code;
 @#
 enum {
-        SIGNATURE_00,
-        SIGNATURE_11,
-        SIGNATURE_13,
-        SIGNATURE_22,
-        SIGNATURE_24,
-        SIGNATURE_33,
-        SIGNATURE_C,
-        SIGNATURE_EV,
-        SIGNATURE_EVC,
-        SIGNATURE_EVO,
-        SIGNATURE_VC,
+        SIGNATURE_0,
+        SIGNATURE_1,
+        SIGNATURE_2,
+        SIGNATURE_3,
+        SIGNATURE_CL,
+        SIGNATURE_ECL,
         SIGNATURE_LENGTH
 };
 
 @ @d PO(P,S,F) [(P)] = { (S), NIL, ADDRESS_INVALID, (F) }
 @<Global...@>=
 shared primitive Primitive[PRIMITIVE_LENGTH] = {
-        PO(PRIMITIVE_CAR,                 SIGNATURE_11, NULL),@/
-        PO(PRIMITIVE_ARRAY_LENGTH,        SIGNATURE_11, NULL /*| primp_array_length |*/),@/
-        PO(PRIMITIVE_CURRENT_ENVIRONMENT, SIGNATURE_00, NULL),@/
-        PO(PRIMITIVE_ROOT_ENVIRONMENT,    SIGNATURE_00, NULL),@/
+        PO(PRIMITIVE_ADD,                 SIGNATURE_2,   NULL),@/
+
+        PO(PRIMITIVE_LAMBDA,              SIGNATURE_CL,  NULL),@/
+        PO(PRIMITIVE_VOV,                 SIGNATURE_CL,  NULL),@/
+        PO(PRIMITIVE_CAR,                 SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_ARRAY_LENGTH,        SIGNATURE_1,   NULL /*| primp_array_length |*/),@/
+        PO(PRIMITIVE_CURRENT_ENVIRONMENT, SIGNATURE_0,   NULL),@/
+        PO(PRIMITIVE_ROOT_ENVIRONMENT,    SIGNATURE_0,   NULL),@/
 };
 
 @ @<Extern...@>=
@@ -3864,32 +3882,48 @@ shared char *Primitive_Label[PRIMITIVE_LENGTH] = {
         [PRIMITIVE_INTEGER_P]           = "integer?",
 };
 
+@ @<Global...@>=
+shared address Interpret_Closure = ADDRESS_INVALID;
+
+@ @<Extern...@>=
+extern shared address Interpret_Closure;
+
 @ @<Initialise \Ls/...@>=
-orreturn(cons(fix(0), fix(0), sig + SIGNATURE_00));
-orreturn(cons(fix(1), fix(1), sig + SIGNATURE_11));
-orreturn(cons(fix(1), fix(3), sig + SIGNATURE_13));
-orreturn(cons(fix(2), fix(2), sig + SIGNATURE_22));
-orreturn(cons(fix(2), fix(4), sig + SIGNATURE_24));
-orreturn(cons(fix(3), fix(3), sig + SIGNATURE_33));
+orreturn(new_symbol_const("eval", &sig_eval));
+orreturn(cons(sig_eval, NIL, &sig_eval));
+orreturn(new_symbol_const("copy", &sig_copy));
+orreturn(cons(sig_copy, NIL, &sig_copy));
+orreturn(new_symbol_const("copy-list", &sig_list));
+orreturn(cons(sig_list, NIL, &sig_list));
 @#
-orreturn(new_symbol_const("capture", &capture));
-orreturn(new_symbol_const("evaluate", &evaluate));
-orreturn(new_symbol_const("optional", &optional));
-orreturn(new_symbol_const("verbatim", &verbatim));
+orreturn(cons(fix(0), sig_copy, copy + 0));
+orreturn(cons(fix(1), sig_copy, copy + 1));
+orreturn(cons(fix(2), sig_copy, copy + 2));
+orreturn(cons(fix(0), sig_list, list + 0));
+orreturn(cons(fix(1), sig_list, list + 1));
+orreturn(cons(fix(2), sig_list, list + 2));
+orreturn(cons(fix(0), sig_eval, eval + 0));
+orreturn(cons(fix(1), sig_eval, eval + 1));
+orreturn(cons(fix(2), sig_eval, eval + 2));
+orreturn(cons(fix(3), sig_eval, eval + 3));
 @#
-orreturn(cons(verbatim, NIL, sig + SIGNATURE_EV));
-orreturn(cons(evaluate, sig[SIGNATURE_EV], sig + SIGNATURE_EV));
+sig[SIGNATURE_0] = NIL;
 @#
-orreturn(cons(capture, NIL, sig + SIGNATURE_C));
-orreturn(cons(verbatim, sig[SIGNATURE_EVC], sig + SIGNATURE_EVC));
-orreturn(cons(evaluate, sig[SIGNATURE_EVC], sig + SIGNATURE_EVC));
+orreturn(cons(eval[0], NIL, sig + SIGNATURE_1));
 @#
-orreturn(cons(optional, NIL, sig + SIGNATURE_EVO));
-orreturn(cons(verbatim, sig[SIGNATURE_EVO], sig + SIGNATURE_EVO));
-orreturn(cons(evaluate, sig[SIGNATURE_EVO], sig + SIGNATURE_EVO));
+orreturn(cons(eval[1], NIL, sig + SIGNATURE_2));
+orreturn(cons(eval[0], sig[SIGNATURE_2], sig + SIGNATURE_2));
 @#
-orreturn(cons(capture, NIL, sig + SIGNATURE_VC));
-orreturn(cons(verbatim, sig[SIGNATURE_VC], sig + SIGNATURE_VC));
+orreturn(cons(eval[2], NIL, sig + SIGNATURE_3));
+orreturn(cons(eval[1], sig[SIGNATURE_3], sig + SIGNATURE_3));
+orreturn(cons(eval[0], sig[SIGNATURE_3], sig + SIGNATURE_3));
+@#
+orreturn(cons(list[1], NIL, sig + SIGNATURE_CL));
+orreturn(cons(copy[0], sig[SIGNATURE_CL], sig + SIGNATURE_CL));
+@#
+orreturn(cons(list[2], NIL, sig + SIGNATURE_ECL));
+orreturn(cons(copy[1], sig[SIGNATURE_ECL], sig + SIGNATURE_ECL));
+orreturn(cons(eval[0], sig[SIGNATURE_ECL], sig + SIGNATURE_ECL));
 @#
 for (i = 0; i < PRIMITIVE_LENGTH; i++) {
         Primitive[i].signature = sig[Primitive[i].signature];
@@ -3898,9 +3932,9 @@ for (i = 0; i < PRIMITIVE_LENGTH; i++) {
         orreturn(env_save_m(Root, ltmp, Primitive[i].owner, false));
 }
 
-@
-@d PRIMITIVE_PREFIX "!Primitive/"
+@ @d PRIMITIVE_PREFIX "!Primitive/"
 @d PRIMITIVE_DEFAULT "!Primitive.Default"
+@d PRIMITIVE_INTERPRET "!Interpret-Closure"
 @<Link \Ls/...@>=
 k = 11 + 7; /* |strlen(PRIMITIVE_WRAPPER)| */
 memmove(btmp, PRIMITIVE_DEFAULT, k);
@@ -3922,6 +3956,8 @@ for (i = 0; i < PRIMITIVE_LENGTH; i++) {
         else
                 Primitive[i].wrapper = atmp;
 }
+orreturn(new_symbol_const(PRIMITIVE_INTERPRET, &ltmp));
+orreturn(vm_locate_entry(ltmp, &Interpret_Closure));
 
 @* Stack. Based on list or array.
 
@@ -4073,7 +4109,7 @@ stack_array_reduce (cell *stack)
 @d REG(I,B) (UB((I), (B)) & 0x3f)
 @d POP(I,B) (UB((I), (B)) & 0x80)
 @#
-@d BYTECODE_ADDRESS_DIRECT   0 /* Unsigned 16/24 bit offset. */
+@d BYTECODE_ADDRESS_DIRECT   0 /* Unsigned 16/24 bit offset; unused. */
 @d BYTECODE_ADDRESS_INDIRECT 1 /* Unsigned 16/24 bit offset to |PROGRAM_EXPORT_BASE|
                                 has pointer-size address. */
 @d BYTECODE_ADDRESS_RELATIVE 2 /* Signed 16 bit delta. */
@@ -4172,11 +4208,11 @@ interpret_register (instruction  ins,
         case LR_Ip:
                 if (POP(ins, argc + 1))
                         return LERR_INCOMPATIBLE;
-                return new_int_c(Ip, ret);
+                return new_pointer(Ip, ret);
         case LR_Trap_Ip:
                 if (POP(ins, argc + 1))
                         return LERR_INCOMPATIBLE;
-                return new_int_c(Trap_Ip, ret);
+                return new_pointer(Trap_Ip, ret);
         case LR_Trapped:
                 if (POP(ins, argc + 1))
                         return LERR_INCOMPATIBLE;
@@ -4256,7 +4292,6 @@ interpret_address16 (instruction  ins,
 {
         address from, to, ivia;
         cell rvia;
-        word wvalue;
         error_code reason;
 
         from = Ip - sizeof (instruction);
@@ -4277,8 +4312,8 @@ interpret_address16 (instruction  ins,
                 break;
         case BYTECODE_ADDRESS_REGISTER:@;
                 orreturn(interpret_register(ins, 1, &rvia));
-                orreturn(int_value(rvia, &wvalue)); /* TODO: Missing a bit! */
-                to = wvalue;
+                assert(pointer_p(rvia));
+                to = (address) pointer(rvia);
                 break;
         }
         *ret = to;
@@ -4295,7 +4330,6 @@ interpret_address24 (instruction  ins,
 {
         address from, to, ivia;
         cell rvia;
-        word wvalue;
         error_code reason;
 
         from = Ip - sizeof (instruction);
@@ -4316,8 +4350,8 @@ interpret_address24 (instruction  ins,
                 break;
         case BYTECODE_ADDRESS_REGISTER:@;
                 orreturn(interpret_register(ins, 0, &rvia));
-                orreturn(int_value(rvia, &wvalue)); /* TODO: Missing a bit! */
-                to = wvalue;
+                assert(pointer_p(rvia));
+                to = (address) pointer(rvia);
                 break;
         }
         *ret = to;
@@ -4435,7 +4469,7 @@ case OP_LOAD:@;
         break;
 case OP_PEND:@;
         ortrap(interpret_address16(ins, &link));
-        orassert(new_int_c(link, &VM_Result));
+        orassert(new_pointer(link, &VM_Result));
         ortrap(interpret_save(ins, VM_Result));
         break;
 
@@ -4460,19 +4494,14 @@ case OP_SYMBOL_P:
         VM_Result = predicate(symbol_p(VM_Arg1));
         ortrap(interpret_save(ins, VM_Result));
         break;
+case OP_CLOSURE_P:
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        VM_Result = predicate(closure_p(VM_Arg1));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
 case OP_PRIMITIVE_P:
         ortrap(interpret_solo_argument(ins, &VM_Arg1));
         VM_Result = predicate(primitive_p(VM_Arg1));
-        ortrap(interpret_save(ins, VM_Result));
-        break;
-case OP_APPLICATIVE_P:
-        ortrap(interpret_solo_argument(ins, &VM_Arg1));
-        VM_Result = predicate(applicative_p(VM_Arg1));
-        ortrap(interpret_save(ins, VM_Result));
-        break;
-case OP_OPERATIVE_P:
-        ortrap(interpret_solo_argument(ins, &VM_Arg1));
-        VM_Result = predicate(operative_p(VM_Arg1));
         ortrap(interpret_save(ins, VM_Result));
         break;
 case OP_RESUMPTION_P:
@@ -4486,12 +4515,26 @@ case OP_INTEGER_P:
         ortrap(interpret_save(ins, VM_Result));
         break;
 
-@ Always |Environment|, single arg is symbol or fail.
+@ These two functions have different signatures.
 
 @<Carry out...@>=
+case OP_EXISTS_P:@;
 case OP_LOOKUP:@;
-        ortrap(interpret_solo_argument(ins, &VM_Arg1));
-        ortrap(env_search(Environment, VM_Arg1, &VM_Result));
+        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Table */
+        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Label */
+        if (environment_p(VM_Arg1)) {
+                reason = env_search(VM_Arg1, VM_Arg2, &VM_Result);
+                if (reason == LERR_MISSING && OP(ins) == OP_EXISTS_P)
+                        VM_Result = LFALSE;
+                else if (failure_p(reason))
+                        goto Trap;
+                else if (OP(ins) == OP_EXISTS_P)
+                        VM_Result = LTRUE;
+        } else {
+                ortrap(hashtable_search(VM_Arg1, VM_Arg2, &VM_Result));
+                if (OP(ins) == OP_EXISTS_P)
+                        VM_Result = predicate(defined_p(VM_Result));
+        }
         ortrap(interpret_save(ins, VM_Result));
         break;
 case OP_EXTEND:@;
@@ -4499,17 +4542,24 @@ case OP_EXTEND:@;
         ortrap(new_env(VM_Arg1, &VM_Result));
         ortrap(interpret_save(ins, VM_Result));
         break;
-case OP_DEFINE_M:@;
-        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Label */
-        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Value */
-        ortrap(env_save_m(Environment, VM_Arg1, VM_Arg2, false));
-        ortrap(interpret_save(ins, VOID));
+case OP_TABLE:@;
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        assert(fixed_p(VM_Arg1));
+        assert(fixed_value(VM_Arg1) >= 0
+                && fixed_value(VM_Arg1) <= (word) HASHTABLE_MAX_FREE);
+        ortrap(new_hashtable(fixed_value(VM_Arg1), &VM_Result));
+        ortrap(interpret_save(ins, VM_Result));
         break;
+case OP_DEFINE_M:@;
 case OP_REPLACE_M:@;
-        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Label */
-        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Value */
-        ortrap(env_save_m(Environment, VM_Arg1, VM_Arg2, true));
-        ortrap(interpret_save(ins, VOID));
+        ortrap(interpret_argument(ins, 0, &VM_Arg1)); /* Table */
+        ortrap(interpret_argument(ins, 1, &VM_Arg2)); /* Datum */
+        if (environment_p(VM_Arg1))
+                ortrap(env_save_m_imp(VM_Arg1, VM_Arg2,
+                        OP(ins) == OP_REPLACE_M));
+        else
+                ortrap(hashtable_save_m(VM_Arg1, VM_Arg2,
+                        OP(ins) == OP_REPLACE_M));
         break;
 
 @ The CONS opcode calls cons.
@@ -4518,7 +4568,8 @@ case OP_REPLACE_M:@;
 case OP_CONS:@;
         ortrap(interpret_argument(ins, 1, &VM_Arg1));
         ortrap(interpret_argument(ins, 2, &VM_Arg2));
-        assert(defined_p(VM_Arg1) && defined_p(VM_Arg2));
+        assert(defined_p(VM_Arg1) && defined_p(VM_Arg2)); /* |cons| is a
+                                                macro without an assertion. */
         ortrap(cons(VM_Arg1, VM_Arg2, &VM_Result));
         ortrap(interpret_save(ins, VM_Result));
         break;
@@ -4562,12 +4613,6 @@ case OP_CMPLT_P:
         ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Yin */
         ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Yang */
         ortrap(int_cmp(VM_Arg1, VM_Arg2, &VM_Result));
-#if 0
-        printf("cmp %d <=> %d : %d\n",
-        fixed_value(VM_Arg1),
-        fixed_value(VM_Arg2),
-        fixed_value(VM_Result));
-#endif
         switch(OP(ins)) {
         case OP_CMP:
                 break; /* This is fine. */
@@ -4590,52 +4635,128 @@ case OP_CMPLT_P:
         ortrap(interpret_save(ins, VM_Result));
         break;
 
-@ @<Carry out...@>=
-#if 0
-case OP_APPLICATIVE:@;
-        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Formals */
+@ @<Type def...@>=
+enum {
+        CLOSURE_ADDRESS,
+        CLOSURE_BODY,
+        CLOSURE_ENVIRONMENT,
+        CLOSURE_SIGNATURE,
+        CLOSURE_LENGTH
+};
+
+@ @<Fun...@>=
+error_code new_closure (cell, cell, cell *);
+error_code closure_body (cell, cell *);
+error_code closure_address (cell, cell *);
+error_code closure_environment (cell, cell *);
+error_code closure_signature (cell, cell *);
+
+@ @c
+error_code
+new_closure (cell  sign,
+             cell  body,
+             cell *ret)
+{
+        cell start;
+        error_code reason;
+
+        assert(null_p(sign) || pair_p(sign));
+        assert(null_p(body) || pair_p(body));
+        orreturn(new_pointer(Interpret_Closure, &start));
+        orreturn(new_array_imp(CLOSURE_LENGTH, fix(0), NIL, FORM_CLOSURE, ret));
+        array_base(*ret)[CLOSURE_ADDRESS] = start;
+        array_base(*ret)[CLOSURE_BODY] = body;
+        array_base(*ret)[CLOSURE_SIGNATURE] = sign;
+        array_base(*ret)[CLOSURE_ENVIRONMENT] = Environment;
+        return LERR_NONE;
+}
+
+@ @c
+error_code
+closure_address (cell  o,
+                 cell *ret)
+{
+        assert(closure_p(o));
+        *ret = array_base(o)[CLOSURE_ADDRESS];
+        return LERR_NONE;
+}
+
+@ @c
+error_code
+closure_body (cell  o,
+              cell *ret)
+{
+        assert(closure_p(o));
+        *ret = array_base(o)[CLOSURE_BODY];
+        return LERR_NONE;
+}
+
+@ @c
+error_code
+closure_environment (cell  o,
+                     cell *ret)
+{
+        assert(closure_p(o));
+        *ret = array_base(o)[CLOSURE_ENVIRONMENT];
+        return LERR_NONE;
+}
+
+@ @c
+error_code
+closure_signature (cell  o,
+                   cell *ret)
+{
+        assert(closure_p(o));
+        *ret = array_base(o)[CLOSURE_SIGNATURE];
+        return LERR_NONE;
+}
+
+@ arg1: (nargs . reversed-formals) or (signature-list . reversed-formals)?
+arg2: body
+
+@<Carry out...@>=
+case OP_CLOSURE:@;
+        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Signature */
         ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Body */
-        ortrap(new_applicative(VM_Arg1, VM_Arg2, &VM_Result));
-        ortrap(interpret_save(ins, VM_Result));
-        break;
-case OP_OPERATIVE:@;
-        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Formals */
-        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Body */
-        ortrap(new_operative(VM_Arg1, VM_Arg2, &VM_Result));
+        ortrap(new_closure(VM_Arg1, VM_Arg2, &VM_Result));
         ortrap(interpret_save(ins, VM_Result));
         break;
 case OP_OPEN:@;
         ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        assert(primitive_p(VM_Arg1) || closure_p(VM_Arg1));
+        if (primitive_p(VM_Arg1)) { /* Root? */
+                reason = LERR_UNIMPLEMENTED;
+                goto Trap;
+        } else
+                ortrap(closure_environment(VM_Arg1, &VM_Result));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+case OP_ADDRESS:@;
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        assert(primitive_p(VM_Arg1) || closure_p(VM_Arg1));
         if (primitive_p(VM_Arg1))
-                ortrap(new_int_c(Primitive[primitive(VM_Arg1)].wrapper,
-                        true, &VM_Result));
+                ortrap(new_pointer(primitive_address_c(VM_Arg1), &VM_Result));
         else
-                ortrap(closure_open(VM_Arg1, &VM_Result));
+                ortrap(closure_address(VM_Arg1, &VM_Result));
         ortrap(interpret_save(ins, VM_Result));
         break;
-#endif
-case OP_OPEN:@;
+case OP_BODY:@;
         ortrap(interpret_solo_argument(ins, &VM_Arg1));
-        assert(primitive_p(VM_Arg1));
-        ortrap(new_int_c(primitive_object(VM_Arg1)->wrapper, &VM_Result));
+        assert(primitive_p(VM_Arg1) || closure_p(VM_Arg1));
+        if (primitive_p(VM_Arg1)) { /* Root? */
+                reason = LERR_UNIMPLEMENTED;
+                goto Trap;
+        } else
+                ortrap(closure_body(VM_Arg1, &VM_Result));
         ortrap(interpret_save(ins, VM_Result));
         break;
 case OP_SIGNATURE:@;
         ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        assert(primitive_p(VM_Arg1) || closure_p(VM_Arg1));
         if (primitive_p(VM_Arg1))
                 VM_Result = primitive_signature_c(VM_Arg1);
-#if 0
-        else if (applicative_p(VM_Arg1))
-                VM_Result = applicative_signature(VM_Arg1);
-        else if (operative_p(VM_Arg1))
-                ortrap(cons(LBA_CAPTURE, NIL, &VM_Result));
-                /* Here for completeness; not actually used to open an
-                        operative closure. */
-#endif
-        else {
-                reason = LERR_INCOMPATIBLE;
-                goto Trap;
-        }
+        else
+                ortrap(closure_signature(VM_Arg1, &VM_Result));
         ortrap(interpret_save(ins, VM_Result));
         break;
 
@@ -6502,24 +6623,6 @@ assembly_append_statement_m (cell  o,
                         orreturn(statement_set_argument_m(statement,
                                 i, ARGUMENT_RELATIVE, delta));
                         break;
-
-#if 0
-                case ARGUMENT_OBJECT:
-                        if (integer_p(A(argument)->dex)
-                                    && statement_integer_fits_p(statement,
-                                        i, A(argument)->dex)) {
-                                orreturn(statement_set_argument_m(statement,
-                                        i, ARGUMENT_SPECIAL, A(argument)->dex));
-                        } else {
-                                orreturn(assembly_install_object_m(o,
-                                        A(argument)->dex, &tablerow));
-                                orreturn(new_int_c(tablerow, &link));
-                                orreturn(statement_set_argument_m(statement,
-                                        i, ARGUMENT_TABLE, link));
-                        }
-                        break;
-#endif
-
                 case ARGUMENT_REGISTER:
                 case ARGUMENT_REGISTER_POPPING:
                         assert(register_p(A(argument)->dex));
@@ -6785,9 +6888,6 @@ for (i = 0; i < hashtable_length_c(array_base(o)[ASSEMBLY_READY_REQUIRE]); i++) 
                 continue;
         ortrap(hashtable_search(Program_Export_Table, A(label)->sin, &found));
         if (undefined_p(found)) {
-#if 1
-                printf("missing: "); psym(A(label)->sin); printf(".\n");
-#endif
                 reason = LERR_MISSING;
                 goto Trap;
         }
@@ -6843,15 +6943,6 @@ for (i = 0; i < hashtable_length_c(array_base(o)[ASSEMBLY_READY_EXPORT]); i++) {
                                         with |LERR_EXISTS| if necessary. */
 @#
         next_export++;
-}
-
-@ @<Fun...@>=
-void fuck (void);
-@ @c
-void
-fuck (void)
-{
-        printf("---\n");
 }
 
 @ @<Install instructions as bytecode and commentary@>=
@@ -6995,6 +7086,11 @@ case ARGUMENT_RELATIVE:
         }
         wvalue *= sizeof (instruction);
         ins |= htobe32((wvalue & 0xffff) | (BYTECODE_ADDRESS_RELATIVE << 30));
+        break;
+case ARGUMENT_REGISTER:
+case ARGUMENT_REGISTER_POPPING:
+        ortrap(assembly_encode_AREG(1, arg, &ivalue));
+        ins |= ivalue | htobe32((BYTECODE_ADDRESS_REGISTER << 30));
         break;
 default:
         reason = LERR_INCOMPATIBLE;
@@ -7829,11 +7925,11 @@ llt_leak (llt_header  *fixture,
                 lid = (word) fixture->leaks[0];
         orreturn(alloc_mem(fixture->leaks, sizeof (void *) * (lid + 1),
                 0, (void **) &fixture->leaks));
-        fixture->leaks[0] = lid;
+        fixture->leaks[0] = (void *) (intptr_t) lid;
         fixture->leaks[lid] = NULL;
         orreturn(alloc_mem(NULL, length, 0, ret));
         fixture->leaks[lid] = *ret;
-        fixture->leaks[0] = lid + 1;
+        fixture->leaks[0] = (void *) (intptr_t) (lid + 1);
         return LERR_NONE;
 }
 
@@ -7918,6 +8014,54 @@ llt_appendf (llt_header  *fixture,
         if (failure_p(reason))
                 return reason;
         return llt_sprintf(fixture, ret, "%s%s", prior, append);
+}
+
+@* Objects Under Test.
+
+@<Test fun...@>=
+bool llt_out_match_p (cell, cell);
+
+@ @(testless.c@>=
+bool
+llt_out_match_p (cell got,
+                 cell want)
+{
+        if (special_p(want) || symbol_p(want))
+                return got == want;
+        if (special_p(got) || symbol_p(got))
+                return false;
+        if (T(got) != T(want))
+                return false;
+        if (pair_p(want))
+                return pair_p(got)
+                        && llt_out_match_p(A(got)->sin, A(want)->sin)
+                        && llt_out_match_p(A(got)->dex, A(want)->dex);
+        if (pointer_p(want)) {
+                if (!pointer_p(got))
+                        return false;
+                if (pointer(got) != pointer(want))
+                        return false;
+                return llt_out_match_p(pointer_datum(got), pointer_datum(want));
+        }
+        if (closure_p(want)) {
+                if (!closure_p(got))
+                        return false;
+                if (!llt_out_match_p(array_base(got)[CLOSURE_ADDRESS],
+                            array_base(want)[CLOSURE_ADDRESS]))
+                        return false;
+                if (!llt_out_match_p(array_base(got)[CLOSURE_ENVIRONMENT],
+                            array_base(want)[CLOSURE_ENVIRONMENT]))
+                        return false;
+                if (!llt_out_match_p(array_base(got)[CLOSURE_SIGNATURE],
+                            array_base(want)[CLOSURE_SIGNATURE]))
+                        return false;
+                return llt_out_match_p(array_base(got)[CLOSURE_BODY],
+                            array_base(want)[CLOSURE_BODY]);
+        }
+        if (environment_p(want)) {
+                return got == want; /* TBD */
+        }
+        assert(!"unsupported match type");
 }
 
 @* TAP. Tap routines to implement a rudimentary stream of test
@@ -8438,7 +8582,7 @@ llt_Evaluator__prepare (llt_header *th)
         ortrap(vm_locate_entry(label, &Ip));
         ortrap(new_symbol_const(PROGRAM_EXIT, &label));
         ortrap(vm_locate_entry(label, &fin));
-        ortrap(new_int_c(fin, &label));
+        ortrap(new_pointer(fin, &label));
         ortrap(stack_array_push(&Control_Link, label));
 @#
         Environment = extended;
@@ -8613,28 +8757,38 @@ int llt_Reader__run (llt_header *);
 int llt_Reader__validate (llt_header *);
 int llt_Reader__clean (llt_header *);
 @#
-bool llt_Reader__match_p (cell, cell);
-@#
 @<Object constructors for reader tests@>@;
 
 @ @(t/reader.c@>=
-char LLT_Glyph_Tab[] = { 0xe2, 0xad, 0xbe, 0x00 }; /* \.{\#u2b7e} */
-char LLT_Glyph_Newline[] = { 0xe2, 0x90, 0xa4, 0x00 }; /* \.{\#u2424} */
+char LLT_Glyph_Tab[] = { 0xe2, 0xad, 0xbe, 0x00 }; /* \.{\#u2b7e} ---
+                                                        horizontal tab key */
+char LLT_Glyph_Newline[] = { 0xe2, 0x90, 0xa4, 0x00 }; /* \.{\#u2424} ---
+                                                        symbol for newline */
 @#
 struct {
         char        *source;
         error_code (*build)(cell *);
-} LLT_Reader_Rules[] = {
-        { "42",                 llt_Reader__construct_integer_42 },
-        { "()",                 llt_Reader__construct_NIL },
-        { "( )",                llt_Reader__construct_NIL },
-        { "(\t)",               llt_Reader__construct_NIL },
-        { "(\n\t)",             llt_Reader__construct_NIL },
-        { "#f",                 llt_Reader__construct_FALSE },
-        { "#t",                 llt_Reader__construct_TRUE },
-        { "(())",               llt_Reader__construct_pair_NIL_NIL },
-        { "( ())",              llt_Reader__construct_pair_NIL_NIL },
-        { "(() . ())",          llt_Reader__construct_pair_NIL_NIL },
+} LLT_Reader_Rules[] = {@|
+        { "42",                 llt_Reader__build_integer_42 },@|
+        { "(42)",               llt_Reader__build_list_42 },@|
+        { "(42 )",              llt_Reader__build_list_42 },@|
+        { "()",                 llt_Reader__build_NIL },@|
+        { "( )",                llt_Reader__build_NIL },@|
+        { "(\t)",               llt_Reader__build_NIL },@|
+        { "(\n\t)",             llt_Reader__build_NIL },@|
+        { "#f",                 llt_Reader__build_FALSE },@|
+        { "#t",                 llt_Reader__build_TRUE },@|
+        { "(())",               llt_Reader__build_pair_NIL_NIL },@|
+        { "( ())",              llt_Reader__build_pair_NIL_NIL },@|
+        { "(() . ())",          llt_Reader__build_pair_NIL_NIL },@|
+        { "symbol",             llt_Reader__build_symbol },@|
+        { "long-symbol",        llt_Reader__build_long_symbol },@|
+        { "(list)",             llt_Reader__build_list },@|
+        { "(+)",                llt_Reader__build_list_tiny },@|
+        { "(x y z)",            llt_Reader__build_xyz },@|
+        { "(lambda () x y z)",  llt_Reader__build_application },@|
+        { "((x y z) x y z)",    llt_Reader__build_list_nested },@|
+        { "((x y z) . (x y z))",llt_Reader__build_list_nested },@|
         { NULL, NULL }
 };
 
@@ -8658,7 +8812,7 @@ llt_Reader__prepare (llt_header *th)
         ortrap(vm_locate_entry(label, &Ip));
         ortrap(new_symbol_const(PROGRAM_EXIT, &label));
         ortrap(vm_locate_entry(label, &fin));
-        ortrap(new_int_c(fin, &label));
+        ortrap(new_pointer(fin, &label));
         ortrap(stack_array_push(&Control_Link, label));
 @#
         General[0] = tc->source;
@@ -8684,8 +8838,8 @@ llt_Reader__validate (llt_header *th)
         llt_fixture *tc = (llt_fixture *) th;
 
         tap_ok(th, "success", !failure_p(tc->reason), fix(tc->reason));
-        tap_ok(th, "correct result",
-                llt_Reader__match_p(Accumulator, tc->want), Accumulator);
+        tap_ok(th, "correct result", llt_out_match_p(Accumulator, tc->want),
+                Accumulator);
         return LLT_RUN_CONTINUE;
 }
 
@@ -8706,8 +8860,8 @@ llt_Reader__Simple (llt_header  *suite,
         llt_fixture *tc;
         llt_header *th;
         char *name;
-        error_code reason;
         int i, length, rules;
+        error_code reason;
 
         for (rules = 0; LLT_Reader_Rules[rules].source; rules++)
                 ;
@@ -8723,7 +8877,7 @@ llt_Reader__Simple (llt_header  *suite,
                         llt_Reader__clean);
                 tc->taps = 2;
                 tc->want = NIL;
-                tc->interpret_limit = 1024;
+                tc->interpret_limit = 2048;
                 orreturn(llt_sprintf(th, &tc->name, "read `"));
                 name = LLT_Reader_Rules[i].source;
                 while (*name) { /* This is horrifically inefficient. */
@@ -8761,47 +8915,30 @@ llt_Reader__Simple (llt_header  *suite,
         return LERR_NONE;
 }
 
-@ @(t/reader.c@>=
-bool
-llt_Reader__match_p (cell got,
-                     cell want)
-{
-        if (special_p(want))
-                return got == want;
-        if (special_p(got))
-                return false;
-        if (T(got) != T(want))
-                return false;
-        if (pair_p(want))
-                return llt_Reader__match_p(A(got)->sin, A(want)->sin)
-                        && llt_Reader__match_p(A(got)->dex, A(want)->dex);
-        assert(!"unsupported match type");
-}
-
 @ @<Object constructors for reader tests@>=
 error_code
-llt_Reader__construct_integer_42 (cell *ret)
+llt_Reader__build_integer_42 (cell *ret)
 {
         *ret = fix(42);
         return LERR_NONE;
 }
 
 error_code
-llt_Reader__construct_NIL (cell *ret)
+llt_Reader__build_NIL (cell *ret)
 {
         *ret = NIL;
         return LERR_NONE;
 }
 
 error_code
-llt_Reader__construct_FALSE (cell *ret)
+llt_Reader__build_FALSE (cell *ret)
 {
         *ret = LFALSE;
         return LERR_NONE;
 }
 
 error_code
-llt_Reader__construct_TRUE (cell *ret)
+llt_Reader__build_TRUE (cell *ret)
 {
         *ret = LTRUE;
         return LERR_NONE;
@@ -8809,9 +8946,325 @@ llt_Reader__construct_TRUE (cell *ret)
 
 @ @<Object constructors for reader tests@>=
 error_code
-llt_Reader__construct_pair_NIL_NIL (cell *ret)
+llt_Reader__build_pair_NIL_NIL (cell *ret)
 {
         return cons(NIL, NIL, ret);
+}
+
+@ @<Object constructors for reader tests@>=
+error_code
+llt_Reader__build_symbol (cell *ret)
+{
+        return new_symbol_cstr("symbol", ret);
+}
+
+@ @<Object constructors for reader tests@>=
+error_code
+llt_Reader__build_long_symbol (cell *ret)
+{
+        return new_symbol_cstr("long-symbol", ret);
+}
+
+@ @<Object constructors for reader tests@>=
+error_code
+llt_Reader__build_list (cell *ret)
+{
+        cell tmp;
+        error_code reason;
+        orreturn(new_symbol_cstr("list", &tmp));
+        return cons(tmp, NIL, ret);
+}
+
+@ @<Object constructors for reader tests@>=
+error_code
+llt_Reader__build_list_42 (cell *ret)
+{
+        return cons(fix(42), NIL, ret);
+}
+
+@ @<Object constructors for reader tests@>=
+error_code
+llt_Reader__build_list_tiny (cell *ret)
+{
+        cell tmp;
+        error_code reason;
+        orreturn(new_symbol_cstr("+", &tmp));
+        return cons(tmp, NIL, ret);
+}
+
+@ @<Object constructors for reader tests@>=
+error_code
+llt_Reader__build_xyz (cell *ret)
+{
+        cell tmp, x, y, z;
+        error_code reason;
+
+        orreturn(new_symbol_cstr("x", &x));
+        orreturn(new_symbol_cstr("y", &y));
+        orreturn(new_symbol_cstr("z", &z));
+        orreturn(cons(z, NIL, &tmp));
+        orreturn(cons(y, tmp, &tmp));
+        return cons(x, tmp, ret);
+}
+
+@ @<Object constructors for reader tests@>=
+error_code
+llt_Reader__build_list_nested (cell *ret)
+{
+        cell head, tail;
+        error_code reason;
+        orreturn(llt_Reader__build_xyz(&head));
+        orreturn(llt_Reader__build_xyz(&tail));
+        return cons(head, tail, ret);
+}
+
+@ @<Object constructors for reader tests@>=
+error_code
+llt_Reader__build_application (cell *ret)
+{
+        cell label, tmp;
+        error_code reason;
+        orreturn(llt_Reader__build_xyz(&tmp));
+        orreturn(new_symbol_cstr("lambda", &label));
+        orreturn(cons(NIL, tmp, &tmp));
+        return cons(label, tmp, ret);
+}
+
+@* Closure tests.
+
+@(t/closure.c@>=
+#include <string.h>
+@<Test common preamble@>@;
+
+int
+main (int    argc,
+      char **argv)
+{@+
+        return llt_main(argc, argv, true);@+
+}
+
+typedef struct {
+        LLT_FIXTURE_HEADER@;
+
+        error_code (*build)(cell *);
+        half  interpret_limit;
+        char *csource;
+        cell  lsource, ssource;
+        cell  want;
+} llt_fixture;
+
+int Test_Fixture_Size = sizeof (llt_fixture);
+
+error_code llt_Closure__Simple (llt_header *, int *, bool, llt_header **);
+@#
+int llt_Closure__prepare (llt_header *);
+int llt_Closure__run (llt_header *);
+int llt_Closure__validate (llt_header *);
+int llt_Closure__clean (llt_header *);
+@#
+@<Object constructors for closure tests@>@;
+
+@ @(t/closure.c@>=
+struct {
+        char        *source;
+        error_code (*build)(cell *);
+} LLT_Closure_Rules[] = {@|
+        { "(lambda ())",        llt_Closure__build_ },@|
+        { "(lambda x)",         llt_Closure__build__x },@|
+        { "(lambda (x))",       llt_Closure__build_x },@|
+        { "(lambda (x y))",     llt_Closure__build_xy },@|
+        { "(lambda (x y . z))", llt_Closure__build_xy_z },@|
+        { NULL, NULL }
+};
+
+llt_initialise Test_Suite[] = {
+        llt_Closure__Simple,
+        NULL
+};
+
+@ @(t/closure.c@>=
+int
+llt_Closure__prepare (llt_header *th)
+{
+        llt_fixture *tc = (llt_fixture *) th;
+        address fin;
+        cell label, jexit;
+        int length;
+        error_code reason;
+
+        ortrap(tc->build(&tc->want));
+        length = strlen(tc->csource);
+        orreturn(new_segment(length, 0, &tc->ssource));
+        memmove(segment_base(tc->ssource), tc->csource, length);
+@#
+        ortrap(new_symbol_const(PROGRAM_EXIT, &label));
+        ortrap(vm_locate_entry(label, &fin));
+        ortrap(new_pointer(fin, &jexit));
+        ortrap(stack_array_push(&Control_Link, jexit));
+        General[0] = tc->ssource;
+        General[1] = fix(0);
+        ortrap(new_symbol_const(PROGRAM_READ, &label));
+        ortrap(vm_locate_entry(label, &Ip));
+        Interpret_Count = Interpret_Limit = 0;
+        ortrap(interpret());
+        General[0] = General[1] = NIL;
+        tc->lsource = Accumulator;
+@#
+        Interpret_Count = 0;
+        Interpret_Limit = tc->interpret_limit;
+        ortrap(stack_array_push(&Control_Link, jexit));
+        ortrap(new_symbol_const(PROGRAM_EVALUATE, &label));
+        ortrap(vm_locate_entry(label, &Ip));
+        Expression = tc->lsource;
+        return LLT_RUN_CONTINUE;
+Trap:
+        return LLT_RUN_FAIL;
+}
+
+@ @(t/closure.c@>=
+int
+llt_Closure__run (llt_header *th)
+{
+        llt_fixture *tc = (llt_fixture *) th;
+        tc->reason = interpret();
+        return LLT_RUN_CONTINUE;
+}
+
+@ @(t/closure.c@>=
+int
+llt_Closure__validate (llt_header *th)
+{
+        llt_fixture *tc = (llt_fixture *) th;
+
+        tap_ok(th, "success", !failure_p(tc->reason), fix(tc->reason));
+        tap_ok(th, "correct result",
+                llt_out_match_p(Accumulator, tc->want), Accumulator);
+        return LLT_RUN_CONTINUE;
+}
+
+@ @(t/closure.c@>=
+int
+llt_Closure__clean (llt_header *th @[unused@])
+{
+        return LLT_RUN_CONTINUE;
+}
+
+@ @(t/closure.c@>=
+error_code
+llt_Closure__Simple (llt_header  *suite,
+                    int         *count,
+                    bool         full @[unused@],
+                    llt_header **ret)
+{
+        llt_fixture *tc;
+        llt_header *th;
+        error_code reason;
+        int i, rules;
+
+        for (rules = 0; LLT_Closure_Rules[rules].source; rules++)
+                ;
+        orreturn(llt_fixture_grow(suite, *count, rules));
+        tc = (llt_fixture *) suite;
+        for (i = 0; i < rules; i++) {
+                tc = ((llt_fixture *) suite) + *count + i;
+                th = (llt_header *) tc;
+                llt_fixture__init_common(th, *count + i,
+                        llt_Closure__prepare,
+                        llt_Closure__run,
+                        llt_Closure__validate,
+                        llt_Closure__clean);
+                orreturn(llt_sprintf(th, &tc->name, "construct closure `%s'",
+                        LLT_Closure_Rules[i].source));
+                tc->build = LLT_Closure_Rules[i].build;
+                tc->csource = LLT_Closure_Rules[i].source;
+                tc->taps = 2;
+                tc->want = tc->lsource = tc->ssource = NIL;
+                tc->interpret_limit = 2048;
+        }
+        (*count) += rules;
+        *ret = suite;
+        return LERR_NONE;
+}
+
+@ These build a closure to compare with the one built by the test.
+
+@<Object constructors for closure tests@>=
+error_code
+llt_Closure__build_ (cell *ret)
+{       /* \.{(lambda ())} remains \.{()}. */
+        return new_closure(NIL, NIL, ret);
+}
+
+@ @<Object constructors for closure tests@>=
+error_code
+llt_Closure__build__x (cell *ret)
+{       /* \.{(lambda x)} becomes \.{((x eval-list))}. */
+        cell leval, sign, tmp, x;
+        error_code reason;
+
+        orreturn(new_symbol_const("eval-list", &leval));
+        orreturn(new_symbol_const("x", &x));
+        orreturn(cons(leval, NIL, &tmp));
+        orreturn(cons(x, tmp, &tmp));
+        orreturn(cons(tmp, NIL, &sign));
+        return new_closure(sign, NIL, ret);
+}
+
+@ @<Object constructors for closure tests@>=
+error_code
+llt_Closure__build_x (cell *ret)
+{       /* \.{(lambda (x))} becomes \.{((x eval))}. */
+        cell eval, tmp, sign, x;
+        error_code reason;
+
+        orreturn(new_symbol_const("eval", &eval));
+        orreturn(new_symbol_const("x", &x));
+        orreturn(cons(eval, NIL, &tmp));
+        orreturn(cons(x, tmp, &tmp));
+        orreturn(cons(tmp, NIL, &sign));
+        return new_closure(sign, NIL, ret);
+}
+
+@ @<Object constructors for closure tests@>=
+error_code
+llt_Closure__build_xy (cell *ret)
+{       /* \.{(lambda (x y))} becomes \.{((x eval) (y eval))}. */
+        cell eval, sign, x, xtmp, y, ytmp;
+        error_code reason;
+
+        orreturn(new_symbol_const("eval", &eval));
+        orreturn(new_symbol_const("x", &x));
+        orreturn(new_symbol_const("y", &y));
+        orreturn(cons(eval, NIL, &eval));
+        orreturn(cons(x, eval, &xtmp));
+        orreturn(cons(y, eval, &ytmp));
+        orreturn(cons(ytmp, NIL, &sign));
+        orreturn(cons(xtmp, sign, &sign));
+        return new_closure(sign, NIL, ret);
+}
+
+@ @<Object constructors for closure tests@>=
+error_code
+llt_Closure__build_xy_z (cell *ret)
+{       /* \.{(lambda (x y . z))} becomes \.{((x eval) (y eval)
+                                                (z eval-list))}. */
+        cell eval, leval, sign, x, xtmp, y, ytmp, z, ztmp;
+        error_code reason;
+
+        orreturn(new_symbol_const("eval", &eval));
+        orreturn(new_symbol_const("eval-list", &leval));
+        orreturn(new_symbol_const("x", &x));
+        orreturn(new_symbol_const("y", &y));
+        orreturn(new_symbol_const("z", &z));
+        orreturn(cons(eval, NIL, &eval));
+        orreturn(cons(leval, NIL, &leval));
+        orreturn(cons(x, eval, &xtmp));
+        orreturn(cons(y, eval, &ytmp));
+        orreturn(cons(z, leval, &ztmp));
+        orreturn(cons(ztmp, NIL, &sign));
+        orreturn(cons(ytmp, sign, &sign));
+        orreturn(cons(xtmp, sign, &sign));
+        return new_closure(sign, NIL, ret);
 }
 
 @** Index. And some remaining bits \AM\ pieces.

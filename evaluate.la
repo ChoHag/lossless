@@ -1,698 +1,1145 @@
-#       To evaluate an expression push the continuation address
-#       onto the Control-Link and then the unevaluated expression
-#       and jump to !Evaluate.
+#       There are five registers used specially for evaluating
+#       Lossless code. In general they each have a singular purpose but
+#       some are also misused between and within the evaluator
+#       subroutines to avoid having to spill the general-purpose
+#       registers to the stack.
+#
+#       Accumulator     The result of evaluation, or just `the result'.
+#       Arguments       Partially-evaluated list of function arguments.
+#       Control-Link    The stack. This register is not misused.
+#       Environment     The current run-time environment, also not misused.
+#       Expression      The expression or sub-expression being evaluated.
+#
+#       As well as being used within a subroutine, primarily to
+#       spill general-purpose registers so that it can use them,
+#       the stack is used between subroutines by pushing an address
+#       to return to (eg. obtained with the PEND operator) *after*
+#       any data it will need that won't be in other registers.
+#
+#       To evaluate an expression push the address to return the
+#       result to such as !Exit to the stack and fill the Expression
+#       register, then start interpretation at or jump to !Evaluate.
+#
+#       If the expression being evaluated is a symbol the result
+#       is the value that symbol is bound to in the environment
+#       (LOOKUP) and control returns to the address saved on the
+#       stack. This instruction has the public label !Return for
+#       use in the frequent operation of popping an address off the
+#       stack and jumping to it in a conditional BRANCH instruction.
+#
+#       If the expression being evaluated is a pair then it denotes
+#       a combiner which requires more work, performed by Combine/Start.
+#
+#       Otherwise if it's not a pair or a symbol the expression
+#       evaluates to itself, ie. it's copied straight to the Accumulator.
 #
 #       (In) Expression: The expression to evaluate
+#       (In) Control-Link: ...
 #
-#       (Out) Accumulator: The evaluated result
+#       (Return) Accumulator: The evaluated result
 
 !Evaluate
-        SYMBOL? acc,expr
-        BRANCH  acc,@!Lookup    Jump to !Lookup if the value is a symbol.
-        PAIR?   acc,expr
-        BRANCH  acc,@Combine-Start
-
-#       When evaluation of an expression is finished, or if the
-#       expression is not being evaluated, control returns to !Finish
-#       to determine what to do with it.
-#
-#       Alternatively the value of a binding is placed directly
-#       into the Accumulator and control flows into !Return.
-#
-#       This is the collection of final routines reached after
-#       !Evaluate. The result is in either Expression or Accumulator
-#       and the routine to branch to after ensuring the value is in
-#       Accumulator is on the stack.
-
-!Finish LOAD    acc,expr        Save the expression in the Accumulator.
-!Return JUMP    =clink          The most common continuation address.
-!Lookup LOOKUP  acc,expr        Look for symbols in Environment
-        JUMP    =clink          No need to jump via !Return.
+        SYMBOL? tmp,expr
+        BRANCH  =tmp,@1f
+        LOOKUP  acc,env,expr    Look for the symbol in the Environment.
+!Return JUMP    =clink
+1h      PAIR?   tmp,expr
+        BRANCH  tmp,@Combine/Start
+        LOAD    acc,expr        Save the expression in the Accumulator.
+        JUMP    =clink          There is no need to JUMP via !Return; only
+;                               in a BRANCH instruction.
 !Exit   HALT
 
-#       In order to evaluate (combine) a list the first item in the
-#       list is evaluated to determine how to continue. The stack
-#       is prepared so that interpretation will continue from
-#       Combine-Dispatch when the first item is known.
+#       The first item in a list, or the combiner, determines how
+#       a list will be combined (or the sinister half of a pair ---
+#       the list need not be proper).
 #
-#       The Environment is saved on the stack to be restored after
-#       evaluation has finished.
+#       To determine what the first item in the list is requires
+#       another trip through the evaluator before even considering
+#       the arguments and this particular trip may itself be part
+#       of the process of evaluating the arguments of another a
+#       combiner, so before anything else a `frame header' is pushed
+#       to the stack consisting of the current Arguments and
+#       Environment. Immediately after the remainder of the combination
+#       is pushed to the stack followed by a directive to continue
+#       with Combine/Dispatch after determining what the combiner is.
+#
+#       Then the combiner is placed in Expression and control
+#       recurses back to !Evaluate to determine how to proceed.
 #
 #       (In) Argument-List: A list of arguments to a combiner in the process
 #                  of being built and into which the result of
 #                  evaluating THIS combiner will be placed.
 #       (In) Expression: The combination expression (list) being evaluated.
 #       (In) Control-Link: ...
-#
-#       (Out) Expression: The combination's arguments.
-#       (Out) Control-Link: @Combine-Dispatch Uncombined-Arguments <Frame> ...
 
-Combine-Start
+Combine/Start
         LOAD    clink,args      Stack any arguments which are currently
 ;                               being evaluated in a previous stack frame.
         LOAD    clink,env       Also stack the current run-time environment.
         CDR     clink,expr      Extract and stack the remainder of the
 ;                               (uncombined) list.
-        PEND    clink,@Combine-Dispatch   Continue from Combine-Dispatch
+        PEND    clink,@Combine/Dispatch   Continue from Combine/Dispatch
 ;                               after evaluation.
-        CAR     expr,expr       The expression which should evaluate to a
-;                               combiner (including primitives & continuations).
-        JUMP    @!Evaluate      Restart the evaluation process.
+        CAR     expr,expr       The combiner which determines what to do with
+;                               the arguments just saved.
+        JUMP    @!Evaluate      Recurse into the evaluator.
 
-#       Evaluation leaves its result in the Accumulator which should
-#       be some sort of combiner. Combine-Dispatch simply saves
-#       that result and jumps on to the appropriate routine (or
-#       aborts).
+#       When the evaluator has determined what the combiner is, control
+#       reaches Combine/Dispatch. This routine simply jumps to
+#       Combine-Primitive, Combine-Closure or the unwritten
+#       Combine-Resumption, or raises an error because the object
+#       cannot be used to perform combination.
 #
-#       After reaching here from above (Combine-Start), the stack
-#       is headed by the list's remaining (unevaluated) arguments
-#       followed by a frame header (the saved Environment followed
-#       by pending Arguments).
-#
-#       (In) Accumulator: Combiner (combination's first list item, evaluated).
+#       (In) Accumulator: Combiner (combination's first list item, evaluated)
 #       (In) Control-Link: Uncombined-Arguments <Frame>
 #
-#       (Out) Expression: Combiner.
+#       (Out) Expression: Combiner
 
-Combine-Dispatch
+Combine/Dispatch
         LOAD          expr,acc
         PRIMITIVE?    tmp,expr
         BRANCH        tmp,@Combine-Primitive
-        APPLICATIVE?  tmp,expr
-        BRANCH        tmp,@Combine-Applicative
-        OPERATIVE?    tmp,expr
-        BRANCH        tmp,@Combine-Operative
+        CLOSURE?      tmp,expr
+        BRANCH        tmp,@Combine-Closure
         RESUMPTION?   tmp,expr
         BRANCH        tmp,@Combine-Primitive
         TRAP          'uncombinable
 
-#       After a combination has been fully evaluated the result is
-#       in Accumulator and the environment and partial arguments
-#       saved as a frame header are restored.
+#       After combination is finally complete and the result is in
+#       the Accumulator this routine will restore the in-process
+#       Arguments and run-time Environment from the frame header
+#       saved in Combine/Start and resume whatever was happening
+#       at the time, ascending out of one level of recursion.
 #
 #       (In) Accumulator: Combined result.
 #       (In) Control-Link: <Frame> ...
 #
-#       (Out) Control-Link: ...
+#       (Out) Control-Link:
 
-Combine-Finish
+Combine/Finish
         LOAD    env,=clink
         LOAD    args,=clink
         JUMP    =clink
 
-#       An operative closure is the simplest environment to enter.
-#
-#       The formals associated with the closure are not used to
-#       interpret the expression but dictate which parts of the
-#       run-time are provided to the function. These are collected
-#       into a new environment and execution continues with the
-#       operative closure's program.
-#
-#       Recall that the closure being entered has been saved in
-#       Expression and the stack is unchanged from the
-#       description for Combine-Dispatch (ie. it is topped by the
-#       combiner's unevaluated arguments and a frame header).
-#
-#       (In) Expression: Operative closure combiner.
+#       Lossless understands two types of combiner, primitives and
+#       closure which are described here. The defining aspect of a
+#       closure is its signature, which is a list describing how
+#       the evaluator should handle its arguments, known as the
+#       argument strategy.
+
+#       Each strategy in the closure's signature describes how to
+#       process the source arguments (ie. evaluate them or not) and
+#       then bind the result or some run-time evaluator state.
+
+#       Two registers are spilled to the stack releasing them to
+#       use in examining the signature/strategy. r0 will hold the
+#       remaining strategy list and r1 the binding or strategy
+#       label. The source arguments are popped back off the stack
+#       and Expression is used to build a list of directives to
+#       push onto the stack if the source arguments' syntax is valid.
+
+#       (In) Expression: Closure object
 #       (In) Control-Link: Uncombined-Arguments <Frame>
-#
-#       (Out) Environment: Closure's environment, extended & populated.
-#       (Out) Expression: Closure's executable content.
-#       (Out) Control-Link: @Combine-Finish <Frame>
 
-Combine-Operative
-        LOAD    r0,env          Save the current environment.
-        LOAD    args,=clink     Remove the arguments from the stack.
-        OPEN    acc,expr
-        LOAD    r1,=acc         `Formals'.
-        LOAD    env,=acc
-        EXTEND  env,env
-        CAR     expr,acc        The closure body.
-        LOAD    acc,=r1         This informal's name (or nil).
-        CMPIS?  r2,acc,()       Is the first informal (un)wanted?
-        BRANCH  r2,@1f
-        DEFINE! env,acc,args    The first informal names a variable to
-;                               bind to the caller's arguments in the
-;                               closure.
-1h      LOAD    acc,=r1         The second informal binding name.
-        CMPIS?  r2,acc,()
-        BRANCH  r2,@2f
-        DEFINE! env,acc,r0      The second informal names the variable to
-;                               bind to the caller's environment.
-2h      LOAD    acc,=r1         The third informal binding name.
-        CMPIS?  r2,acc,()
-        BRANCH  r2,@3f
-        DELIMIT r0              Magic, also clobber r0.
-        DEFINE! env,acc,r0      The last informal names a continuation delimiter.
-3h      PEND    =clink,@Combine-Finish
-        JUMP    @!Evaluate
+Combine-Closure
+        LOAD    args,=clink     Restore unprocessed arguments.
+        LOAD    clink,expr
+        LOAD    clink,r0
+        LOAD    clink,r1
+        SIGNATURE r0,expr
+        LOAD    expr,()
 
-#       The goal here is to prepare the stack to build a list out
-#       of the evaluated arguments and then continue the process
-#       of combination when they are all ready.
-#
-#       This program is entered from Combine-Dispatch, which has
-#       the unevaluated arguments sitting on top of a frame header
-#       and the combiner in Expression.
-#
-#       (In) Expression: Applicative closure combiner.
-#       (In) Control-Link: Uncombined-Arguments <Frame>
-#
-#       (Out) Control-Link: @Applicative-Ready Closure <Frame>
+#       Here begins the loop to process each strategy in the closure's
+#       signature. First the (remaining) signature is checked against
+#       nil indicating that there should be no (more) arguments and
+#       control moves to Combine-Closure/signature/finish.
 
-Combine-Applicative
-        LOAD    args,=clink     Pop off the (unevaluated) arguments.
-        LOAD    clink,expr      Save the closure.
-        PEND    clink,@Applicative-Ready
-        JUMP    @Combine-Arguments
+#       Each strategy is a list with two items in it: the location
+#       to bind to and how that argument should be handled by this
+#       evaluator. The most common strategy is `eval' to evaluate
+#       an argument in the run-time environment and bind the resulting
+#       value in the extended closure environment.
 
-#       If there are no arguments then evaluation proceeds directly
-#       to the target (eg. @Applicative-Ready) otherwise the stack
-#       dictates where to go to begin evaluation of the arguments.
-#
-#       (In) Argument-List: Combination's unevaluated arguments.
-#       (In) Control-Link: @Applicative-Ready Closure <Frame>
-#
-#       (Out) Control-Link: ... @Applicative-Ready Closure <Frame>
-#
-#       The Control-Link is additionally headed by zero or more
-#       combinations of: @Combine-Evaluate Expression
-#
-#       @Combine-Arguments is also reached from @Combine-Primitive
-#       in which case the primitive and @Primitive-Ready will be
-#       atop the stack instead and some links may be @Combine-Verbatim
-#       instead.
-#
-#       If there are no arguments control proceeds directly to
-#       @Applicative-Ready or @Primitive-Ready.
-#
-#       (Error) Control-Link: Reconstructed-Expression <Frame> ...
+#       The binding location of a closure is a (unique) symbol.
 
-1h      LOAD    args,=clink     Restore the original argument list.
-        LOAD    tmp,=clink      Pop & discard the evaluation target.
-        CONS    clink,=clink,args Reconstruct combination.
+#       (In) Arguments: Uncombined arguments
+#       (In) Control-Link: r1 r0 Closure <Frame>
+#       (In) Expression: Evaluation queue
+#       (In) r0: (Remaining) signature
+
+Combine-Closure/signature/next
+        CMPIS?  tmp,r0,()       Finished?
+        BRANCH  tmp,@Combine-Closure/signature/finish
+        CAR     acc,r0          Strategy.
+        CDR     r0,r0           Next signature.
+        CAR     r1,acc          Argument's binding label.
+        CDR     acc,acc
+        CAR     acc,acc         Strategy label.
+        LOAD    tmp,'eval       Check if this strategy is eval, otherwise
+;                               continue at Combine-Closure/signature/eval-list?
+        CMPIS?  tmp,acc,tmp
+        BRANCH  =tmp,@Combine-Closure/signature/eval-list?
+        PAIR?   tmp,args        Is the remaining Arguments a pair?
+        BRANCH  tmp,@1f
         TRAP    'incompatible-operand
-Combine-Arguments
-        LOAD    clink,args      Save unevaluated arguments.
-        LOAD    acc,()
-2h      CMPIS?  tmp,args,()
-        BRANCH  tmp,@3f
-        PAIR?   tmp,args        Something remains, is it still a proper list?
-        BRANCH  =tmp,@1b
-        PEND    tmp,@Combine-Evaluate
-        CONS    acc,tmp,acc
-        LOAD    tmp,=args       First/next unevaluated argument.
-        CONS    acc,tmp,acc     Build the reversed list.
-        JUMP    @2b
 
-#       After scanning the argument list prepare to jump straight
-#       to @Applicative-Ready if it turned out there were no arguments.
+#       To evaluate an argument which will be bound in a closure's
+#       run-time environment two directives will be pushed to the
+#       stack, here being built up in Expression in reverse. First
+#       Combine/Evaluate-Argument will run the argument through
+#       !Evaluate then Combine/Append-Argument will append the
+#       result to Arguments along with the label it will be bound
+#       to when the arguments are all ready.
+
+#       Eventually this will push an iteration of the following
+#       sequence to the stack (Control-Link):
 #
-#       If there were arguments then they are in a list, reversed,
-#       in Accession. Copy them onto the stack and proceed to
-#       evaluate them.
+#           /Evaluate-Argument Argument /Append-Argument Binding
+#
+#       ... followed by another one (or something more exotic; read
+#       on), or the directive to complete the combination (see
+#       Combine-Closure/signature/finish).
 
-3h      LOAD    tmp,=clink      Discard saved arguments.
-        CMPIS?  tmp,acc,()      Were there no arguments?
-        BRANCH  tmp,@2f
-        CONS    args,0,()       Prepare a new argument list.
-1h      CAR     tmp,acc
-        LOAD    clink,tmp       The unevaluated argument Expression.
-        CDR     acc,acc
-        CAR     tmp,acc         @Combine-Evaluate or @Combine-Verbatim.
-        LOAD    clink,tmp
-        CDR     acc,acc
-        CMPIS?  tmp,acc,()
-        BRANCH  tmp,@3f
+#       (In) Expression: Evaluation queue
+#       (In) Arguments: Unscanned arguments
+#       (In) r1: Binding label
+
+1h      PEND    tmp,@Combine/Evaluate-Argument
+        CONS    expr,tmp,expr
+        CONS    expr,=args,expr
+        PEND    tmp,@Combine/Append-Argument
+        CONS    expr,tmp,expr
+        CONS    expr,r1,expr
+        JUMP    @Combine-Closure/signature/next
+
+#       If the argument strategy wasn't eval the next most familiar
+#       is eval-list, which is an instruction to evaluate all of
+#       the remaining arguments as the eval strategy does but build
+#       them into a list which is bound to a single label, ie. this
+#       handles the last label in the dotted-tail of a lambda or let
+#       closure.
+
+#       Ordinarily each result will be pushed onto Arguments in a
+#       pair that includes its binding location. In this case an
+#       empty list is first pushed onto Arguments alone and each
+#       result is appended to that. When all of the results have
+#       been computed the list is put in the correct order and
+#       paired with its binding location.
+
+#       (In) Accumulator: Strategy label
+#       (In) Expression: Evaluation queue
+
+Combine-Closure/signature/eval-list?
+        LOAD    tmp,'eval-list
+        CMPIS?  tmp,acc,tmp
+        BRANCH  =tmp,@Combine-Closure/signature/copy?
+        PEND    tmp,@Combine/Evaluate-List/Start
+        CONS    expr,tmp,expr
+
+#       Similar to the loop for the eval strategy this pushes each
+#       remaining argument to Expression along with the directives
+#       to handle the result --- Combine/Evaluate-List/Append-Argument.
+
+#       (In) Arguments: Unscanned arguments
+#       (In) Expression: (List) evaluation queue
+
+Combine-Closure/signature/eval-list/next
+        CMPIS?  tmp,args,()
+        BRANCH  tmp,@Combine-Closure/signature/eval-list/finish
+        PAIR?   tmp,args
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand   Improper list
+1h      PEND    tmp,@Combine/Evaluate-Argument
+        CONS    expr,tmp,expr
+        CONS    expr,=args,expr
+        PEND    tmp,@Combine/Evaluate-List/Append-Argument
+        CONS    expr,tmp,expr
+        JUMP    @Combine-Closure/signature/eval-list/next
+
+#       When the eval-list strategy has finished scanning the source
+#       arguments the final directive which will ready the list for
+#       binding is added to Expression.
+
+#       (In) Expression: (List) evaluation queue
+#       (In) r1: Binding label
+
+Combine-Closure/signature/eval-list/finish
+        PEND    tmp,@Combine/Evaluate-List/Finish
+        CONS    expr,tmp,expr
+        CONS    expr,r1,expr
+        JUMP    @Combine-Closure/signature/next
+
+#       The eval and eval-list strategies cover the closures that
+#       will be encountered most of the time so it'll be helpful
+#       to pause here to describe how the Expression register is
+#       moved to the stack and how each argument is eventually
+#       processed into a result and bound.
+
+#       The first check is to see if anything is left in Arguments
+#       not described by the signature, otherwise the arguments
+#       were valid so r0 and r1 are restored and the stack is
+#       prepared.
+
+#       First, or last after the arguments are ready, Combine/Finish
+#       is pushed onto the stack where it can return to the level
+#       of recursion begun in Combine/Start with the result of the
+#       combination now in the Accumulator.
+
+#       In order to place that result there Combine-Closure/Ready
+#       is positioned on the stack so it is reached after processing
+#       the arguments is complete and they're ready in Arguments.
+
+#       Before Combine-Closure/Ready come the directives now in
+#       Expression. As the source arguments list was scanned in
+#       order, the list in Expression is in reverse (ie. the
+#       directives for the first argument are at the back of the
+#       list). Moving that onto the stack reverses the list again
+#       and so this routine ends with the directive to process the
+#       first argument on top of the stack with the rest in their
+#       natural order.
+
+#       (In) Arguments: unhandled arguments, should be nil.
+#       (In) Expression: stack additions in reverse
+#       (In) Control-Link: r1 r0 Closure <Frame>
+
+#       This is where the routine started by Combine-Closure (from
+#       Combine/Dispatch) finishes and the evaluator begins to
+#       execute the plan just built.
+
+#       (Out) Arguments: ()
+#       (Out) Expression: ()
+#       (Out) Control-Link: (Queue) /Ready Closure /Finish <Frame>
+
+Combine-Closure/signature/finish
+        CMPIS?  tmp,args,()     Signature ended with unhandled arguments?
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand
+1h      LOAD    r1,=clink       Restore spilled registers.
+        LOAD    r0,=clink
+        LOAD    acc,=clink      Restore the closure.
+        PEND    clink,@Combine/Finish
+        LOAD    clink,acc
+        PEND    clink,@Combine-Closure/Ready
+1h      CMPIS?  tmp,expr,()     Finished?
+        BRANCH  tmp,@1f
+        LOAD    clink,=expr     Move the next item from Expression.
         JUMP    @1b
-2h      CONS    args,0,()
-3h      JUMP    =clink          @Applicative-Ready
+1h      JUMP    =clink          Arguments is now ().
 
-#       Prepare to evaluate the next argument in a combination.
-#
-#       (In) Control-Link: Expression ...
-#
-#       (Out) Control-Link: @Combine-Build ...
-#       (Out) Expression: Unevaluated expression.
+#       In order to evaluate an argument it gets popped off the
+#       stack into Expression and control continues with !Evaluate.
+#       After evaluation control will reach Combine/Append-Argument
+#       below.
 
-Combine-Evaluate
-        LOAD    expr,=clink     Load the next argument to evaluate.
-        PEND    clink,@Combine-Build    Prepare to build the next result
-;                               into the argument list when it's ready.
+#       (In) Arguments: In-progress list of pre-bound arguments
+#       (In) Control-Link: Argument /Append-Argument Binding ...
+
+Combine/Evaluate-Argument
+        LOAD    expr,=clink
         JUMP    @!Evaluate
 
-#       Build the argument list with one more result. In the case
-#       of an argument which is being copied as-is control can start
-#       at @Combine-Verbatim rather than @Combine-Evaluate to copy
-#       the argument and proceed directly without recursing through
-#       @!Evaluate and @!Return.
+#       When an argument has been evaluated its result is in the
+#       Accumulator and it's pushed onto Arguments along with the
+#       location it's going to be bound to. If an argument isn't
+#       being evaluated then it's popped off the stack as in
+#       Combine/Evaluate-Argument but straight onto the Accumulator
+#       without going through !Evaluate.
+
+#       (In; Append) Accumulator: Evaluated result
+#       (In; Append) Control-Link: Binding ...
+#       (In; Copy) Control-Link: Argument Binding ...
 #
-#       (In) Argument-List: A pair of the list size and the growing arguments.
-#       (In) Accumulator: Next result.
-#       (In) Control-Link: @Continuation ...
-#
-#       In case entering through @Combine-Verbatim the result is
-#       the unevaluated argument waiting on top of Control-Link
-#       which is first moved to the Accumulator.
-#
-#       (Out) Argument-List: Grown by one (evaluated) argument.
+#       (In/Out) Arguments: In-progress list of pre-bound arguments
+
+Combine/Copy-Argument
+        LOAD    acc,=clink
+Combine/Append-Argument
+        CONS    acc,=clink,acc  Pair the result with its binding location.
+        CONS    args,acc,args   Save the pair in Arguments.
+        JUMP    =clink          Keep calm.
+
+#       To bind a (remaining) list of arguments of unknown length to a single variable first
+# the list terminator is pushed onto Arguments, without a binding label. This will be added later.
+
+#       After preparing to build a new list control will proceed
+#       with either Combine/Evaluate-List/Append-Argument or
+#       Combine/Evaluate-List/Finish if there were no arguments in
+#       the source expression.
+
+#       (In) Arguments: In-progress list of pre-bound arguments
+
+Combine/Evaluate-List/Start
+        CONS    args,(),args
+        JUMP    =clink
+
+#       (In) Accumulator: Next result
+#       (In/Out) Arguments: In-progress list of pre-bound arguments
+#                           with in-progress list of remaining arguments
+#                           at the front
+
+Combine/Evaluate-List/Append-Argument
+        CONS    acc,acc,=args
+        CONS    args,acc,args
+        JUMP    =clink
+
+#       (In) Arguments: In-progress list of pre-bound arguments
+#                       with in-progress list of remaining arguments
+#                       at the front
+#       (In) Control-Link: Binding Next ...
+
+#       (Out) Arguments: In-progress list of pre-bound arguments
+#                        with finished list of remaining arguments
+#                        at the front (in reverse)
 #       (Out) Control-Link: ...
 
-Combine-Verbatim
-        LOAD    acc,=clink
-Combine-Build
-        LOAD    expr,=args      Strip off the argument count.
-        CONS    args,acc,args   Prepend the new argument.
-        ADD     expr,expr,1     Increment the argument count.
-        CONS    args,expr,args
+Combine/Evaluate-List/Finish
+        CONS    acc,=clink,=args
+        CONS    args,acc,args
         JUMP    =clink
 
-#       The complete argument list is ready in Arguments. Now it
-#       can be validated against the closure's formals list (the
-#       closure was saved on the stack) while binding the variables
-#       in the Environment which has been extended in Operate-Applicative.
-#
-#       The formals list has already been validated as a list of symbols.
-#
-#       (In) Argument-List: (n . (reversed-arguments))
+#       Load closure's environment & expand
+#       set bindings from args
+#       Load body into expression
+
+#       (In) Arguments: Finished list of pre-bound arguments
+#       (In) Environment: Caller's run-time environment
 #       (In) Control-Link: Closure <Frame>
-#
-#       If the closure is variadic control proceeds to
-#       @Applicative-Collecting otherwise n is removed from arguments
-#       into @Applicative-Bind.
 
-1h      TRAP    'incompatible-operand
-Applicative-Ready
-        SIGNATURE expr,clink  (min . max)
-        CAR     expr,expr     Minimum arguments required.
-        CAR     tmp,args      How many arguments there are
-        CMPLT?  tmp,tmp,expr
-        BRANCH  tmp,@1b
-        SIGNATURE expr,clink
-        CDR     expr,expr     Maximum arguments permitted (or -1 in
-;                             lieu of infinity).
-        CMPEQ?  tmp,expr,-1   Collect all remaining arguments?
-        BRANCH  tmp,@Applicative-Collecting
-        CAR     tmp,=args
-        CMPGT?  tmp,tmp,expr
-        BRANCH  tmp,@1b
+Combine-Closure/Ready
+        LOAD    expr,=clink     Restore closure
+        ADDRESS acc,expr
+        JUMP    acc
 
-#       The closure is reached with the right number of arguments
-#       and does not collect any remainder. The closure was created
-#       with the bindings in reverse to match the reversed order
-#       in Arguments after evaluation.
-#
-#       (In) Argument-List: (reversed-arguments)
-#       (In) Control-Link: Closure <Frame>
-#
-#       (Out) Environment: Closure's environment, extended & populated.
-#       (Out) Expression: Closure's code.
-#       (Out) Control-Link: @Combine-Finish <Frame>
-#
-#       If there are no arguments control proceeds to @!Evaluate
-#       directly.
+#       This is the default address assigned to a closure before
+#       it's compiled.
 
-Applicative-Bind
-        CMPIS?  tmp,args,()     Skip binding if there are no arguments.
-        BRANCH  =tmp,@1f
-        OPEN    expr,=clink
-        LOAD    tmp,=expr       Discard formals (nil).
-        EXTEND  env,=expr       Load and extend the closure environments.
-        CAR     expr,expr       Load closure body.
-        PEND    clink,@Combine-Finish
-        JUMP    @!Evaluate
-1h      OPEN    expr,=clink     Remove the closure from the stack and
-;                               open it in Accumulator: a three-item
-;                               list of the closure's reversed formals,
-;                               environment and code.
-        LOAD    acc,=expr       Formals (in reverse).
-        EXTEND  env,=expr       Load and extend the closure environments.
-        LOAD    clink,=expr     Save closure body.
-1h      PAIR?   expr,args       Loop over the arguments & formals.
-        BRANCH  =expr,@2f
-        DEFINE! env,=acc,=args
+#       (In) Arguments: Finished list of pre-bound arguments
+#       (In) Environment: Caller's run-time environment
+#       (In) Expression: Closure
+#       (In) Control-Link: <Frame>
+
+#       (Out) Environment: Extended closure environment with arguments bound
+#       (Out) Expression: Closure body
+
+!Interpret-Closure
+        OPEN    env,expr        Closure environment
+        EXTEND  env,env
+1h      CMPIS?  tmp,args,()
+        BRANCH  tmp,@1f
+        DEFINE! env,=args
         JUMP    @1b
-2h      LOAD    expr,=clink     Restore closure body.
-        PEND    clink,@Combine-Finish
-        JUMP    @!Evaluate
+1h      LOAD    clink,r0        Prepare to enter !Primitive/do
+        BODY    r0,expr         Closure body
+        JUMP    @!Primitive/do
 
-#       The extra arguments to a variadic closure are built into a
-#       list, which will now be in the correct order, then prepended
-#       to Arguments so that @Applicative-Bind can bind them in the
-#       extended closure environment.
-#
-#       (In) Argument-List: (n . (reversed-arguments))
-#       (In) Control-Link: Closure <Frame>
-#
-#       (Out) Argument-List: (reversed-arguments)
-#
-#       Extra arguments to a variadic function are removed from the
-#       Argument-List to form a new list (in the correct order)
-#       which is then prepended back onto Argument-List.
-#
-#       TODO: Invert this loop; zero isn't so special.
+#       Returning to the remaining closure signature strategies,
+#       the copy strategy copies the argument from the source
+#       expression as-is without evaluation.
 
-Applicative-Collecting
-        SIGNATURE expr,clink
-        CAR     expr,expr       Min
-        CAR     acc,args        Got
-        CMPEQ?  tmp,expr,args
+#       Note that the branch through Combine-Closure/Append-Argument
+#       is made directly without wasting space for it on the stack
+#       as /Copy-Argument does not need to wait for the evaluator to
+#       process the argument first.
+
+#       (In) Accumulator: Strategy label
+#       (In) Arguments: Unscanned arguments
+#       (In) Expression: Evaluation queue
+#       (In) r1: Binding label
+
+Combine-Closure/signature/copy?
+        LOAD    tmp,'copy
+        CMPIS?  tmp,acc,tmp
+        BRANCH  =tmp,@Combine-Closure/signature/copy-list?
+        PAIR?   tmp,args
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand
+1h      PEND    tmp,@Combine/Copy-Argument
+        CONS    expr,tmp,expr
+        CONS    expr,=args,expr
+        CONS    expr,r1,expr
+        JUMP    @Combine-Closure/signature/next
+
+#       The copy-list strategy directs the evaluator to bind the
+#       remaining source arguments without any further processing
+#       at all. This works by duplicating the plain copy process
+#       but moving the unscanned arguments into the accumulator and
+#       continuing as though it was a regular argument to copy.
+
+#       (In) Accumulator: Strategy label
+#       (In) Arguments: Remaining arguments (maybe none)
+#       (In) Expression: Evaluation queue
+#       (In) r1: Binding label
+
+Combine-Closure/signature/copy-list?
+        LOAD    tmp,'copy-list
+        CMPIS?  tmp,acc,tmp
+        BRANCH  =tmp,@Combine-Closure/signature/environment?
+        PEND    tmp,@Combine/Copy-Argument
+        CONS    expr,tmp,expr
+        CONS    expr,args,expr
+        CONS    expr,r1,expr
+        LOAD    args,()
+        JUMP    @Combine-Closure/signature/next
+
+#       A closure's strategies describe the arguments which it
+#       requires. It may also dictate that additional evaluator
+#       state be bound in the closure's extended environment. These
+#       strategies must come after all of the copy/eval strategies
+#       (of which one of the list strategies, if present, must
+#       be last and along); no attempt is made to enforce this here
+#       but in the !Primitive/vov routine which creates these
+#       extended closures.
+
+#       (In) Accumulator: Strategy label
+#       (In) Arguments: Should be ()
+#       (In) Expression: Evaluation queue
+#       (In) r1: Binding label
+
+Combine-Closure/signature/environment?
+        LOAD    tmp,'environment
+        CMPIS?  tmp,acc,tmp
+        BRANCH  =tmp,@Combine-Closure/signature/continuation?
+        CMPIS?  tmp,args,()
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand
+1h      PEND    tmp,@Combine/Copy-Environment
+        CONS    expr,tmp,expr
+        CONS    expr,r1,expr
+        JUMP    @Combine-Closure/signature/next
+
+#       Capturing the run-time environment is a simple matter of
+#       copying it into the Accumulator.
+
+#       (In) Control-Link: Binding ...
+#
+#       (In/Out) Arguments: In-progress list of pre-bound arguments
+#       (Out) Control-Link: ...
+
+Combine/Copy-Environment
+        LOAD    acc,env
+        JUMP    @Combine/Append-Argument
+
+#       The only strategy remaining strategy which Lossless supports
+#       is to capture the run-time continuation of the closure's
+#       caller although there is scope to implement other strategies
+#       by handling the unimplemented feature trap.
+
+#       (In) Accumulator: Strategy label
+#       (In) Arguments: Should be ()
+#       (In) Expression: Evaluation queue
+#       (In) r1: Binding label
+
+#       The only argument strategy remaining is a continuation.
+Combine-Closure/signature/continuation?
+        LOAD    tmp,'environment
+        CMPIS?  tmp,acc,tmp
         BRANCH  =tmp,@1f
-        CDR     args,args
-        CONS    args,(),args
-        JUMP    @Applicative-Bind
+        TRAP    'unimplemented
+1h      CMPIS?  tmp,args,()
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand   Too many arguments.
+1h      PEND    tmp,@Combine/Copy-Continuation
+        CONS    expr,tmp,expr
+        CONS    expr,r1,expr
+        JUMP    @Combine-Closure/signature/next
 
-1h      CAR     acc,args        Got
-        CDR     args,args       Args
-        SUB     expr,acc,expr   How many extra arguments there are.
-        LOAD    acc,()          Captured arguments.
-1h      CAR     tmp,=args
-        CONS    acc,tmp,acc
-        SUB     expr,expr,1
-        CMPEQ?  tmp,clink,0
-        BRANCH  =tmp,@1b
+#       Capturing the run-time continuation is also not supported.
 
-        CONS    args,acc,args
-        JUMP    @Applicative-Bind
+Combine/Copy-Continuation
+        TRAP    'unimplemented
 
-#       Check the primitive's signature to see whether the primitive
-#       is pure applicative --- (min . max) --- or complex. A pure
-#       applicative primitive's arguments are processed in the same
-#       way as an applicative closure in @Combine-Arguments except
-#       that control will eventually proceed to @Primitive-Ready.
+#       A primitive works similarly to a closure in most respects
+#       except two:
+
+#           Only the eval, copy and copy-list strategies are available.
 #
-#       (In) Expression: Primitive object.
+#           The binding location is a number identifying a register.
+
+#       (In) Expression: Primitive object
 #       (In) Control-Link: Uncombined-Arguments <Frame>
-#
-#       (Out) Arguments: Uncombined-Arguments
-#       (Out) Expression: Primitive object.
-#       (Out) Control-Link: @Primitive-Ready Primitive <Frame>
 
 Combine-Primitive
-        LOAD    args,=clink
-        LOAD    clink,expr      Save primitive.
-        PEND    clink,@Primitive-Ready
-        SIGNATURE acc,expr      A pair of two integers (min . max)
-;                               indicates an applicative primitive.
-        CDR     tmp,acc
-        INTEGER? tmp,tmp        Or the CDR can be nil or a symbol if
-;                               the primitive may capture its arguments
-;                               without evaluation.
-        BRANCH  tmp,@Combine-Arguments
-        JUMP    @Combine-Complex-Primitive
+        LOAD    args,=clink     Restore unprocessed arguments.
+        LOAD    clink,expr      Save closure object.
+        LOAD    clink,r0        Used for the signature.
+        LOAD    clink,r1        Used for each strategy.
+        SIGNATURE r0,expr
+        LOAD    expr,()         Prepare a queue of evaluation/copy work.
 
-#       A complex primitive's signature is a list of one or more
-#       symbols each one directing how to interpret the corresponding
-#       argument.
-#
-#       - evaluate: An argument is required and will be evaluated
-#                   before passing it to the primitive.
-#       - verbatim: An argument is required and is passed to the
-#                   primitive as-is.
-#       - optional: An argument may or may not be present and is
-#                   not evaluated. No more arguments may be present.
-#       - capture:  Stop scanning the arguments and pass any that
-#                   remain as-is in a (possibly empty) list.
-#
-#       If optional or capture is used it must be the last item in
-#       the signature, and the signature must consist of at least
-#       one symbol.
-#
-#       (In) Arguments: Uncombined-Arguments
-#       (In) Expression: Primitive
-#       (In) Control-Link: @Primitive-Ready Primitive <Frame>
-#
-#       After processing the argument list all registers are unused except:
-#
-#       (Out) Control-Link: ... @Primitive-Ready Primitive <Frame>
-#
-#       As with @Combine-Arguments the Control-Link is preceeded
-#       by pairs of a link followed by an expression; in this case
-#       the link may be @Combine-Evaluate or @Combine-Verbatim.
-#
-#       Processing the argument list uses these registers:
-#
-#       (-) Accumulator: Reverse work list.
-#       (-) Arguments: Remaining unevaluated arguments
-#       (-) Expression: Next interpreter symbol.
-#       (-) Control-Link: (Signature) Unevaluated-Arguments
-#                         @Primitive-Ready Primitive <Frame>
+#       Identical to Combine-Closure/signature/next except for
+#       continuing at Combine-Primitive/signature/copy? or
+#       Combine-Primitive/signature/next.
 
-Combine-Complex/Failure
-        LOAD    tmp,=clink      Discard signature.
-        LOAD    args,=clink     Restore unevaluated arguments.
-        LOAD    acc,=clink      Discard target.
-        CONS    clink,=clink,args Reconstruct combination.
-        TRAP    'incompatible-operand
+#       (Out) Accumulator: Strategy label
+#       (Out) r1: Binding label
+#
+#       (In/Out) Arguments: Unscanned arguments
+#       (In/Out) Expression: Evaluation queue
 
-Combine-Complex-Primitive
-        LOAD    clink,args      Unevaluated arguments.
-        CDR     clink,acc       Remaining signature.
-        CAR     expr,acc        First signature item.
-        LOAD    acc,()
-        JUMP    @Combine-Complex/Item
-
-Combine-Complex/Next
-        CMPIS?  tmp,clink,()    Finished interpreting?
-        BRANCH  tmp,@Combine-Complex/Processed
-        CAR     expr,clink
-        CDR     clink,=clink
-
-Combine-Complex/Item
-        LOAD    tmp,'evaluate
-        CMPIS?  tmp,tmp,expr
-        BRANCH  tmp,@Combine-Complex/Evaluate
-        LOAD    tmp,'verbatim
-        CMPIS?  tmp,tmp,expr
-        BRANCH  tmp,@Combine-Complex/Verbatim
-        LOAD    tmp,'capture     Or it's 'optional.
-        CMPIS?  tmp,tmp,expr
-        BRANCH  tmp,@Combine-Complex/Capture
-
-Combine-Complex/Optional
-        CMPIS?  tmp,args,()      No more arguments at all?
-        BRANCH  tmp,@Combine-Complex/Capture
+Combine-Primitive/signature/next
+        CMPIS?  tmp,r0,()       Finished?
+        BRANCH  tmp,@Combine-Primitive/signature/finish
+        LOAD    acc,=r0         Next formal
+        CAR     r1,acc          Register `binding', an integer.
+        CDR     acc,acc
+        CAR     acc,acc         Strategy
+        LOAD    tmp,'eval
+        CMPIS?  tmp,acc,tmp
+        BRANCH  =tmp,@Combine-Primitive/signature/copy?
         PAIR?   tmp,args
-        BRANCH  =tmp,@Combine-Complex/Failure
-        CDR     tmp,args
-        CMPIS?  tmp,tmp,()
-        BRANCH  =tmp,@Combine-Complex/Failure
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand
+1h      PEND    tmp,@Combine/Evaluate-Argument
+        CONS    expr,tmp,expr
+        CONS    expr,=args,expr
+        PEND    tmp,@Combine/Append-Argument
+        CONS    expr,tmp,expr
+        CONS    expr,r1,expr
+        JUMP    @Combine-Primitive/signature/next
 
-Combine-Complex/Capture
-        PEND    expr,@Combine-Verbatim
-        CONS    acc,expr,acc
-        CONS    acc,args,acc    If coming from @Combine-Complex/Optional
-;                               Arguments will be nil or a list of one.
+#       Also practically identical to Combine-Closure/signature/copy?.
+
+#       (In) Accumulator: Strategy label
+#       (In) Arguments: Unscanned arguments
+#       (In) Expression: Evaluation queue
+#       (In) r1: Binding label
+
+Combine-Primitive/signature/copy?
+        LOAD    tmp,'copy
+        CMPIS?  tmp,acc,tmp
+        BRANCH  =tmp,@Combine-Primitive/signature/copy-list?
+        PAIR?   tmp,args
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand   Improper list
+1h      PEND    tmp,@Combine/Copy-Argument
+        CONS    expr,tmp,expr
+        CONS    expr,=args,expr
+        CONS    expr,r1,expr
+        JUMP    @Combine-Primitive/signature/next
+
+#       The only argument strategy remaining is copy-list which
+#       will also always be the last strategy.
+
+#       (In) Accumulator: Strategy label
+#       (In) Arguments: Remaining arguments
+#       (In) Expression: Evaluation queue
+#       (In) r1: Binding label
+#
+#       (Out) Arguments: ()
+
+Combine-Primitive/signature/copy-list?
+        PEND    tmp,@Combine/Copy-Argument
+        CONS    expr,tmp,expr
+        CONS    expr,args,expr
+        CONS    expr,r1,expr
         LOAD    args,()
-        JUMP    @Combine-Complex/Processed
 
-Combine-Complex/Evaluate
-        PAIR?   tmp,args        Are there more arguments?
-        BRANCH  =tmp,@Combine-Complex/Failure
-        PEND    tmp,@Combine-Evaluate
-        CONS    acc,tmp,acc
-        LOAD    tmp,=args
-        CONS    acc,tmp,acc
-        JUMP    @Combine-Complex/Next
-Combine-Complex/Verbatim
-        PAIR?   tmp,args        Are there more arguments?
-        BRANCH  =tmp,@Combine-Complex/Failure
-        PEND    tmp,@Combine-Verbatim
-        CONS    acc,tmp,acc
-        LOAD    tmp,=args
-        CONS    acc,tmp,acc
-        JUMP    @Combine-Complex/Next
-
-#       Epilogue. Move the prepared work from Expression to the
-#       stack and jump to the first.
-
-#       (In) Accumulator: Reverse work list
-#       (In) Arguments: Should be nil.
-#       (In) Control-Link: () Unevaluated-Arguments @Primitive-Ready
-#                          Primitive <Frame>
-
-Combine-Complex/Processed
-        CMPIS?  tmp,args,()     Processed all arguments?
-        BRANCH  =tmp,@Combine-Complex/Failure
-        LOAD    tmp,=clink      Discard (empty) signature.
-        LOAD    expr,=clink     Discard unevaluated arguments.
-        LOAD    expr,acc
-1h      LOAD    clink,=expr     Copy expression.
-        LOAD    clink,=expr     Copy link.
-        CMPIS?  acc,expr,()
-        BRANCH  =acc,@1b
-        CONS    args,0,()
-        JUMP    =clink
-
-#       Unlike a closure a primitive does not have its variadic
-#       arguments collected into a list nor are any of the arguments
-#       bound in an environment.
+#       (In) Arguments: Should be ()
+#       (In) Expression: Evaluation queue
+#       (In) Control-Link: r1 r0 Closure <Frame>
 #
-#       If the primitive is complex then the arguments are not
-#       placed in registers but are left in Argument-List along
-#       with the list size.
-#
-#       (In) Argument-List: (n . (reversed-arguments))
-#       (In) Control-Link: Primitive <Frame>
-#
-#       (Out) Accumulator: Primitive.
-#       (Out) Control-Link: @Combine-Finish <Frame>
-#
-#       When performing a pure applicative primitive the registers
-#       clobbered to fit the primitive's arguments are saved onto
-#       the Control-Link ahead of @Combine-Finish with the appropriate
-#       @!Restore/r... link to put them back.
+#       (Out) Arguments: ()
+#       (Out) Expression: ()
+#       (Out) Control-Link: (Queue) /Ready Closure /Finish <Frame>
 
-1h      TRAP    'incompatible-operand
-Primitive-Ready
-        LOAD    expr,=clink     Restore the primitive object.
-        PEND    clink,@Combine-Finish
-        SIGNATURE acc,expr
-        CDR     tmp,acc
-        INTEGER? tmp,tmp
-        BRANCH  =tmp,@Primitive-Ready/Complex
-        CDR     tmp,acc         Maximum arguments allowed.
-        LOAD    acc,=args       How many arguments there are.
-        CMPGT?  tmp,acc,tmp     Too many?
-        BRANCH  tmp,@1b
-        SIGNATURE tmp,expr
-        CAR     tmp,tmp         Minimum arguments required.
-        CMPLT?  tmp,acc,tmp     Not enough?
-        BRANCH  tmp,@1b
+Combine-Primitive/signature/finish
+        CMPIS?  tmp,args,()
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand
+1h      LOAD    args,expr
+        LOAD    r1,=clink
+        LOAD    r0,=clink
+        LOAD    expr,=clink
+        PEND    clink,@Combine/Finish
+        LOAD    clink,expr
+        PEND    clink,@Combine-Primitive/Ready
+1h      CMPIS?  tmp,args,()
+        BRANCH  tmp,@1f
+        LOAD    clink,=args
+        JUMP    @1b
+1h      JUMP    =clink          Args is now ()
 
-        CMPEQ?  tmp,acc,0
-        BRANCH  tmp,@Primitive-Ready/Go
-        CMPEQ?  tmp,acc,1
-        BRANCH  =tmp,@1f
-        LOAD    clink,r0
-        PEND    clink,@!Restore/r0
-        LOAD    r0,=args
-        JUMP    @Primitive-Ready/Go
-1h      CMPEQ?  tmp,acc,2
-        BRANCH  =tmp,@1f
-        LOAD    clink,r0
-        LOAD    clink,r1
-        PEND    clink,@!Restore/r1
-        LOAD    r1,=args
-        LOAD    r0,=args
-        JUMP    @Primitive-Ready/Go
-1h      CMPEQ?  tmp,acc,3
-        BRANCH  =tmp,@1f
-        LOAD    clink,r0
-        LOAD    clink,r1
-        LOAD    clink,r2
-        PEND    clink,@!Restore/r2
-        LOAD    r2,=args
-        LOAD    r1,=args
-        LOAD    r0,=args
-        JUMP    @Primitive-Ready/Go
-##      No primitive (yet?) accepts more than four arguments.
-##      CMPEQ?  tmp,acc,4
-##      BRANCH  =tmp,@1f
-1h      LOAD    clink,r0
-        LOAD    clink,r1
-        LOAD    clink,r2
-        LOAD    clink,r3
-        PEND    clink,@!Restore/r3
-        LOAD    r3,=args
-        LOAD    r2,=args
-        LOAD    r1,=args
-        LOAD    r0,=args
-Primitive-Ready/Go
-        LOAD    args,acc        Note how many arguments there were.
-Primitive-Ready/Complex
-        LOAD    acc,expr        Save the primitive object.
-        OPEN    expr,expr       Locate primitive's wrapper.
-        JUMP    expr            Perform the primitive operation.
+#       The primitives are defined such that the last argument,
+#       first in Arguments which has been built in reverse, has as
+#       the number identifying the highest used register as its
+#       binding location. Unless there are no arguments and no
+#       registers to spill. There is no need to check the remaining
+#       arguments' binding register.
+#
+#       The primitive is responsible for restoring the spilled
+#       registers before returning control to the caller.
+#
+#       This assembly language's addressing syntax could do with
+#       an addressing mode to calculate the jump-in point to start
+#       from rather than iterating over each choice in turn.
 
-########
+Combine-Primitive/Ready
+        ADDRESS acc,=clink      Discard the closure after obtaining its address.
+        CMPIS?  tmp,args,()
+        BRANCH  tmp,acc         If there are no arguments proceed directly
+;                               to the primitive implementation.
+        CAR     expr,args       First argument.
+        CAR     tmp,expr        First register number.
+        CMPIS?  tmp,tmp,0
+        BRANCH  tmp,@0f
+        CAR     tmp,expr        There's no spare space to store the register
+;                               number! Extract it again.
+        CMPIS?  tmp,tmp,1
+        BRANCH  tmp,@1f
+        CAR     tmp,expr
+        CMPIS?  tmp,tmp,2
+        BRANCH  tmp,@2f
+        CAR     tmp,expr
+        CMPIS?  tmp,tmp,3
+        BRANCH  tmp,@3f
+        TRAP    'lossless-error No primitive has more than 4 arguments; this
+;                               instruction `is' unreachable.
+3h      LOAD    clink,r3        Spill and fill the registers starting
+;                               with the last argument.
+        CDR     r3,expr         The argument, discarding the bindling location.
+        CDR     args,args       The remaining arguments list.
+        CAR     expr,args       Next argument pair.
+2h      LOAD    clink,r2        Repeat, or start here.
+        CDR     r2,expr
+        CDR     args,args
+        CAR     expr,args
+1h      LOAD    clink,r1        Repeat, or start here.
+        CDR     r1,expr
+        CDR     args,args
+        CAR     expr,args
+0h      LOAD    clink,r0        Repeat, or start here.
+        CDR     r0,expr
+        CDR     args,args
+        JUMP    acc             Jump into the primitive.
+
+######## End of the evaluator.
+
+#       Symbols in the root environment are bound to primitives,
+#       becoming `operators'. As described above the evaluator is
+#       directed to an address to perform the primitive operation
+#       after loading its arguments into registers. Restoring the
+#       prior values of the registers and returning to the caller
+#       is a very common operation and so a common set of routines
+#       to return from another function is defined here for general
+#       use.
 
 !Primitive.Default
         TRAP    'unimplemented
 
-!Restore/r7
-        LOAD    r7,=clink
-!Restore/r6
-        LOAD    r6,=clink
-!Restore/r5
-        LOAD    r5,=clink
-!Restore/r4
-        LOAD    r4,=clink
-!Restore/r3
+!Restore/r7     LOAD    r7,=clink
+!Restore/r6     LOAD    r6,=clink
+!Restore/r5     LOAD    r5,=clink
+!Restore/r4     LOAD    r4,=clink
+!Restore/r3     LOAD    r3,=clink
+!Restore/r2     LOAD    r2,=clink
+!Restore/r1     LOAD    r1,=clink
+!Restore/r0     LOAD    r0,=clink
+                JUMP    =clink
+
+#       Some routines spill higher registers and leave lower-valued
+#       registers alone, such as when a routine shares registers
+#       with a routine which it calls.
+
+!Restore/r7-1   LOAD    r7,=clink
+!Restore/r6-1   LOAD    r6,=clink
+!Restore/r5-1   LOAD    r5,=clink
+!Restore/r4-1   LOAD    r4,=clink
+!Restore/r3-1   LOAD    r3,=clink
+!Restore/r2-1   LOAD    r2,=clink
+!Restore/r1-1   LOAD    r1,=clink
+                JUMP    =clink
+!Restore/r7-2   LOAD    r7,=clink
+!Restore/r6-2   LOAD    r6,=clink
+!Restore/r5-2   LOAD    r5,=clink
+!Restore/r4-2   LOAD    r4,=clink
+!Restore/r3-2   LOAD    r3,=clink
+!Restore/r2-2   LOAD    r2,=clink
+                JUMP    =clink
+!Restore/r7-3   LOAD    r7,=clink
+!Restore/r6-3   LOAD    r6,=clink
+!Restore/r5-3   LOAD    r5,=clink
+!Restore/r4-3   LOAD    r4,=clink
+!Restore/r3-3   LOAD    r3,=clink
+                JUMP    =clink
+!Restore/r7-4   LOAD    r7,=clink
+!Restore/r6-4   LOAD    r6,=clink
+!Restore/r5-4   LOAD    r5,=clink
+!Restore/r4-4   LOAD    r4,=clink
+                JUMP    =clink
+!Restore/r7-5   LOAD    r7,=clink
+!Restore/r6-5   LOAD    r6,=clink
+!Restore/r5-5   LOAD    r5,=clink
+                JUMP    =clink
+!Restore/r7-6   LOAD    r7,=clink
+!Restore/r6-6   LOAD    r6,=clink
+                JUMP    =clink
+
+#       The first pair of primitives which will be defined are
+#       lambda and vov for building closures. You'd expect `if' or
+#       something even more fundamental to come first but for a
+#       machine which is built on exactly the concepts of numbers
+#       and conditional branching, it's surprising how far you can
+#       get without either.
+#
+#       The lambda primitive receives two arguments which are both
+#       unevaluated and therefore need to be validated.
+#
+#       A valid lambda formals list is a list of unique symbols;
+#       the list may be proper or improper provided the dotted tail
+#       is also a symbol.
+#
+#       A closure is the same whether from lambda or vov. While
+#       validating the lambda formals a signature is created to
+#       match the formals expected by vov. They then share the same
+#       code to validate the body and finish.
+#
+#       (In) r0: formals (unvalidated)
+#       (In) r1: body (unvalidated)
+
+!Primitive/lambda
+        JUMP    @Primitive/lambda/validate-formals
+
+#       Registers r1 to r4 are spilled to the stack while processing
+#       the formals list. The final validated signature is built
+#       in r4 while r1 to r3 are spare space for the validation.
+
+#       (In) Control-Link: ...
+#
+#       (Out) Control-Link: r4 r3 r2 r1 ...
+#       (Out) r2: (eval)
+#       (Out) r3: Hashtable of binding labels
+#       (Out) r4: Budding signature
+
+Primitive/lambda/validate-formals
+        LOAD    clink,r1        Spill the body; holds the next label.
+        LOAD    clink,r2        Common tail of all evaluating arguments.
+        LOAD    clink,r3        Hashtable of discovered binding labels.
+        LOAD    clink,r4        Compiled formals.
+        LOAD    r4,()
+        LOAD    r2,'eval
+        CONS    r2,r2,()        (eval)
+        TABLE   r3,0
+
+#       Each time around the loop the remainder of the list is
+#       checked to see if it's really a symbol indicating that
+#       closure is variadic and should consume and evaluate all
+#       remaining arguments.
+#
+#       Otherwise if the next label is unique a new strategy is
+#       created for the binding and included in the signature in r4.
+#
+#       (In) r0: (Remaining) formals
+#       (In) r2: (eval)
+#       (In) r3: Hashtable of binding labels
+#       (In) r4: Budding signature
+
+Primitive/lambda/validate-formals/next
+        CMPIS?  tmp,r0,()       Finished?
+        BRANCH  tmp,@Primitive/lambda/validate-formals/finish
+        SYMBOL? tmp,r0          Is the (remaining) list really a symbol?
+        BRANCH  tmp,@Primitive/lambda/validate-formals/consume
+        PAIR?   tmp,r0          Is the remaining list list-like?
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CAR     r1,r0           Next binding label.
+        SYMBOL? tmp,r1
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand
+1h      EXISTS? tmp,r3,r1       Check that this label is unique.
+        BRANCH  =tmp,@1f
+        TRAP    'conflicted-binding
+1h      CONS    tmp,r1,r1
+        DEFINE! r3,tmp          Record that this label was used.
+        CONS    tmp,r1,r2       Create a new signature strategy for this
+;                               binding.
+        CONS    r4,tmp,r4       Include the strategy in the signature.
+        CDR     r0,r0           Next formal.
+        JUMP    @Primitive/lambda/validate-formals/next
+
+#       If the lambda formals was a single symbol, or an improper
+#       list with a symbol in the dotted tail position, the signature
+#       is completed with a strategy to evaluate and consume all
+#       remaining arguments. The binding is checked for uniqness
+#       but there's no need to record it in r3 which is about to
+#       be discarded.
+#
+#       (In) r0: Binding label
+#       (In) r3: Hashtable of binding labels
+#       (In) r4: Budding signature
+
+Primitive/lambda/validate-formals/consume
+        EXISTS? tmp,r3,r0
+        BRANCH  =tmp,@1f
+        TRAP    'conflicted-binding
+1h      LOAD    r2,'eval-list
+        CONS    r2,r2,()
+        CONS    tmp,r0,r2
+        CONS    r4,tmp,r4
+        JUMP    @Primitive/lambda/validate-formals/finish
+
+#       After validating the lambda formals a signature representing
+#       them has been constructed in r4 in reverse which is copied
+#       in the correct order into r0. The spilled registers are
+#       restored and control proceeds with Primitive/vov/validate-body
+#       to construct the closure.
+#
+#       (In) Control-Link: r4 r3 r2 r1 ...
+#       (In) r4: Reverse signature
+
+#       (Out) Control-Link: ...
+#       (Out) r0: Valid signature
+#       (Out) r1: Body (unvalidated)
+
+Primitive/lambda/validate-formals/finish
+        LOAD    r0,()
+1h      CMPIS?  tmp,r4,()
+        BRANCH  tmp,@1f
+        CAR     tmp,r4
+        CONS    r0,tmp,r0
+        CDR     r4,r4
+        JUMP    @1b
+1h      LOAD    r4,=clink
         LOAD    r3,=clink
-!Restore/r2
         LOAD    r2,=clink
-!Restore/r1
         LOAD    r1,=clink
-!Restore/r0
-        LOAD    r0,=clink
-        JUMP    =clink
+        JUMP    @Primitive/vov/validate-body
 
-!Restore/r7-1
-        LOAD    r7,=clink
-!Restore/r6-1
-        LOAD    r6,=clink
-!Restore/r5-1
-        LOAD    r5,=clink
-!Restore/r4-1
+#       A vov expression creates a closure with a richer possible
+#       signature than the strategies available to a lambda expression.
+#       In addition to merely evaluating each argument an `operative'
+#       closure can receive the arguments without evaluating them
+#       or various kinds of run-time state.
+#
+#       The formals passed to vov precisely match the signature of
+#       the closure that will be created and so validation is just
+#       validation without having to process the list like lambda
+#       does. The lambda primitive replaces its formals in r0 with
+#       a signature compatible with this routine which is why they
+#       are able to share the final steps in Primitive/vov/validate-body.
+#
+#       (In) r0: Formals (unvalidated)
+#       (In) r1: Body (unvalidated)
+
+!Primitive/vov
+        PEND    clink,@Primitive/vov/validate-body
+        JUMP    @Primitive/vov/validate-formals
+
+#       With a valid formals signature in r0 validating the body
+#       is simply a matter of ensuring it's a proper list.
+#
+#       (In) Control-Link: ...
+#       (In) r0: Formals (validated)
+#       (In) r1: Body (unvalidated)
+
+Primitive/vov/validate-body
+        CMPIS?  tmp,r1,()
+        BRANCH  tmp,@3f
+        LOAD    acc,r1
+1h      PAIR?   tmp,acc         Looks like a list so far?
+        BRANCH  tmp,@2f
+        TRAP    'incompatible-operand
+2h      CDR     acc,acc         Remaining instructions.
+        CMPIS?  tmp,acc,()      Finished?
+        BRANCH  =tmp,@1b
+3h      CLOSURE acc,r0,r1       Close over processed/validated formals &
+;                               validated body.
+        JUMP    @!Restore/r1
+
+#       The formals list as passed and the body are both spilled
+#       along with the other three registers this routine needs;
+#       they will be used as-is after the work to validate them is
+#       discarded.
+#
+#       r3 and r4 hold a hashtable which records the formals (r3) or
+#       state (r4) which have been identified. r2 is used for
+#       additional working space.
+#
+#       (In) Control-Link: ...
+#       (In) r0: Unvalidated formals
+#       (In) r1: Unvalidated closure body
+#
+#       (Out) Control-Link: r4 r3 r2 r1 r0 ...
+#       (Out) r3: hashtable of identified binding labels.
+#       (Out) r4: hashtable of identified state requests.
+
+Primitive/vov/validate-formals
+        LOAD    clink,r0        Walking along the formals list
+        LOAD    clink,r1        Next formal list
+        LOAD    clink,r2        Working space
+        LOAD    clink,r3
+        LOAD    clink,r4
+        TABLE   r3,0            Collected formal labels
+        TABLE   r4,0            Collected state requests
+        JUMP    @Primitive/vov/validate-formals/continue
+
+#       After validating the formals the original list is restored
+#       along with the body now ready for its own validation.
+#
+#       (In) Control-Link: r4 r3 r2 r1 r0 ...
+#
+#       (Out) Control-Link: ...
+#       (Out) r0: Formals (original list, now validated)
+#       (Out) r1: Body (unvalidated)
+
+Primitive/vov/validate-formals/finish
         LOAD    r4,=clink
-!Restore/r3-1
         LOAD    r3,=clink
-!Restore/r2-1
         LOAD    r2,=clink
-!Restore/r1-1
         LOAD    r1,=clink
-        JUMP    =clink
+        LOAD    r0,=clink       Restore formals as passed
+        JUMP    @Primitive/vov/validate-body
 
-!Restore/r7-2
-        LOAD    r7,=clink
-!Restore/r6-2
-        LOAD    r6,=clink
-!Restore/r5-2
-        LOAD    r5,=clink
-!Restore/r4-2
-        LOAD    r4,=clink
-!Restore/r3-2
-        LOAD    r3,=clink
-!Restore/r2-2
-        LOAD    r2,=clink
-        JUMP    =clink
+#       If scanning reaches the end of the formals list then it was
+#       valid otherwise control continues with the next.
+#
+#       (In) r0: (Remaining) unvalidated formals
 
-!Restore/r7-3
-        LOAD    r7,=clink
-!Restore/r6-3
-        LOAD    r6,=clink
-!Restore/r5-3
-        LOAD    r5,=clink
-!Restore/r4-3
-        LOAD    r4,=clink
-!Restore/r3-3
-        LOAD    r3,=clink
-        JUMP    =clink
+Primitive/vov/validate-formals/next
+        CDR     r0,r0
+        CMPIS?  tmp,r0,()
+        BRANCH  tmp,@Primitive/vov/validate-formals/finish
 
-!Restore/r7-4
-        LOAD    r7,=clink
-!Restore/r6-4
-        LOAD    r6,=clink
-!Restore/r5-4
-        LOAD    r5,=clink
-!Restore/r4-4
-        LOAD    r4,=clink
-        JUMP    =clink
+#       Following on from Primitive/vov/validate-formals/next, here
+#       each individual formal is validated. The formals passed to
+#       the vov primitive are the same as the signature the final
+#       closure will have, namely a list of lists, each inner list
+#       of two items: the formal label and argument strategy.
+#
+#       Any strategy other than plain eval or copy indicates the
+#       end of any more copying or evaluating strategies and so
+#       control continues with an alternate but similar algorithm
+#       starting with Primitive/vov/validate-formals/next%final.
+#
+#       (In) r0: Remaining unvalidated formals
+#       (In) r3: Hashtable containing all binding labels seen
+#       (In) r4: Hashtable containing all state requests seen
 
-!Restore/r7-5
-        LOAD    r7,=clink
-!Restore/r6-5
-        LOAD    r6,=clink
-!Restore/r5-5
-        LOAD    r5,=clink
-        JUMP    =clink
+Primitive/vov/validate-formals/continue
+        PAIR?   tmp,r0          Does the (next) formal item continue a list?
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CAR     r1,r0           Next formal; should also be list.
+        PAIR?   tmp,r1
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CAR     r2,r1           Binding label, should be unique symbol.
+        SYMBOL? tmp,r2
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand
+1h      EXISTS? tmp,r3,r2       See if the binding label has been used already.
+        BRANCH  =tmp,@1f
+        TRAP    'conflicted-binding
+1h      CONS    tmp,r2,r2       Create a record of this label.
+        DEFINE! r3,tmp
+        CDR     r2,r1           The argument strategy, should be a list of one.
+        PAIR?   tmp,r2
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CDR     tmp,r2
+        CMPIS?  tmp,tmp,()
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CAR     r2,r2           The argument strategy.
+        LOAD    tmp,'eval
+        CMPIS?  tmp,r2,tmp
+        BRANCH  tmp,@Primitive/vov/validate-formals/next
+        LOAD    tmp,'copy
+        CMPIS?  tmp,r2,tmp
+        BRANCH  tmp,@Primitive/vov/validate-formals/next
+        LOAD    tmp,'eval-list
+        CMPIS?  tmp,r2,tmp
+        BRANCH  tmp,@Primitive/vov/validate-formals/next%final
+        LOAD    tmp,'copy-list
+        CMPIS?  tmp,r2,tmp
+        BRANCH  tmp,@Primitive/vov/validate-formals/next%final
+        LOAD    tmp,'environment
+        CMPIS?  tmp,r2,tmp
+        EXISTS? tmp,r4,r2       Has the environment been requested already?
+        BRANCH  =tmp,@1f
+        TRAP    'incompatible-operand
+1h      CONS    tmp,r2,r2
+        DEFINE! r4,tmp          ... it has now.
+        BRANCH  tmp,@Primitive/vov/validate-formals/next%final
+        LOAD    tmp,'continuation
+        CMPIS?  tmp,r2,tmp      Requested continuation already?
+        EXISTS? tmp,r4,r2
+        BRANCH  =tmp,@1f
+        TRAP    'incompatible-operand
+1h      CONS    tmp,r2,r2
+        DEFINE! r4,tmp          Record this request.
+        BRANCH  tmp,@Primitive/vov/validate-formals/next%final
+        TRAP    'incompatible-operand
 
-!Restore/r7-6
-        LOAD    r7,=clink
-!Restore/r6-6
-        LOAD    r6,=clink
-        JUMP    =clink
+#       This is a copy of Primitive/vov/validate-formals/next &
+#       Primitive/vov/validate-formals/continue for use when the
+#       copying and evaluation strategies are no longer permitted
+#       in a valid formals signature.
+#
+#       (In) r0: Remaining unvalidated formals
+#       (In) r3: Hashtable containing all binding labels seen
+#       (In) r4: Hashtable containing all state requests seen
+#
+#       Possible improvement: store #t in r4 until positional formals
+#       have finished, then replace it with a hashtable and test
+#       for that before validating each formal. Copy pasta for now.
+#
+Primitive/vov/validate-formals/next%final
+        CDR     r0,r0
+        CMPIS?  tmp,r0,()
+        BRANCH  tmp,@Primitive/vov/validate-formals/finish
+Primitive/vov/validate-formals/continue%final
+1h      PAIR?   tmp,r0
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CAR     r1,r0           Formal.
+        PAIR?   tmp,r1
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CAR     r2,r1           Label.
+        SYMBOL? tmp,r2
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand
+1h      EXISTS? tmp,r3,r2
+        BRANCH  =tmp,@1f
+        TRAP    'conflicted-binding
+1h      CONS    tmp,r2,r2
+        DEFINE! r3,tmp          Record this label.
+        CDR     r2,r1           (Strategy).
+        PAIR?   tmp,r2
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CDR     tmp,r2
+        CMPIS?  tmp,tmp,()
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CAR     r2,r2           Strategy.
+        LOAD    tmp,'environment
+        CMPIS?  tmp,r2,tmp
+        EXISTS? tmp,r4,r2
+        BRANCH  =tmp,@1f
+        TRAP    'incompatible-operand
+1h      CONS    tmp,r2,r2
+        DEFINE! r4,tmp          Record this request.
+        BRANCH  tmp,@Primitive/vov/validate-formals/next%final
+        LOAD    tmp,'continuation
+        CMPIS?  tmp,r2,tmp
+        EXISTS? tmp,r4,r2
+        BRANCH  =tmp,@1f
+        TRAP    'incompatible-operand
+1h      CONS    tmp,r2,r2
+        DEFINE! r4,tmp          Record this request.
+        BRANCH  tmp,@Primitive/vov/validate-formals/next%final
+        TRAP    'incompatible-operand
+
+
+
+
+
+
+
+
+########
 
 !Primitive/null?
         CMPIS?  acc,r0,()
@@ -880,13 +1327,13 @@ Primitive/array/set!/imp
 
 !Primitive/+
         ADD     acc,r0,r1
-        JUMP    =clink
+        JUMP    @!Restore/r1
 !Primitive/-
         SUB     acc,r0,r1
-        JUMP    =clink
+        JUMP    @!Restore/r1
 !Primitive/*
         MUL     acc,r0,r1
-        JUMP    =clink
+        JUMP    @!Restore/r1
 
 !Primitive/current-environment
         LOAD    acc,env
@@ -897,148 +1344,31 @@ Primitive/array/set!/imp
         JUMP    =clink
 
 !Primitive/do
-#       CAR     tmp,args        Not used: The number of arguments _to the
-#                               primitive_ (ie. matching the _signature_),
-#                               which in this case is 1.
-        CDR     acc,args        Primitive's argument[s].
-        CAR     acc,acc         The only primitive argument is the full
-;                               captured list of expressions to evaluate
-;                               sequentially.
-        CMPIS?  tmp,acc,()      Do nothing?
+        PEND    acc,@Primitive/do/next
+        CMPIS?  tmp,r0,()
         BRANCH  =tmp,@1f
-        LOAD    acc,#VOID       If there is nothing to do then load #VOID
-;                               and return directly.
-        JUMP    =clink
-#       Build a work queue in in reverse in Arguments while validating
-#       that the `do' expression is a proper list.
-1h      LOAD    args,()
-1h      PAIR?   tmp,acc         Looks like a list?
+        LOAD    acc,#VOID
+        JUMP    @!Restore/r0
+        LOAD    args,()
+1h      PAIR?   tmp,r0
         BRANCH  tmp,@2f
-        TRAP    'improper-list
-2h      PEND    tmp,@Primitive/do/next Prepend evaluation of this item to the list.
-        CONS    args,tmp,args
-        CONS    args,=acc,args
-        CMPIS?  tmp,acc,()      Is the list finished?
+        CMPIS?  tmp,r0,()
         BRANCH  tmp,@3f
-        JUMP    @1b             Repeat with the next item.
-#       Enqueue the Arguments list onto the stack in the original order.
-3h      LOAD    clink,=args
+        TRAP    'incompatible-operand
+2h      CONS    args,acc,args
+        CONS    args,=r0,args
+        JUMP    @1b
+
+3h      LOAD    r0,=clink
+1h      LOAD    clink,=args
         LOAD    clink,=args
         CMPIS?  tmp,args,()
-        BRANCH  =tmp,@3b
-        JUMP    =clink          Jump to the first @!Evaluate.
+        BRANCH  =tmp,@1b
+
+        LOAD    tmp,=clink      Discard first branch directive.
 Primitive/do/next
         LOAD    expr,=clink
         JUMP    @!Evaluate
-
-#       (In) Argument-List: (2 formals body)
-#
-#       (Out) Accumulator: Applicative Closure
-
-# arguments to APPLICATIVE/new_applicative:
-#
-#       formals: reverse list, made proper if capturing
-#       body: no idea, should probably make a deep copy?
-#
-#       Operations on a closure:
-#               SIGNATURE: pair of (min . max) (applicative)
-#                          list of (capture) (operative)
-#               OPEN: (reverse-formals environment body)
-
-#       In-progress: Acc: Formals
-#               Args: Reverse
-#               Expr: Next
-#               r0: count
-#               r1: duplicate scan
-
-Primitive/lambda/Failure
-        LOAD    tmp,=clink      Discard body
-        LOAD    r1,=clink
-        LOAD    r0,=clink
-        TRAP    'incompatible-operand
-!Primitive/lambda
-        LOAD    clink,r1
-        LOAD    clink,r0
-        CDR     args,args       (body formals)
-        CAR     clink,args      body
-        CDR     acc,args        (formals)
-        CAR     acc,acc         formals
-        LOAD    r0,0            Prepare reverse formals.
-        LOAD    args,()
-        CMPIS?  tmp,acc,()
-        BRANCH  tmp,@Primitive/lambda/capture-none
-        SYMBOL? tmp,acc
-        BRANCH  tmp,@Primitive/lambda/capture-every
-        PAIR?   tmp,acc
-        BRANCH  =tmp,@Primitive/lambda/Failure
-
-1h      LOAD    expr,=acc       Next formal.
-        SYMBOL? tmp,expr
-        BRANCH  =tmp,@Primitive/lambda/Failure
-
-        LOAD    r1,args         Scan for duplicates.
-2h      CMPIS?  tmp,r1,()
-        BRANCH  =tmp,@2f
-        LOAD    tmp,=r1
-        CMPIS?  tmp,tmp,expr
-        BRANCH  tmp,@Primitive/lambda/Failure
-        JUMP    @2b
-2h      CONS    args,expr,args  Prepend the new symbol to Arguments.
-        ADD     r0,r0,1
-
-        CMPIS?  tmp,acc,()      Finished?
-        BRANCH  tmp,@3f
-        PAIR?   tmp,acc
-        BRANCH  tmp,@1b
-        SYMBOL? tmp,acc         Finished and capture?
-        BRANCH  =tmp,@Primitive/lambda/Failure
-
-        LOAD    r1,args         Scan for duplicates
-2h      CMPIS?  tmp,r1,()
-        BRANCH  =tmp,@2f
-        LOAD    tmp,=r1
-        CMPIS?  tmp,tmp,expr
-        BRANCH  tmp,@Primitive/lambda/Failure
-        JUMP    @2b
-2h      CONS    args,expr,args  Prepend the new symbol to Arguments
-        CONS    r0,r0,-1        Variadic signature.
-        JUMP    @4f
-
-3h      CONS    r0,r0,r0        Static signature.
-#       Reverse formals now ready in args, r0 has signature, (body) on clink
-#       acc, expr, r1 usable
-4h      CAR     acc,clink       Restore body.
-        LOAD    expr,()
-5h      CMPIS?  tmp,acc,()      Loop to check body is a proper list (should be turtle&hare).
-        BRANCH  tmp,@5f
-        PAIR?   tmp,acc
-        BRANCH  =tmp,@Primitive/lambda/Failure
-        CONS    expr,=acc,expr
-        JUMP    @5b
-
-5h      CMPIS?  tmp,expr,()     Loop to put the body back in the correct
-;                               order (also copied); no `do' primitive prepended.
-        BRANCH  tmp,@6f
-        CONS    acc,=expr,acc
-        JUMP    @5b
-
-#       To branch here the Accumulator has the capture binding name.
-Primitive/lambda/capture-every
-        CONS    args,acc,()     Formals
-        SUB     r0,0,1          # TODO: BUG: LOAD r0,-1 segfaults (also single-char symbols).
-
-#       To branch here the Accumulator is nil and r0 is 0.
-Primitive/lambda/capture-none
-        CONS    r0,0,r0         Signature
-
-6h      LOAD    tmp,=clink      Discard saved body.
-        CONS    acc,env,acc     Current environment.
-        CONS    acc,args,acc    Reversed formals.
-        APPLICATIVE acc,r0,acc
-        JUMP    @!Restore/r1
-
-
-
 
 
 
@@ -1059,8 +1389,8 @@ Primitive/read-expression/space?
 1h      JUMP    =clink
 
 Primitive/read-expression/digit?
-        CMPLT?  acc,r3,#x30     0
-        BRANCH  acc,@1f
+        CMPGE?  acc,r3,#x30     0
+        BRANCH  =acc,@1f
         CMPLE?  acc,r3,#x39     9
 1h      JUMP    =clink
 
@@ -1178,10 +1508,12 @@ Primitive/read-expression/finished
 #       Is eof
 1h      TRAP    'missing
 
-
-
 #       This is the heart of the read function.
 #
+
+Primitive/read-expression/back-up
+        SUB     r1,r1,1
+        JUMP    =clink          Probably to the next instruction.
 Primitive/read-expression/next
         ADD     r1,r1,1
 Primitive/read-expression/imp
@@ -1268,8 +1600,7 @@ Primitive/read-expression/close-list
         LOAD    r3,=clink
 1h      CMPIS?  tmp,r3,()
         BRANCH  tmp,@2f
-        LOAD    tmp,=r3
-        CONS    acc,r3,acc
+        CONS    acc,=r3,acc
         JUMP    @1b
 2h      LOAD    r3,'object
         JUMP    =clink
@@ -1328,7 +1659,6 @@ Primitive/read-expression/list-tail/finish
 
 
 
-
 #       It's all just boring text parsing from here.
 #
 #       (In)    r0: segment
@@ -1342,16 +1672,18 @@ Primitive/read-expression/symbol/next
         JUMP    @Primitive/read-expression/source-byte
 1h      BRANCH  acc,@Primitive/read-expression/symbol/finish ... if #eof.
         PEND    clink,@1f
+        JUMP    @Primitive/read-expression/terminator?
+1h      BRANCH  =acc,@1f
+        PEND    clink,@Primitive/read-expression/back-up
+        JUMP    @Primitive/read-expression/symbol/finish
+1h      PEND    clink,@1f
         JUMP    @Primitive/read-expression/printable?
 1h      BRANCH  acc,@2f
         TRAP    'unprintable
 2h      PEND    clink,@1f
         JUMP    @Primitive/read-expression/forbidden?
-1h      BRANCH  =acc,@2f
-        TRAP    'syntax-error
-2h      PEND    clink,@1f
-        JUMP    @Primitive/read-expression/terminator?
 1h      BRANCH  =acc,@Primitive/read-expression/symbol/next
+        TRAP    'syntax-error
 
 #       (In)    r0: segment
 #       (In)    r1: terminal offset
@@ -1364,15 +1696,6 @@ Primitive/read-expression/symbol/next
 #       (Out)   r3: 'object
 
 Primitive/read-expression/symbol/finish
-#       LOAD    r3,r1           Save terminal offset
-#       SUB     r2,r1,r4        Symbol length
-#       LOAD    r1,r4           Starting offset
-#       SLO     acc,'segment->symbol
-#       S->S    r0,r4,r2
-#       SLO     r2,'segment/length      Restore r2
-#       LENGTH  r2,r0           Restore r2
-#       LOAD    r1,r3           Restore offset
-#
         SUB     r3,r1,r4        Symbol length
         SYMBOL  r0,r4,r3
         LOAD    r3,'object
@@ -1419,27 +1742,34 @@ Primitive/read-expression/boolean
 1h      BRANCH  acc,@2f         if #eof.
         PEND    clink,@1f
         JUMP    @Primitive/read-expression/terminator?
-1h      BRANCH  acc,@2f
-        TRAP    'syntax-error
+1h      BRANCH  =acc,@3f
+        SUB     r1,r1,1
+        JUMP    @2f
+3h      TRAP    'syntax-error
 2h      LOAD    acc,r4
         LOAD    r3,'object
         JUMP    =clink
 
+#       A sign byte has been encountered (r5 is true if it's `-'),
+#       r1 has not advanced.
+
 Primitive/read-expression/possible-number
-        LOAD    r4,r1
+        LOAD    r4,r1           Save the sign byte offset.
         ADD     r1,r1,1
         PEND    clink,@1f
         JUMP    @Primitive/read-expression/source-byte
 1h      BRANCH  acc,@Primitive/read-expression/symbol/finish ... if #eof.
-        PEND    clink,@1f
+        PEND    clink,@1f       Look for a digit starting a signed
+;                               base 10 number.
         JUMP    @Primitive/read-expression/digit?
 1h      BRANCH  acc,@Primitive/read-expression/number
         CMPIS?  acc,r3,#x23     #
         BRANCH  =acc,@1f
-        ADD     r1,r1,1
+        ADD     r1,r1,1         Found a signed number; move to the base
+;                               indicator character.
         PEND    clink,@Primitive/read-expression/special-number/imp
         JUMP    @Primitive/read-expression/source-byte
-1h      LOAD    r1,r4           Move back to [-+]
+1h      LOAD    r1,r4           Move back to [-+].
         JUMP    @Primitive/read-expression/symbol/next
 
 Primitive/read-expression/special-number
@@ -1577,9 +1907,8 @@ Primitive/read-expression/number/finish
         BRANCH  =r5,@1f         Negate?
         SUB     r6,0,r6
 1h      LOAD    acc,r6          Number
-        LOAD    r1,r4           Terminal offset
         LOAD    r3,'object
-        JUMP    =clink
+        JUMP    @Primitive/read-expression/back-up
 
 Primitive/read-expression/rune
         TRAP    'unimplemented
