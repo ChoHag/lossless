@@ -3613,7 +3613,6 @@ typedef enum {
         OP_POKE4_M,
         OP_POKE8_M,
         OP_PRIMITIVE_P,
-        OP_REPLACE_M,
         OP_RESUMPTION_P,
         OP_SEGMENT_P,
         OP_SIGNATURE,
@@ -3641,11 +3640,10 @@ shared opcode_table Op[OPCODE_LENGTH] = {@|
         [OP_WIDEBRANCH]     = { NIL, AADD, NARG, NARG },@|
         [OP_CLOSURE_P]      = { NIL, AREG, ALOB, NARG },@|
         [OP_INTEGER_P]      = { NIL, AREG, ALOB, NARG },@|
-        [OP_REPLACE_M]      = { NIL, AREG, ALOB, NARG },@|
         [OP_SIGNATURE]      = { NIL, AREG, ALOB, NARG },@|
         [OP_WIDESPORK]      = { NIL, AADD, NARG, NARG },@|
         [OP_SEGMENT_P]      = { NIL, AREG, ALOB, NARG },@|
-        [OP_DEFINE_M]       = { NIL, AREG, ALOB, NARG },@|
+        [OP_DEFINE_M]       = { NIL, ALOT, ALOT, ALOT },@|
         [OP_EXISTS_P]       = { NIL, AREG, ALOT, ALOT },@|
         [OP_SYMBOL_P]       = { NIL, AREG, ALOB, NARG },@|
         [OP_ADDRESS]        = { NIL, AREG, ALOB, NARG },@|
@@ -3701,7 +3699,6 @@ shared char *Opcode_Label[OPCODE_LENGTH] = {@|
         [OP_WIDEBRANCH]     = "VM:WIDEBRANCH",@|
         [OP_CLOSURE_P]      = "VM:CLOSURE?",@|
         [OP_INTEGER_P]      = "VM:INTEGER?",@|
-        [OP_REPLACE_M]      = "VM:REPLACE!",@|
         [OP_SIGNATURE]      = "VM:SIGNATURE",@|
         [OP_WIDESPORK]      = "VM:WIDESPORK",@|
         [OP_SEGMENT_P]      = "VM:SEGMENT?",@|
@@ -3894,7 +3891,7 @@ shared address Interpret_Closure = ADDRESS_INVALID;
 @ @<Extern...@>=
 extern shared address Interpret_Closure;
 
-@ @<Initialise \Ls/...@>=
+@ @<Initialise \Ls/ primitives@>=
 orreturn(new_symbol_const("eval", &sig_eval));
 orreturn(cons(sig_eval, NIL, &sig_eval));
 orreturn(new_symbol_const("copy", &sig_copy));
@@ -4559,15 +4556,13 @@ case OP_TABLE:@;
         ortrap(interpret_save(ins, VM_Result));
         break;
 case OP_DEFINE_M:@;
-case OP_REPLACE_M:@;
-        ortrap(interpret_argument(ins, 0, &VM_Arg1)); /* Table */
-        ortrap(interpret_argument(ins, 1, &VM_Arg2)); /* Datum */
+        ortrap(interpret_argument(ins, 0, &VM_Result)); /* Replace? */
+        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Table */
+        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Datum */
         if (environment_p(VM_Arg1))
-                ortrap(env_save_m_imp(VM_Arg1, VM_Arg2,
-                        OP(ins) == OP_REPLACE_M));
+                ortrap(env_save_m_imp(VM_Arg1, VM_Arg2, true_p(VM_Result)));
         else
-                ortrap(hashtable_save_m(VM_Arg1, VM_Arg2,
-                        OP(ins) == OP_REPLACE_M));
+                ortrap(hashtable_save_m(VM_Arg1, VM_Arg2, true_p(VM_Result)));
         break;
 
 @ The CONS opcode calls cons.
@@ -6991,6 +6986,8 @@ case AADD:
         @<Encode a single address argument and |break|@>
 case ARGH:
         @<Encode an error identifier argument and |break|@>
+case ALOT:
+        @<Encode the first object argument and |break|@>
 case AREG:
         @<Encode the first register argument and |break|@>
 default:
@@ -7047,6 +7044,11 @@ if (!null_p(tmp)) {
 }
 ortrap(assembly_validate_integer(7, true, error_id_c(A(arg)->dex), &wvalue));
 ins |= htobe32((wvalue | 0x80) << 8);
+break;
+
+@ @<Encode the first object ...@>=
+ortrap(assembly_encode_ALOT(0, arg, &ivalue));
+ins |= ivalue;
 break;
 
 @ @<Encode the first register ...@>=

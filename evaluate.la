@@ -433,7 +433,7 @@ Combine-Closure/Ready
         EXTEND  env,env
 1h      CMPIS?  tmp,args,()
         BRANCH  tmp,@1f
-        DEFINE! env,=args
+        DEFINE! #t,env,=args
         JUMP    @1b
 1h      LOAD    clink,r0        Prepare to enter !Primitive/do
         BODY    r0,expr         Closure body
@@ -853,7 +853,7 @@ Primitive/lambda/validate-formals/next
         BRANCH  =tmp,@1f
         TRAP    'conflicted-binding
 1h      CONS    tmp,r1,r1
-        DEFINE! r3,tmp          Record that this label was used.
+        DEFINE! #t,r3,tmp          Record that this label was used.
         CONS    tmp,r1,r2       Create a new signature strategy for this
 ;                               binding.
         CONS    r4,tmp,r4       Include the strategy in the signature.
@@ -1028,7 +1028,7 @@ Primitive/vov/validate-formals/continue
         BRANCH  =tmp,@1f
         TRAP    'conflicted-binding
 1h      CONS    tmp,r2,r2       Create a record of this label.
-        DEFINE! r3,tmp
+        DEFINE! #t,r3,tmp
         CDR     r2,r1           The argument strategy, should be a list of one.
         PAIR?   tmp,r2
         BRANCH  tmp,@1f
@@ -1057,7 +1057,7 @@ Primitive/vov/validate-formals/continue
         BRANCH  =tmp,@1f
         TRAP    'incompatible-operand
 1h      CONS    tmp,r2,r2
-        DEFINE! r4,tmp          ... it has now.
+        DEFINE! #t,r4,tmp          ... it has now.
         JUMP    @Primitive/vov/validate-formals/next%final
 2h      LOAD    tmp,'continuation
         CMPIS?  tmp,r2,tmp
@@ -1066,7 +1066,7 @@ Primitive/vov/validate-formals/continue
         BRANCH  =tmp,@1f
 2h      TRAP    'incompatible-operand
 1h      CONS    tmp,r2,r2
-        DEFINE! r4,tmp          Record this request.
+        DEFINE! #t,r4,tmp          Record this request.
         JUMP    @Primitive/vov/validate-formals/next%final
 
 #       This is a copy of Primitive/vov/validate-formals/next &
@@ -1102,7 +1102,7 @@ Primitive/vov/validate-formals/continue%final
         BRANCH  =tmp,@1f
         TRAP    'conflicted-binding
 1h      CONS    tmp,r2,r2
-        DEFINE! r3,tmp          Record this label.
+        DEFINE! #t,r3,tmp          Record this label.
         CDR     r2,r1           (Strategy).
         PAIR?   tmp,r2
         BRANCH  tmp,@1f
@@ -1119,7 +1119,7 @@ Primitive/vov/validate-formals/continue%final
         BRANCH  =tmp,@1f
         TRAP    'incompatible-operand
 1h      CONS    tmp,r2,r2
-        DEFINE! r4,tmp          Record this request.
+        DEFINE! #t,r4,tmp          Record this request.
         JUMP    @Primitive/vov/validate-formals/next%final
 2h      LOAD    tmp,'continuation
         CMPIS?  tmp,r2,tmp
@@ -1128,8 +1128,70 @@ Primitive/vov/validate-formals/continue%final
         BRANCH  =tmp,@1f
 2h      TRAP    'incompatible-operand
 1h      CONS    tmp,r2,r2
-        DEFINE! r4,tmp          Record this request.
+        DEFINE! #t,r4,tmp          Record this request.
         JUMP    @Primitive/vov/validate-formals/next%final
+
+!Primitive/do
+        PEND    acc,@Primitive/do/next
+        CMPIS?  tmp,r0,()
+        BRANCH  =tmp,@1f
+        LOAD    acc,#VOID
+        JUMP    @!Restore/r0
+        LOAD    args,()
+1h      PAIR?   tmp,r0
+        BRANCH  tmp,@2f
+        CMPIS?  tmp,r0,()
+        BRANCH  tmp,@3f
+        TRAP    'incompatible-operand
+2h      CONS    args,acc,args
+        CONS    args,=r0,args
+        JUMP    @1b
+#
+#       Finished processing the list, move & reverse it onto the stack.
+#
+3h      LOAD    r0,=clink
+1h      LOAD    clink,=args
+        LOAD    clink,=args
+        CMPIS?  tmp,args,()
+        BRANCH  =tmp,@1b
+        LOAD    tmp,=clink      Discard first branch directive.
+Primitive/do/next
+        LOAD    expr,=clink
+        JUMP    @!Evaluate
+
+#       (In) r0: Environment
+#       (In) r1: Label or label & closure formals
+#       (In) r2: Value or body of lambda expression
+!Primitive/set!
+        LOAD    acc,#t
+        JUMP    @Primitive/define!/imp
+!Primitive/define!
+        LOAD    acc,#f
+Primitive/define!/imp
+#       ENVIRONMENT? tmp,r0
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand
+1h      SYMBOL? tmp,r1
+#       BRANCH  =tmp,@Primitive/define!/procedure
+        CMPIS?  tmp,r2,()
+        BRANCH  =tmp,@1f
+        TRAP    'incompatible-operand
+1h      CDR     tmp,r2
+        CMPIS?  tmp,tmp,()
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CAR     r2,r2
+        CONS    r1,r1,r2
+        DEFINE! acc,r0,r1
+        JUMP    @!Restore/r2
+
+!Primitive/current-environment
+        LOAD    acc,env
+        JUMP    =clink
+
+!Primitive/root-environment
+        LOAD    acc,root
+        JUMP    =clink
 
 
 
@@ -1333,41 +1395,6 @@ Primitive/array/set!/imp
 !Primitive/*
         MUL     acc,r0,r1
         JUMP    @!Restore/r1
-
-!Primitive/current-environment
-        LOAD    acc,env
-        JUMP    =clink
-
-!Primitive/root-environment
-        LOAD    acc,root
-        JUMP    =clink
-
-!Primitive/do
-        PEND    acc,@Primitive/do/next
-        CMPIS?  tmp,r0,()
-        BRANCH  =tmp,@1f
-        LOAD    acc,#VOID
-        JUMP    @!Restore/r0
-        LOAD    args,()
-1h      PAIR?   tmp,r0
-        BRANCH  tmp,@2f
-        CMPIS?  tmp,r0,()
-        BRANCH  tmp,@3f
-        TRAP    'incompatible-operand
-2h      CONS    args,acc,args
-        CONS    args,=r0,args
-        JUMP    @1b
-
-3h      LOAD    r0,=clink
-1h      LOAD    clink,=args
-        LOAD    clink,=args
-        CMPIS?  tmp,args,()
-        BRANCH  =tmp,@1b
-
-        LOAD    tmp,=clink      Discard first branch directive.
-Primitive/do/next
-        LOAD    expr,=clink
-        JUMP    @!Evaluate
 
 
 
