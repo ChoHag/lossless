@@ -394,7 +394,13 @@ Combine/Evaluate-List/Append-Argument
 #       (Out) Control-Link: ...
 
 Combine/Evaluate-List/Finish
-        CONS    acc,=clink,=args
+        LOAD    expr,=args
+        LOAD    acc,()
+1h      CMPIS?  tmp,expr,()
+        BRANCH  tmp,@1f
+        CONS    acc,=expr,acc
+        JUMP    @1b
+1h      CONS    acc,=clink,acc
         CONS    args,acc,args
         JUMP    =clink
 
@@ -794,24 +800,21 @@ Combine-Primitive/Ready
 #       match the formals expected by vov. They then share the same
 #       code to validate the body and finish.
 #
-#       (In) r0: formals (unvalidated)
-#       (In) r1: body (unvalidated)
-
-!Primitive/lambda
-        JUMP    @Primitive/lambda/validate-formals
-
 #       Registers r1 to r4 are spilled to the stack while processing
 #       the formals list. The final validated signature is built
 #       in r4 while r1 to r3 are spare space for the validation.
-
+#
 #       (In) Control-Link: ...
+#       (In) r0: formals (unvalidated)
+#       (In) r1: body (unvalidated)
 #
 #       (Out) Control-Link: r4 r3 r2 r1 ...
 #       (Out) r2: (eval)
 #       (Out) r3: Hashtable of binding labels
 #       (Out) r4: Budding signature
 
-Primitive/lambda/validate-formals
+!Primitive/lambda
+
         LOAD    clink,r1        Spill the body; holds the next label.
         LOAD    clink,r2        Common tail of all evaluating arguments.
         LOAD    clink,r3        Hashtable of discovered binding labels.
@@ -918,12 +921,32 @@ Primitive/lambda/validate-formals/finish
 #       a signature compatible with this routine which is why they
 #       are able to share the final steps in Primitive/vov/validate-body.
 #
-#       (In) r0: Formals (unvalidated)
-#       (In) r1: Body (unvalidated)
+#       The formals list as passed and the body are both spilled
+#       along with the other three registers this routine needs;
+#       they will be used as-is after the work to validate them is
+#       discarded.
+#
+#       r3 and r4 hold a hashtable which records the formals (r3) or
+#       state (r4) which have been identified. r2 is used for
+#       additional working space.
+#
+#       (In) Control-Link: ...
+#       (In) r0: Unvalidated formals
+#       (In) r1: Unvalidated closure body
+#
+#       (Out) Control-Link: r4 r3 r2 r1 r0 ...
+#       (Out) r3: hashtable of identified binding labels.
+#       (Out) r4: hashtable of identified state requests.
 
 !Primitive/vov
-        PEND    clink,@Primitive/vov/validate-body
-        JUMP    @Primitive/vov/validate-formals
+        LOAD    clink,r0        Walking along the formals list
+        LOAD    clink,r1        Next formal list
+        LOAD    clink,r2        Working space
+        LOAD    clink,r3
+        LOAD    clink,r4
+        TABLE   r3,0            Collected formal labels
+        TABLE   r4,0            Collected state requests
+        JUMP    @Primitive/vov/validate-formals/first
 
 #       With a valid formals signature in r0 validating the body
 #       is simply a matter of ensuring it's a proper list.
@@ -945,33 +968,6 @@ Primitive/vov/validate-body
 3h      CLOSURE acc,r0,r1       Close over processed/validated formals &
 ;                               validated body.
         JUMP    @!Restore/r1
-
-#       The formals list as passed and the body are both spilled
-#       along with the other three registers this routine needs;
-#       they will be used as-is after the work to validate them is
-#       discarded.
-#
-#       r3 and r4 hold a hashtable which records the formals (r3) or
-#       state (r4) which have been identified. r2 is used for
-#       additional working space.
-#
-#       (In) Control-Link: ...
-#       (In) r0: Unvalidated formals
-#       (In) r1: Unvalidated closure body
-#
-#       (Out) Control-Link: r4 r3 r2 r1 r0 ...
-#       (Out) r3: hashtable of identified binding labels.
-#       (Out) r4: hashtable of identified state requests.
-
-Primitive/vov/validate-formals
-        LOAD    clink,r0        Walking along the formals list
-        LOAD    clink,r1        Next formal list
-        LOAD    clink,r2        Working space
-        LOAD    clink,r3
-        LOAD    clink,r4
-        TABLE   r3,0            Collected formal labels
-        TABLE   r4,0            Collected state requests
-        JUMP    @Primitive/vov/validate-formals/continue
 
 #       After validating the formals the original list is restored
 #       along with the body now ready for its own validation.
@@ -997,6 +993,7 @@ Primitive/vov/validate-formals/finish
 
 Primitive/vov/validate-formals/next
         CDR     r0,r0
+Primitive/vov/validate-formals/first
         CMPIS?  tmp,r0,()
         BRANCH  tmp,@Primitive/vov/validate-formals/finish
 
@@ -1055,21 +1052,22 @@ Primitive/vov/validate-formals/continue
         BRANCH  tmp,@Primitive/vov/validate-formals/next%final
         LOAD    tmp,'environment
         CMPIS?  tmp,r2,tmp
+        BRANCH  =tmp,@2f
         EXISTS? tmp,r4,r2       Has the environment been requested already?
         BRANCH  =tmp,@1f
         TRAP    'incompatible-operand
 1h      CONS    tmp,r2,r2
         DEFINE! r4,tmp          ... it has now.
-        BRANCH  tmp,@Primitive/vov/validate-formals/next%final
-        LOAD    tmp,'continuation
-        CMPIS?  tmp,r2,tmp      Requested continuation already?
-        EXISTS? tmp,r4,r2
+        JUMP    @Primitive/vov/validate-formals/next%final
+2h      LOAD    tmp,'continuation
+        CMPIS?  tmp,r2,tmp
+        BRANCH  tmp,@2f
+        EXISTS? tmp,r4,r2       Requested continuation already?
         BRANCH  =tmp,@1f
-        TRAP    'incompatible-operand
+2h      TRAP    'incompatible-operand
 1h      CONS    tmp,r2,r2
         DEFINE! r4,tmp          Record this request.
-        BRANCH  tmp,@Primitive/vov/validate-formals/next%final
-        TRAP    'incompatible-operand
+        JUMP    @Primitive/vov/validate-formals/next%final
 
 #       This is a copy of Primitive/vov/validate-formals/next &
 #       Primitive/vov/validate-formals/continue for use when the
@@ -1116,21 +1114,22 @@ Primitive/vov/validate-formals/continue%final
 1h      CAR     r2,r2           Strategy.
         LOAD    tmp,'environment
         CMPIS?  tmp,r2,tmp
+        BRANCH  =tmp,@2f
         EXISTS? tmp,r4,r2
         BRANCH  =tmp,@1f
         TRAP    'incompatible-operand
 1h      CONS    tmp,r2,r2
         DEFINE! r4,tmp          Record this request.
-        BRANCH  tmp,@Primitive/vov/validate-formals/next%final
-        LOAD    tmp,'continuation
+        JUMP    @Primitive/vov/validate-formals/next%final
+2h      LOAD    tmp,'continuation
         CMPIS?  tmp,r2,tmp
+        BRANCH  =tmp,@2f
         EXISTS? tmp,r4,r2
         BRANCH  =tmp,@1f
-        TRAP    'incompatible-operand
+2h      TRAP    'incompatible-operand
 1h      CONS    tmp,r2,r2
         DEFINE! r4,tmp          Record this request.
-        BRANCH  tmp,@Primitive/vov/validate-formals/next%final
-        TRAP    'incompatible-operand
+        JUMP    @Primitive/vov/validate-formals/next%final
 
 
 
@@ -1176,17 +1175,17 @@ Primitive/vov/validate-formals/continue%final
 1h      TRAP    'incompatible-operand
 !Primitive/cons
         CONS    acc,r0,r1
-        JUMP    =clink
+        JUMP    @!Restore/r1
 !Primitive/car
         PAIR?   acc,r0
         BRANCH  =acc,@1b
         CAR     acc,r0
-        JUMP    =clink
+        JUMP    @!Restore/r0
 !Primitive/cdr
         PAIR?   acc,r0
         BRANCH  =acc,@1b
         CDR     acc,r0
-        JUMP    =clink
+        JUMP    @!Restore/r0
 
 1h      TRAP    'incompatible-operand
 !Primitive/symbol/key

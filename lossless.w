@@ -305,9 +305,12 @@ code).
 #include <assert.h> /* Definitely not for library code. */
 #include <stdio.h> /* To be removed when \Ls/ I/O is usable. */
 #include <stdlib.h>
-#include <ctype.h> /* Some ASCII macros. */
 #include <string.h> /* Bulk memory transfers, and |strlen|. */
 #include "lossless.h"
+#ifdef LLTEST
+#include <stdarg.h>
+#include "testless.h"
+#endif
 @<Global variables@>@;
 
 @ Non-\CEE/ source code which is compiled by \Ls/ as it starts up
@@ -3821,6 +3824,7 @@ enum {
         SIGNATURE_3,
         SIGNATURE_CL,
         SIGNATURE_ECL,
+        SIGNATURE_L,
         SIGNATURE_LENGTH
 };
 
@@ -3828,6 +3832,8 @@ enum {
 @<Global...@>=
 shared primitive Primitive[PRIMITIVE_LENGTH] = {
         PO(PRIMITIVE_ADD,                 SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_DO,                  SIGNATURE_L,   NULL),@/
+        PO(PRIMITIVE_CONS,                SIGNATURE_2,   NULL),@/
 
         PO(PRIMITIVE_LAMBDA,              SIGNATURE_CL,  NULL),@/
         PO(PRIMITIVE_VOV,                 SIGNATURE_CL,  NULL),@/
@@ -3917,6 +3923,8 @@ orreturn(cons(eval[0], sig[SIGNATURE_2], sig + SIGNATURE_2));
 orreturn(cons(eval[2], NIL, sig + SIGNATURE_3));
 orreturn(cons(eval[1], sig[SIGNATURE_3], sig + SIGNATURE_3));
 orreturn(cons(eval[0], sig[SIGNATURE_3], sig + SIGNATURE_3));
+@#
+orreturn(cons(list[0], NIL, sig + SIGNATURE_L));
 @#
 orreturn(cons(list[1], NIL, sig + SIGNATURE_CL));
 orreturn(cons(copy[0], sig[SIGNATURE_CL], sig + SIGNATURE_CL));
@@ -7465,11 +7473,8 @@ forward by the correct size.
         int         ok;        /* The final result of this unit. */
 
 @ @<Test fun...@>=
-error_code llt_appendf (llt_header *, char *, char **, char *, ...);
 void llt_fixture__init_common (llt_header *, int, llt_thunk, llt_thunk,
         llt_thunk, llt_thunk);
-void llt_fixture_free (llt_header *);
-error_code llt_fixture_leak (llt_header *, int *);
 error_code llt_list_suite (llt_header *);
 error_code llt_load_tests (bool, llt_header **);
 error_code llt_main (int, char **, bool);
@@ -7477,12 +7482,7 @@ int llt_perform_test (int *, llt_header *);
 void llt_print_test (llt_header *);
 error_code llt_run_suite (llt_header *);
 error_code llt_skip_test (int *, llt_header *, char *);
-error_code llt_sprintf (llt_header *, char **, char *, ...);
 error_code llt_usage (char *, bool);
-error_code llt_vsprintf (llt_header *, int, char **, char *, va_list);
-bool tap_ok (llt_header *, char *, bool, cell);
-void tap_out (char *, ...);
-void tap_plan (int);
 
 @ The header contains four |llt_forward| objects which should
 actually be |llt_thunk| to avoid problems caused by the order of
@@ -7607,7 +7607,7 @@ invalid_id:
                         goto invalid_id;
                 if ((int) value > suite->total)
                         goto invalid_id;
-                if (llt_fixture_fetch(suite, value)->perform)
+                if (llt_fixture_fetch(suite, value - 1)->perform)
                         warn("Duplicate test id %lud", value);
                 llt_fixture_fetch(suite, value - 1)->perform = true;
         }
@@ -7699,6 +7699,39 @@ llt_print_test (llt_header *o)
                 putchar(*p);
         }
         printf("|)\n");
+}
+
+@ @d LLT_PROGRESS_INIT   0
+@d LLT_PROGRESS_PREPARE  1
+@d LLT_PROGRESS_RUN      2
+@d LLT_PROGRESS_VALIDATE 3
+@d LLT_PROGRESS_CLEAN    4
+@d LLT_PROGRESS_SKIP     5
+@(testless.c@>=
+void
+llt_fixture__init_common (llt_header *fixture,
+                          int         id,
+                          llt_thunk   prepare,
+                          llt_thunk   run,
+                          llt_thunk   validate,
+                          llt_thunk   clean)
+{
+        fixture->name = "";
+        fixture->id = id;
+        fixture->total = -1;
+        fixture->leaks = NULL;
+        fixture->perform = true;
+        fixture->prepare = (llt_forward) prepare;
+        fixture->run = (llt_forward) run;
+        fixture->validate = (llt_forward) validate;
+        fixture->clean = (llt_forward) clean;
+        fixture->progress = LLT_PROGRESS_INIT;
+        fixture->taps = 1;
+        fixture->tap = fixture->tap_start = 0;
+        fixture->ok = false;
+        fixture->res = NIL;
+        fixture->resp = NULL;
+        fixture->reason = fixture->expect = LERR_NONE;
 }
 
 @ To run a suite each unit in turn is passed through |llt_perform_test|
@@ -7840,7 +7873,7 @@ core memory allocator point |Test_Memory| to an instance of this
 object (eg.~created in |main| before calling |llt_main|) with
 pointers to alternative allocation and release functions.
 
-@ @<Type def...@>=
+@<Test def...@>=
 typedef struct {
         bool active; /* Whether |alloc_mem| should revert to these. */
         bool available; /* Whether the false allocation should succeed. */
@@ -7848,10 +7881,17 @@ typedef struct {
         error_code (*free)(void *);
 } llt_allocation;
 
-@ @<Global...@>=
+@ @<Test fun...@>=
+error_code llt_appendf (llt_header *, char *, char **, char *, ...);
+void llt_free (llt_header *);
+error_code llt_leak (llt_header *, size_t, void **);
+error_code llt_sprintf (llt_header *, char **, char *, ...);
+error_code llt_vsprintf (llt_header *, int, char **, char *, va_list);
+
+@ @(testless.c@>=
 shared llt_allocation *Test_Memory = NULL;
 
-@ @<Extern...@>=
+@ @<Test def...@>=
 extern shared llt_allocation *Test_Memory;
 
 @ These sections are responsible for diverting allocation and
@@ -7867,41 +7907,6 @@ if (Test_Memory != NULL && Test_Memory->active)
         return Test_Memory->free(o);
 
 @* Allocating memory while testing.
-
-Increase the size of the budding test suite by |delta| unit fixtures.
-
-@ @d LLT_PROGRESS_INIT   0
-@d LLT_PROGRESS_PREPARE  1
-@d LLT_PROGRESS_RUN      2
-@d LLT_PROGRESS_VALIDATE 3
-@d LLT_PROGRESS_CLEAN    4
-@d LLT_PROGRESS_SKIP     5
-@(testless.c@>=
-void
-llt_fixture__init_common (llt_header *fixture,
-                          int         id,
-                          llt_thunk   prepare,
-                          llt_thunk   run,
-                          llt_thunk   validate,
-                          llt_thunk   clean)
-{
-        fixture->name = "";
-        fixture->id = id;
-        fixture->total = -1;
-        fixture->leaks = NULL;
-        fixture->perform = true;
-        fixture->prepare = (llt_forward) prepare;
-        fixture->run = (llt_forward) run;
-        fixture->validate = (llt_forward) validate;
-        fixture->clean = (llt_forward) clean;
-        fixture->progress = LLT_PROGRESS_INIT;
-        fixture->taps = 1;
-        fixture->tap = fixture->tap_start = 0;
-        fixture->ok = false;
-        fixture->res = NIL;
-        fixture->resp = NULL;
-        fixture->reason = fixture->expect = LERR_NONE;
-}
 
 @ Ordinarily test scripts are expected to be run once and immediately
 quit and so expect to be able to allocate memory with wild abandon
@@ -7933,14 +7938,14 @@ llt_leak (llt_header  *fixture,
         return LERR_NONE;
 }
 
-@ Although nothing uses it the |llt_fixture_free| function will
-clean up a fixture's memory allocations.
+@ Although nothing uses it the |llt_free| function will clean up a
+fixture's memory allocations.
 
 Ignores error returns but |free| doesn't fail anyway.
 
 @(testless.c@>=
 void
-llt_fixture_free (llt_header *fixture)
+llt_free (llt_header *fixture)
 {
         int i;
 
@@ -7953,8 +7958,8 @@ llt_fixture_free (llt_header *fixture)
         fixture->leaks = NULL;
 }
 
-@ The main consumer of |llt_fixture_leak| is this wrapper around
-\.{printf} and its two users |llt_sprintf| and |llt_appendf|.
+@ The main consumer of |llt_leak| is this wrapper around \.{printf}
+and its two users |llt_sprintf| and |llt_appendf|.
 
 @(testless.c@>=
 error_code
@@ -8068,7 +8073,12 @@ llt_out_match_p (cell got,
 results in the \pdfURL{{\it Test Anything Protocol\/}}%
 {http://testanything.org/}\footnote{$^1$}{\.{http://testanything.org/}}
 
-@(testless.c@>=
+@<Test fun...@>=
+bool tap_ok (llt_header *, char *, bool, cell);
+void tap_out (char *, ...);
+void tap_plan (int);
+
+@ @(testless.c@>=
 void
 tap_plan (int length)
 {
@@ -8755,7 +8765,6 @@ error_code llt_Reader__Simple (llt_header *, int *, bool, llt_header **);
 int llt_Reader__prepare (llt_header *);
 int llt_Reader__run (llt_header *);
 int llt_Reader__validate (llt_header *);
-int llt_Reader__clean (llt_header *);
 @#
 @<Object constructors for reader tests@>@;
 
@@ -8766,8 +8775,8 @@ char LLT_Glyph_Newline[] = { 0xe2, 0x90, 0xa4, 0x00 }; /* \.{\#u2424} ---
                                                         symbol for newline */
 @#
 struct {
-        char        *source;
-        error_code (*build)(cell *);
+        char            *source;
+        error_code @[@](*build)(cell *);
 } LLT_Reader_Rules[] = {@|
         { "42",                 llt_Reader__build_integer_42 },@|
         { "(42)",               llt_Reader__build_list_42 },@|
@@ -8844,13 +8853,6 @@ llt_Reader__validate (llt_header *th)
 }
 
 @ @(t/reader.c@>=
-int
-llt_Reader__clean (llt_header *th @[unused@])
-{
-        return LLT_RUN_CONTINUE;
-}
-
-@ @(t/reader.c@>=
 error_code
 llt_Reader__Simple (llt_header  *suite,
                     int         *count,
@@ -8874,7 +8876,7 @@ llt_Reader__Simple (llt_header  *suite,
                         llt_Reader__prepare,
                         llt_Reader__run,
                         llt_Reader__validate,
-                        llt_Reader__clean);
+                        NULL);
                 tc->taps = 2;
                 tc->want = NIL;
                 tc->interpret_limit = 2048;
@@ -9055,30 +9057,67 @@ typedef struct {
 
 int Test_Fixture_Size = sizeof (llt_fixture);
 
+error_code llt_Closure__Evaluate (llt_header *, int *, bool, llt_header **);
+error_code llt_Closure__Sequence (llt_header *, int *, bool, llt_header **);
 error_code llt_Closure__Simple (llt_header *, int *, bool, llt_header **);
 @#
 int llt_Closure__prepare (llt_header *);
 int llt_Closure__run (llt_header *);
 int llt_Closure__validate (llt_header *);
-int llt_Closure__clean (llt_header *);
 @#
 @<Object constructors for closure tests@>@;
 
 @ @(t/closure.c@>=
 struct {
-        char        *source;
-        error_code (*build)(cell *);
-} LLT_Closure_Rules[] = {@|
-        { "(lambda ())",        llt_Closure__build_ },@|
-        { "(lambda x)",         llt_Closure__build__x },@|
-        { "(lambda (x))",       llt_Closure__build_x },@|
-        { "(lambda (x y))",     llt_Closure__build_xy },@|
-        { "(lambda (x y . z))", llt_Closure__build_xy_z },@|
+        char            *source;
+        error_code @[@](*build)(cell *);
+} LLT_Closure_Sequence_Rules[] = {@|
+        { "(do)",          llt_Closure__out_sequence_empty },@|
+        { "(do #f)",       llt_Closure__out_sequence_false },@|
+        { "(do #t)",       llt_Closure__out_sequence_true },@|
+        { "(do #f 42 #t)", llt_Closure__out_sequence_true },@|
+        { NULL, NULL }
+};
+
+struct {
+        char            *source;
+        error_code @[@](*build)(cell *);
+} LLT_Closure_Simple_Rules[] = {@|
+        { "(lambda ())",             llt_Closure__build_ },@|
+        { "(lambda x)",              llt_Closure__build__x },@|
+        { "(lambda (x))",            llt_Closure__build_x },@|
+        { "(lambda (x y))",          llt_Closure__build_xy },@|
+        { "(lambda (x y . z))",      llt_Closure__build_xy_z },@|
+        { "(vov ())",                llt_Closure__build_ },@|
+        { "(vov ((a copy)))",        llt_Closure__build_a },@|
+        { "(vov ((e environment)))", llt_Closure__build_e },@|
+        { "(vov ((a copy-list) (e environment)))",
+                                     llt_Closure__build_ae },@|
+        { NULL, NULL }
+};
+
+struct {
+        char            *source;
+        error_code @[@](*build)(cell *);
+} LLT_Closure_Evaluate_Rules[] = {@|
+        { "((lambda ()) )",       llt_Closure__out_sequence_empty },@|
+        { "((lambda x) )",        llt_Closure__out_sequence_empty },@|
+        { "((lambda x x) )",      llt_Closure__out_sequence_NIL },@|
+        { "((lambda x x) 1 2 3)", llt_Closure__out_sequence_123 },@|
+        { "((lambda (x y z) (cons x (cons y (cons z ())))) 1 2 3)",
+                                  llt_Closure__out_sequence_123 },@|
+        { "((vov ()) )",          llt_Closure__out_sequence_empty },@|
+        { "((vov ((x copy-list)) x) marco polo!)",
+                                  llt_Closure__out_operative_arguments },@|
+        { "((vov ((x environment)) x))",
+                                  llt_Closure__out_operative_environment },@|
         { NULL, NULL }
 };
 
 llt_initialise Test_Suite[] = {
+        llt_Closure__Sequence,
         llt_Closure__Simple,
+        llt_Closure__Evaluate,
         NULL
 };
 
@@ -9143,13 +9182,6 @@ llt_Closure__validate (llt_header *th)
 }
 
 @ @(t/closure.c@>=
-int
-llt_Closure__clean (llt_header *th @[unused@])
-{
-        return LLT_RUN_CONTINUE;
-}
-
-@ @(t/closure.c@>=
 error_code
 llt_Closure__Simple (llt_header  *suite,
                     int         *count,
@@ -9161,7 +9193,7 @@ llt_Closure__Simple (llt_header  *suite,
         error_code reason;
         int i, rules;
 
-        for (rules = 0; LLT_Closure_Rules[rules].source; rules++)
+        for (rules = 0; LLT_Closure_Simple_Rules[rules].source; rules++)
                 ;
         orreturn(llt_fixture_grow(suite, *count, rules));
         tc = (llt_fixture *) suite;
@@ -9172,11 +9204,87 @@ llt_Closure__Simple (llt_header  *suite,
                         llt_Closure__prepare,
                         llt_Closure__run,
                         llt_Closure__validate,
-                        llt_Closure__clean);
+                        NULL);
                 orreturn(llt_sprintf(th, &tc->name, "construct closure `%s'",
-                        LLT_Closure_Rules[i].source));
-                tc->build = LLT_Closure_Rules[i].build;
-                tc->csource = LLT_Closure_Rules[i].source;
+                        LLT_Closure_Simple_Rules[i].source));
+                tc->build = LLT_Closure_Simple_Rules[i].build;
+                tc->csource = LLT_Closure_Simple_Rules[i].source;
+                tc->taps = 2;
+                tc->want = tc->lsource = tc->ssource = NIL;
+                tc->interpret_limit = 2048;
+        }
+        (*count) += rules;
+        *ret = suite;
+        return LERR_NONE;
+}
+
+@ @(t/closure.c@>=
+error_code
+llt_Closure__Sequence (llt_header  *suite,
+                       int         *count,
+                       bool         full @[unused@],
+                       llt_header **ret)
+{
+        llt_fixture *tc;
+        llt_header *th;
+        error_code reason;
+        int i, rules;
+
+        for (rules = 0; LLT_Closure_Sequence_Rules[rules].source; rules++)
+                ;
+        orreturn(llt_fixture_grow(suite, *count, rules));
+        tc = (llt_fixture *) suite;
+        for (i = 0; i < rules; i++) {
+                tc = ((llt_fixture *) suite) + *count + i;
+                th = (llt_header *) tc;
+                llt_fixture__init_common(th, *count + i,
+                        llt_Closure__prepare,
+                        llt_Closure__run,
+                        llt_Closure__validate,
+                        NULL);
+                orreturn(llt_sprintf(th, &tc->name, "perform sequence `%s'",
+                        LLT_Closure_Sequence_Rules[i].source));
+                tc->build = LLT_Closure_Sequence_Rules[i].build;
+                tc->csource = LLT_Closure_Sequence_Rules[i].source;
+                tc->taps = 2;
+                tc->want = tc->lsource = tc->ssource = NIL;
+                tc->interpret_limit = 2048;
+        }
+        (*count) += rules;
+        *ret = suite;
+        return LERR_NONE;
+}
+
+@ This is the third function that's practically identical...
+
+@(t/closure.c@>=
+error_code
+llt_Closure__Evaluate (llt_header  *suite,
+                       int         *count,
+                       bool         full @[unused@],
+                       llt_header **ret)
+{
+        llt_fixture *tc;
+        llt_header *th;
+        error_code reason;
+        int i, rules;
+
+        for (rules = 0; LLT_Closure_Evaluate_Rules[rules].source; rules++)
+                ;
+        orreturn(llt_fixture_grow(suite, *count, rules));
+        tc = (llt_fixture *) suite;
+        for (i = 0; i < rules; i++) {
+                tc = ((llt_fixture *) suite) + *count + i;
+                th = (llt_header *) tc;
+                llt_fixture__init_common(th, *count + i,
+                        llt_Closure__prepare,
+                        llt_Closure__run,
+                        llt_Closure__validate,
+                        NULL);
+                orreturn(llt_sprintf(th, &tc->name, "evaluate closure `%s'",
+                        LLT_Closure_Evaluate_Rules[i].source));
+                tc->build = LLT_Closure_Evaluate_Rules[i].build;
+                tc->csource = LLT_Closure_Evaluate_Rules[i].source;
                 tc->taps = 2;
                 tc->want = tc->lsource = tc->ssource = NIL;
                 tc->interpret_limit = 2048;
@@ -9206,6 +9314,56 @@ llt_Closure__build__x (cell *ret)
         orreturn(new_symbol_const("x", &x));
         orreturn(cons(leval, NIL, &tmp));
         orreturn(cons(x, tmp, &tmp));
+        orreturn(cons(tmp, NIL, &sign));
+        return new_closure(sign, NIL, ret);
+}
+
+@ @<Object constructors for closure tests@>=
+error_code
+llt_Closure__build_a (cell *ret)
+{       /* \.{(vov ((a copy)))} */
+        cell a, copy, tmp, sign;
+        error_code reason;
+
+        orreturn(new_symbol_const("copy", &copy));
+        orreturn(new_symbol_const("a", &a));
+        orreturn(cons(copy, NIL, &tmp));
+        orreturn(cons(a, tmp, &tmp));
+        orreturn(cons(tmp, NIL, &sign));
+        return new_closure(sign, NIL, ret);
+}
+
+@ @<Object constructors for closure tests@>=
+error_code
+llt_Closure__build_ae (cell *ret)
+{       /* \.{(vov ((a copy-list) (e environment)))} */
+        cell a, atmp, e, etmp, env, lcopy, sign;
+        error_code reason;
+
+        orreturn(new_symbol_const("environment", &env));
+        orreturn(new_symbol_const("copy-list", &lcopy));
+        orreturn(new_symbol_const("a", &a));
+        orreturn(new_symbol_const("e", &e));
+        orreturn(cons(env, NIL, &etmp));
+        orreturn(cons(e, etmp, &etmp));
+        orreturn(cons(lcopy, NIL, &atmp));
+        orreturn(cons(a, atmp, &atmp));
+        orreturn(cons(etmp, NIL, &sign));
+        orreturn(cons(atmp, sign, &sign));
+        return new_closure(sign, NIL, ret);
+}
+
+@ @<Object constructors for closure tests@>=
+error_code
+llt_Closure__build_e (cell *ret)
+{       /* \.{(vov ((a environment)))} */
+        cell env, tmp, sign, e;
+        error_code reason;
+
+        orreturn(new_symbol_const("environment", &env));
+        orreturn(new_symbol_const("e", &e));
+        orreturn(cons(env, NIL, &tmp));
+        orreturn(cons(e, tmp, &tmp));
         orreturn(cons(tmp, NIL, &sign));
         return new_closure(sign, NIL, ret);
 }
@@ -9265,6 +9423,66 @@ llt_Closure__build_xy_z (cell *ret)
         orreturn(cons(ytmp, sign, &sign));
         orreturn(cons(xtmp, sign, &sign));
         return new_closure(sign, NIL, ret);
+}
+
+@ @<Object constructors for closure tests@>=
+error_code
+llt_Closure__out_sequence_empty (cell *ret)
+{       /* \.{(do)} does nothing and `returns' \.{\#VOID}. */
+        *ret = VOID;
+        return LERR_NONE;
+}
+
+error_code
+llt_Closure__out_sequence_NIL (cell *ret)
+{       /* To test that a sequence returns \.{()}. */
+        *ret = NIL;
+        return LERR_NONE;
+}
+
+
+error_code
+llt_Closure__out_sequence_false (cell *ret)
+{       /* To test that a sequence returns \.{\#f}. */
+        *ret = LFALSE;
+        return LERR_NONE;
+}
+
+error_code
+llt_Closure__out_sequence_true (cell *ret)
+{       /* To test that a sequence returns \.{\#t}. */
+        *ret = LTRUE;
+        return LERR_NONE;
+}
+
+error_code
+llt_Closure__out_sequence_123 (cell *ret)
+{       /* To test that a sequence returns \.{(1 2 3)}. */
+        cell tmp;
+        error_code reason;
+        orreturn(cons(fix(3), NIL, &tmp));
+        orreturn(cons(fix(2), tmp, &tmp));
+        return cons(fix(1), tmp, ret);
+}
+
+@ @<Object constructors for closure tests@>=
+error_code
+llt_Closure__out_operative_arguments (cell *ret)
+{       /* To test that a closure returns its arguments unevaluated. */
+        cell label, list;
+        error_code reason;
+        orreturn(new_symbol_const("polo!", &label));
+        orreturn(cons(label, NIL, &list));
+        orreturn(new_symbol_const("marco", &label));
+        return cons(label, list, ret);
+}
+
+@ @<Object constructors for closure tests@>=
+error_code
+llt_Closure__out_operative_environment (cell *ret)
+{       /* To test that a closure returns its caller's environment. */
+        *ret = Environment;
+        return LERR_NONE;
 }
 
 @** Index. And some remaining bits \AM\ pieces.
