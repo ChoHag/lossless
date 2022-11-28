@@ -38,6 +38,7 @@
 #
 #       (Return) Accumulator: The evaluated result
 
+!Exit   HALT
 !Evaluate
         SYMBOL? tmp,expr
         BRANCH  =tmp,@1f
@@ -45,10 +46,29 @@
 !Return JUMP    =clink
 1h      PAIR?   tmp,expr
         BRANCH  tmp,@Combine/Start
-        LOAD    acc,expr        Save the expression in the Accumulator.
+        SYNTAX? tmp,expr
+        BRANCH  =tmp,@1f
+        CAR     acc,expr
+        CDR     expr,expr
+        LOAD    tmp,'quote
+        CMPIS?  tmp,acc,tmp
+        BRANCH  tmp,@1f
+        LOAD    tmp,'quasiquote
+        CMPIS?  tmp,acc,tmp
+        BRANCH  =tmp,@2f
+        TRAP    'unimplemented  ...
+2h      LOAD    tmp,'unquote
+        CMPIS?  tmp,acc,tmp
+        BRANCH  =tmp,@2f
+        TRAP    'unimplemented  ...
+2h      LOAD    tmp,'splice
+        CMPIS?  tmp,acc,tmp
+        BRANCH  =tmp,@2f
+        TRAP    'unimplemented  ...
+2h      TRAP    'unimplemented
+1h      LOAD    acc,expr        Save the expression in the Accumulator.
         JUMP    =clink          There is no need to JUMP via !Return; only
 ;                               in a BRANCH instruction.
-!Exit   HALT
 
 #       The first item in a list, or the combiner, determines how
 #       a list will be combined (or the sinister half of a pair ---
@@ -701,23 +721,46 @@ Combine-Primitive/Ready
         BRANCH  tmp,@3f
         TRAP    'lossless-error No primitive has more than 4 arguments; this
 ;                               instruction `is' unreachable.
-3h      LOAD    clink,r3        Spill and fill the registers starting
-;                               with the last argument.
-        CDR     r3,expr         The argument, discarding the bindling location.
+0h      LOAD    clink,r0
+        CDR     r0,expr         The argument, discarding the bindling location.
         CDR     args,args       The remaining arguments list.
+        JUMP    acc             Jump into the primitive.
+1h      LOAD    clink,r0
+        LOAD    clink,r1
+        CDR     r1,expr
+        CDR     args,args
         CAR     expr,args       Next argument pair.
-2h      LOAD    clink,r2        Repeat, or start here.
+        CDR     r0,expr
+        CDR     args,args
+        JUMP    acc
+2h      LOAD    clink,r0        Repeats...
+        LOAD    clink,r1
+        LOAD    clink,r2
         CDR     r2,expr
         CDR     args,args
         CAR     expr,args
-1h      LOAD    clink,r1        Repeat, or start here.
         CDR     r1,expr
         CDR     args,args
         CAR     expr,args
-0h      LOAD    clink,r0        Repeat, or start here.
         CDR     r0,expr
         CDR     args,args
-        JUMP    acc             Jump into the primitive.
+        JUMP    acc
+3h      LOAD    clink,r0        Repeats...
+        LOAD    clink,r1
+        LOAD    clink,r2
+        LOAD    clink,r3
+        CDR     r3,expr
+        CDR     args,args
+        CAR     expr,args
+        CDR     r2,expr
+        CDR     args,args
+        CAR     expr,args
+        CDR     r1,expr
+        CDR     args,args
+        CAR     expr,args
+        CDR     r0,expr
+        CDR     args,args
+        JUMP    acc
 
 ######## End of the evaluator.
 
@@ -1168,7 +1211,7 @@ Primitive/do/next
 !Primitive/define!
         LOAD    acc,#f
 Primitive/define!/imp
-#       ENVIRONMENT? tmp,r0
+        ENVIRONMENT? tmp,r0
         BRANCH  tmp,@1f
         TRAP    'incompatible-operand
 1h      SYMBOL? tmp,r1
@@ -1180,9 +1223,15 @@ Primitive/define!/imp
         CMPIS?  tmp,tmp,()
         BRANCH  tmp,@1f
         TRAP    'incompatible-operand
-1h      CAR     r2,r2
-        CONS    r1,r1,r2
-        DEFINE! acc,r0,r1
+1h      CAR     expr,r2
+        LOAD    r2,acc
+        PEND    clink,@1f
+        JUMP    @!Evaluate
+1h      ENVIRONMENT? tmp,r0
+        BRANCH  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CONS    r1,r1,acc
+        DEFINE! r2,r0,r1
         JUMP    @!Restore/r2
 
 !Primitive/current-environment
@@ -1193,46 +1242,44 @@ Primitive/define!/imp
         LOAD    acc,root
         JUMP    =clink
 
-
-
-
-
-
-
-
 ########
 
-!Primitive/null?
-        CMPIS?  acc,r0,()
-        JUMP    =clink
-!Primitive/pair?
-        PAIR?   acc,r0
-        JUMP    =clink
-!Primitive/symbol?
-        SYMBOL? acc,r0
-        JUMP    =clink
-!Primitive/segment?
-        SEGMENT? acc,r0
-        JUMP    =clink
 !Primitive/array?
         ARRAY?  acc,0
-        JUMP    =clink
-
-!Primitive/false?
-        CMPIS?  acc,r0,#f
-        JUMP    =clink
-!Primitive/true?
-        CMPIS?  acc,r0,#t
-        JUMP    =clink
+        JUMP    @!Restore/r0
 !Primitive/boolean?
         CMPIS?  acc,r0,#f
         BRANCH  acc,@1f
         CMPIS?  acc,r0,#t
-1h      JUMP    =clink
+1h      JUMP    @!Restore/r0
+!Primitive/false?
+        CMPIS?  acc,r0,#f
+        JUMP    @!Restore/r0
+!Primitive/integer?
+        INTEGER? acc,r0
+        JUMP    @!Restore/r0
+!Primitive/null?
+        CMPIS?  acc,r0,()
+        JUMP    @!Restore/r0
+!Primitive/pair?
+        PAIR?   acc,r0
+        JUMP    @!Restore/r0
+!Primitive/segment?
+        SEGMENT? acc,r0
+        JUMP    @!Restore/r0
+!Primitive/symbol?
+        SYMBOL? acc,r0
+        JUMP    @!Restore/r0
+!Primitive/true?
+        CMPIS?  acc,r0,#t
+        JUMP    @!Restore/r0
+!Primitive/void?
+        CMPIS?  acc,r0,#VOID
+        JUMP    @!Restore/r0
 
 !Primitive/is?
         CMPIS?  acc,r0,r1
-        JUMP    =clink
+        JUMP    @!Restore/r1
 
 1h      TRAP    'incompatible-operand
 !Primitive/cons
@@ -1444,7 +1491,7 @@ Primitive/read-expression/unimplemented-or-forbidden?
         BRANCH  acc,@1f
         CMPEQ?  acc,r3,#x24     $
         BRANCH  acc,@1f
-        CMPEQ?  acc,r3,#x27     '
+        CMPEQ?  acc,r3,#x22     "
         BRANCH  acc,@1f
         CMPEQ?  acc,r3,#x2c     ,
         BRANCH  acc,@1f
@@ -1452,6 +1499,9 @@ Primitive/read-expression/unimplemented-or-forbidden?
         CMPEQ?  acc,r3,tmp
         BRANCH  acc,@1f
         CMPEQ?  acc,r3,#x3b     ;
+        BRANCH  acc,@1f
+        LOAD    tmp,#x7c        |
+        CMPEQ?  acc,r3,tmp
         BRANCH  acc,@1f
 Primitive/read-expression/forbidden?
         LOAD    tmp,#x5c        \
@@ -1575,6 +1625,10 @@ Primitive/read-expression/imp
         LOAD    acc,()
         LOAD    r3,'close
         JUMP    =clink
+1h      CMPIS?  tmp,r3,#x27     '
+        BRANCH  =tmp,@1f
+        LOAD    r3,'quote
+        JUMP    @Primitive/read-expression/quote
 1h      CMPIS?  tmp,r3,#x23     #
         BRANCH  tmp,@Primitive/read-expression/special
 1h      CMPIS?  tmp,r3,#x2d     -; offset is not incremented yet
@@ -1589,6 +1643,14 @@ Primitive/read-expression/imp
         JUMP    @Primitive/read-expression/digit?
 1h      BRANCH  acc,@Primitive/read-expression/number
         JUMP    @Primitive/read-expression/symbol
+
+Primitive/read-expression/quote
+        LOAD    clink,r3        Quoting method
+        PEND    clink,@Primitive/read-expression/quote/continue
+        JUMP    @Primitive/read-expression/next
+Primitive/read-expression/quote/continue
+        SYNTAX  acc,=clink,acc
+        JUMP    =clink
 
 #       This is the other heart which recursively reads expressions
 #       to form them into lists.

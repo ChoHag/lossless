@@ -896,6 +896,7 @@ typedef union {
 @d FORM_OPCODE         (LTAG_BOTH | 0x05) /* A virtual machine's operator. */
 @d FORM_PRIMITIVE      (LTAG_BOTH | 0x06) /* A \Ls/ operator. */
 @d FORM_REGISTER       (LTAG_BOTH | 0x07) /* A virtual machine register. */
+@d FORM_SYNTAX         (LTAG_BOTH | 0x08) /* A syntactic element (\.{`';,}). */
 
 @ Each format has a corresponding test. Some also share
 implementation or are otherwise related.
@@ -918,6 +919,7 @@ implementation or are otherwise related.
 @d register_p(O)       (form_p((O), REGISTER))
 @d rune_p(O)           (form_p((O), RUNE))
 @d statement_p(O)      (form_p((O), STATEMENT))
+@d syntax_p(O)         (form_p((O), SYNTAX))
 @#
 @d segment_intern_p(O) (form_p((O), SEGMENT_INTERN))
 @d segment_stored_p(O) (form_p((O), SEGMENT))
@@ -3591,9 +3593,9 @@ typedef enum {
         OP_CONS,
         OP_DEFINE_M,
         OP_DELIMIT,
+        OP_ENVIRONMENT_P,
         OP_EXISTS_P,
         OP_EXTEND,
-        OP_TABLE,
         OP_INTEGER_P,
         OP_JOIN,
         OP_JUMP,
@@ -3608,10 +3610,10 @@ typedef enum {
         OP_PEEK4,
         OP_PEEK8,
         OP_PEND,
-        OP_POKE_M,
         OP_POKE2_M,
         OP_POKE4_M,
         OP_POKE8_M,
+        OP_POKE_M,
         OP_PRIMITIVE_P,
         OP_RESUMPTION_P,
         OP_SEGMENT_P,
@@ -3620,6 +3622,9 @@ typedef enum {
         OP_SUB,
         OP_SYMBOL,
         OP_SYMBOL_P,
+        OP_SYNTAX,
+        OP_SYNTAX_P,
+        OP_TABLE,
         OP_TRAP,
         OP_WIDEBRANCH,
         OP_WIDESPORK,
@@ -3635,6 +3640,7 @@ typedef enum {
 @d ARGH 5 /* A trap code (symbol, encoded as an 8-bit iny). */
 @<Global...@>=
 shared opcode_table Op[OPCODE_LENGTH] = {@|
+        [OP_ENVIRONMENT_P]  = { NIL, AREG, ALOB, NARG },@|
         [OP_RESUMPTION_P]   = { NIL, AREG, ALOB, NARG },@|
         [OP_PRIMITIVE_P]    = { NIL, AREG, ALOB, NARG },@|
         [OP_WIDEBRANCH]     = { NIL, AADD, NARG, NARG },@|
@@ -3646,6 +3652,7 @@ shared opcode_table Op[OPCODE_LENGTH] = {@|
         [OP_DEFINE_M]       = { NIL, ALOT, ALOT, ALOT },@|
         [OP_EXISTS_P]       = { NIL, AREG, ALOT, ALOT },@|
         [OP_SYMBOL_P]       = { NIL, AREG, ALOB, NARG },@|
+        [OP_SYNTAX_P]       = { NIL, AREG, ALOB, NARG },@|
         [OP_ADDRESS]        = { NIL, AREG, ALOB, NARG },@|
         [OP_ARRAY_P]        = { NIL, AREG, ALOB, NARG },@|
         [OP_CLOSURE]        = { NIL, AREG, ALOT, ALOT },@|
@@ -3666,6 +3673,7 @@ shared opcode_table Op[OPCODE_LENGTH] = {@|
         [OP_PAIR_P]         = { NIL, AREG, ALOB, NARG },@|
         [OP_POKE_M]         = { NIL, AREG, ALOT, ALOT },@|
         [OP_SYMBOL]         = { NIL, AREG, ALOT, ALOT },@|
+        [OP_SYNTAX]         = { NIL, AREG, ALOT, ALOT },@|
         [OP_PEEK2]          = { NIL, AREG, ALOT, ALOT },@|
         [OP_PEEK4]          = { NIL, AREG, ALOT, ALOT },@|
         [OP_PEEK8]          = { NIL, AREG, ALOT, ALOT },@|
@@ -3694,6 +3702,7 @@ extern shared opcode_table Op[];
 
 @ @<Data...@>=
 shared char *Opcode_Label[OPCODE_LENGTH] = {@|
+        [OP_ENVIRONMENT_P]  = "VM:ENVIRONMENT?",@|
         [OP_RESUMPTION_P]   = "VM:RESUMPTION?",@|
         [OP_PRIMITIVE_P]    = "VM:PRIMITIVE?",@|
         [OP_WIDEBRANCH]     = "VM:WIDEBRANCH",@|
@@ -3705,6 +3714,7 @@ shared char *Opcode_Label[OPCODE_LENGTH] = {@|
         [OP_DEFINE_M]       = "VM:DEFINE!",@|
         [OP_EXISTS_P]       = "VM:EXISTS?",@|
         [OP_SYMBOL_P]       = "VM:SYMBOL?",@|
+        [OP_SYNTAX_P]       = "VM:SYNTAX?",@|
         [OP_ADDRESS]        = "VM:ADDRESS",@|
         [OP_ARRAY_P]        = "VM:ARRAY?",@|
         [OP_CLOSURE]        = "VM:CLOSURE",@|
@@ -3725,6 +3735,7 @@ shared char *Opcode_Label[OPCODE_LENGTH] = {@|
         [OP_PAIR_P]         = "VM:PAIR?",@|
         [OP_POKE_M]         = "VM:POKE!",@|
         [OP_SYMBOL]         = "VM:SYMBOL",@|
+        [OP_SYNTAX]         = "VM:SYNTAX",@|
         [OP_PEEK2]          = "VM:PEEK2",@|
         [OP_PEEK4]          = "VM:PEEK4",@|
         [OP_PEEK8]          = "VM:PEEK8",@|
@@ -3773,9 +3784,6 @@ typedef struct {
 @<Type def...@>=
 typedef enum {
         PRIMITIVE_ADD,
-        PRIMITIVE_SUB,
-        PRIMITIVE_MUL,
-
         PRIMITIVE_ARRAY_LENGTH,
         PRIMITIVE_ARRAY_OFFSET,
         PRIMITIVE_ARRAY_P,
@@ -3786,31 +3794,31 @@ typedef enum {
         PRIMITIVE_CAR,
         PRIMITIVE_CDR,
         PRIMITIVE_CONS,
+        PRIMITIVE_CURRENT_ENVIRONMENT,
+        PRIMITIVE_DEFINE_M,
         PRIMITIVE_DO,
         PRIMITIVE_FALSE_P,
+        PRIMITIVE_INTEGER_P,
         PRIMITIVE_IS_P,
         PRIMITIVE_LAMBDA,
+        PRIMITIVE_MUL,
         PRIMITIVE_NEW_ARRAY,
         PRIMITIVE_NEW_SEGMENT,
+        PRIMITIVE_NEW_SYMBOL_SEGMENT,
         PRIMITIVE_NULL_P,
         PRIMITIVE_PAIR_P,
+        PRIMITIVE_ROOT_ENVIRONMENT,
         PRIMITIVE_SEGMENT_LENGTH,
         PRIMITIVE_SEGMENT_P,
         PRIMITIVE_SEGMENT_RESIZE_M,
-        PRIMITIVE_NEW_SYMBOL_SEGMENT,
-        PRIMITIVE_SYMBOL_HASH,
+        PRIMITIVE_SET_M,
+        PRIMITIVE_SUB,
+        PRIMITIVE_SYMBOL_KEY,
         PRIMITIVE_SYMBOL_P,
         PRIMITIVE_SYMBOL_SEGMENT,
-        PRIMITIVE_SYS_READ,
-        PRIMITIVE_SYS_WRITE,
         PRIMITIVE_TRUE_P,
-        PRIMITIVE_VOV,
-        PRIMITIVE_CURRENT_ENVIRONMENT,
-        PRIMITIVE_ROOT_ENVIRONMENT,
-
         PRIMITIVE_VOID_P,
-        PRIMITIVE_INTEGER_P,
-
+        PRIMITIVE_VOV,
         PRIMITIVE_LENGTH
 } primitive_code;
 @#
@@ -3829,15 +3837,41 @@ enum {
 @<Global...@>=
 shared primitive Primitive[PRIMITIVE_LENGTH] = {
         PO(PRIMITIVE_ADD,                 SIGNATURE_2,   NULL),@/
-        PO(PRIMITIVE_DO,                  SIGNATURE_L,   NULL),@/
-        PO(PRIMITIVE_CONS,                SIGNATURE_2,   NULL),@/
-
-        PO(PRIMITIVE_LAMBDA,              SIGNATURE_CL,  NULL),@/
-        PO(PRIMITIVE_VOV,                 SIGNATURE_CL,  NULL),@/
+        PO(PRIMITIVE_ARRAY_LENGTH,        SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_ARRAY_OFFSET,        SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_ARRAY_P,             SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_ARRAY_REF,           SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_ARRAY_RESIZE_M,      SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_ARRAY_SET_M,         SIGNATURE_3,   NULL),@/
+        PO(PRIMITIVE_BOOLEAN_P,           SIGNATURE_1,   NULL),@/
         PO(PRIMITIVE_CAR,                 SIGNATURE_1,   NULL),@/
-        PO(PRIMITIVE_ARRAY_LENGTH,        SIGNATURE_1,   NULL /*| primp_array_length |*/),@/
+        PO(PRIMITIVE_CDR,                 SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_CONS,                SIGNATURE_2,   NULL),@/
         PO(PRIMITIVE_CURRENT_ENVIRONMENT, SIGNATURE_0,   NULL),@/
+        PO(PRIMITIVE_DEFINE_M,            SIGNATURE_ECL, NULL),@/
+        PO(PRIMITIVE_DO,                  SIGNATURE_L,   NULL),@/
+        PO(PRIMITIVE_FALSE_P,             SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_INTEGER_P,           SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_IS_P,                SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_LAMBDA,              SIGNATURE_CL,  NULL),@/
+        PO(PRIMITIVE_MUL,                 SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_NEW_ARRAY,           SIGNATURE_3,   NULL),@/
+        PO(PRIMITIVE_NEW_SEGMENT,         SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_NEW_SYMBOL_SEGMENT,  SIGNATURE_3,   NULL),@/
+        PO(PRIMITIVE_NULL_P,              SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_PAIR_P,              SIGNATURE_1,   NULL),@/
         PO(PRIMITIVE_ROOT_ENVIRONMENT,    SIGNATURE_0,   NULL),@/
+        PO(PRIMITIVE_SEGMENT_LENGTH,      SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_SEGMENT_P,           SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_SEGMENT_RESIZE_M,    SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_SET_M,               SIGNATURE_ECL, NULL),@/
+        PO(PRIMITIVE_SUB,                 SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_SYMBOL_KEY,          SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_SYMBOL_P,            SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_SYMBOL_SEGMENT,      SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_TRUE_P,              SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_VOID_P,              SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_VOV,                 SIGNATURE_CL,  NULL),@/
 };
 
 @ @<Extern...@>=
@@ -3846,11 +3880,6 @@ extern shared primitive Primitive[];
 @ @<Data...@>=
 shared char *Primitive_Label[PRIMITIVE_LENGTH] = {
         [PRIMITIVE_ADD]                 = "+",
-        [PRIMITIVE_SUB]                 = "-",
-        [PRIMITIVE_MUL]                 = "*",
-
-        [PRIMITIVE_CURRENT_ENVIRONMENT] = "current-environment",
-        [PRIMITIVE_ROOT_ENVIRONMENT]    = "root-environment",
         [PRIMITIVE_ARRAY_LENGTH]        = "array/length",
         [PRIMITIVE_ARRAY_OFFSET]        = "array/offset",
         [PRIMITIVE_ARRAY_P]             = "array?",
@@ -3861,28 +3890,31 @@ shared char *Primitive_Label[PRIMITIVE_LENGTH] = {
         [PRIMITIVE_CAR]                 = "car",
         [PRIMITIVE_CDR]                 = "cdr",
         [PRIMITIVE_CONS]                = "cons",
+        [PRIMITIVE_CURRENT_ENVIRONMENT] = "current-environment",
+        [PRIMITIVE_DEFINE_M]            = "define!",
         [PRIMITIVE_DO]                  = "do",
         [PRIMITIVE_FALSE_P]             = "false?",
+        [PRIMITIVE_INTEGER_P]           = "integer?",
         [PRIMITIVE_IS_P]                = "is?",
         [PRIMITIVE_LAMBDA]              = "lambda",
+        [PRIMITIVE_MUL]                 = "*",
         [PRIMITIVE_NEW_ARRAY]           = "new-array",
         [PRIMITIVE_NEW_SEGMENT]         = "new-segment",
+        [PRIMITIVE_NEW_SYMBOL_SEGMENT]  = "segment->symbol",
         [PRIMITIVE_NULL_P]              = "null?",
         [PRIMITIVE_PAIR_P]              = "pair?",
+        [PRIMITIVE_ROOT_ENVIRONMENT]    = "root-environment",
         [PRIMITIVE_SEGMENT_LENGTH]      = "segment/length",
         [PRIMITIVE_SEGMENT_P]           = "segment?",
         [PRIMITIVE_SEGMENT_RESIZE_M]    = "segment/resize!",
-        [PRIMITIVE_NEW_SYMBOL_SEGMENT]  = "segment->symbol",
-        [PRIMITIVE_SYMBOL_HASH]         = "symbol/hash",
+        [PRIMITIVE_SET_M]               = "set!",
+        [PRIMITIVE_SUB]                 = "-",
+        [PRIMITIVE_SYMBOL_KEY]          = "symbol/key",
         [PRIMITIVE_SYMBOL_P]            = "symbol?",
         [PRIMITIVE_SYMBOL_SEGMENT]      = "symbol/segment",
-        [PRIMITIVE_SYS_READ]            = "sys/read",
-        [PRIMITIVE_SYS_WRITE]           = "sys/write",
         [PRIMITIVE_TRUE_P]              = "true?",
-        [PRIMITIVE_VOV]                 = "vov",
-
         [PRIMITIVE_VOID_P]              = "void?",
-        [PRIMITIVE_INTEGER_P]           = "integer?",
+        [PRIMITIVE_VOV]                 = "vov",
 };
 
 @ @<Global...@>=
@@ -4479,29 +4511,29 @@ case OP_PEND:@;
         break;
 
 @ @<Carry out...@>=
-case OP_PAIR_P:
-        ortrap(interpret_solo_argument(ins, &VM_Arg1));
-        VM_Result = predicate(pair_p(VM_Arg1));
-        ortrap(interpret_save(ins, VM_Result));
-        break;
 case OP_ARRAY_P:
         ortrap(interpret_solo_argument(ins, &VM_Arg1));
         VM_Result = predicate(segment_p(VM_Arg1));
         ortrap(interpret_save(ins, VM_Result));
         break;
-case OP_SEGMENT_P:
-        ortrap(interpret_solo_argument(ins, &VM_Arg1));
-        VM_Result = predicate(segment_p(VM_Arg1));
-        ortrap(interpret_save(ins, VM_Result));
-        break;
-case OP_SYMBOL_P:
-        ortrap(interpret_solo_argument(ins, &VM_Arg1));
-        VM_Result = predicate(symbol_p(VM_Arg1));
-        ortrap(interpret_save(ins, VM_Result));
-        break;
 case OP_CLOSURE_P:
         ortrap(interpret_solo_argument(ins, &VM_Arg1));
         VM_Result = predicate(closure_p(VM_Arg1));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+case OP_ENVIRONMENT_P:
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        VM_Result = predicate(environment_p(VM_Arg1));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+case OP_INTEGER_P:
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        VM_Result = predicate(integer_p(VM_Arg1));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+case OP_PAIR_P:
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        VM_Result = predicate(pair_p(VM_Arg1));
         ortrap(interpret_save(ins, VM_Result));
         break;
 case OP_PRIMITIVE_P:
@@ -4514,9 +4546,19 @@ case OP_RESUMPTION_P:
         VM_Result = LFALSE;
         ortrap(interpret_save(ins, VM_Result));
         break;
-case OP_INTEGER_P:
+case OP_SEGMENT_P:
         ortrap(interpret_solo_argument(ins, &VM_Arg1));
-        VM_Result = predicate(integer_p(VM_Arg1));
+        VM_Result = predicate(segment_p(VM_Arg1));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+case OP_SYMBOL_P:
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        VM_Result = predicate(symbol_p(VM_Arg1));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+case OP_SYNTAX_P:
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        VM_Result = predicate(syntax_p(VM_Arg1));
         ortrap(interpret_save(ins, VM_Result));
         break;
 
@@ -4559,6 +4601,7 @@ case OP_DEFINE_M:@;
         ortrap(interpret_argument(ins, 0, &VM_Result)); /* Replace? */
         ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Table */
         ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Datum */
+        assert(environment_p(VM_Arg1) || hashtable_p(VM_Arg1));
         if (environment_p(VM_Arg1))
                 ortrap(env_save_m_imp(VM_Arg1, VM_Arg2, true_p(VM_Result)));
         else
@@ -4578,14 +4621,22 @@ case OP_CONS:@;
         break;
 case OP_CAR:@;
         ortrap(interpret_solo_argument(ins, &VM_Arg1));
-        assert(pair_p(VM_Arg1));
+        assert(ATOM_SIN_DATUM_P(VM_Arg1));
         VM_Result = A(VM_Arg1)->sin;
         ortrap(interpret_save(ins, VM_Result));
         break;
 case OP_CDR:@;
         ortrap(interpret_solo_argument(ins, &VM_Arg1));
-        assert(pair_p(VM_Arg1));
+        assert(ATOM_DEX_DATUM_P(VM_Arg1));
         VM_Result = A(VM_Arg1)->dex;
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+case OP_SYNTAX:@;
+        ortrap(interpret_argument(ins, 1, &VM_Arg1));
+        ortrap(interpret_argument(ins, 2, &VM_Arg2));
+        assert(symbol_p(VM_Arg1));
+        assert(defined_p(VM_Arg2));
+        ortrap(new_atom(VM_Arg1, VM_Arg2, FORM_SYNTAX, &VM_Result));
         ortrap(interpret_save(ins, VM_Result));
         break;
 
