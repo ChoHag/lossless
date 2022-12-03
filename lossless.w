@@ -3231,22 +3231,8 @@ Table ID = XX YYYY,YYYY YYZZ,ZZZZ
 
 XX shifted left |OBJECTDB_SPLIT_GAP|.
 
-@d ADDRESS_INVALID       INTPTR_MAX
-@#
-@d CODE_PAGE_LENGTH      0x1000000l /* $2^{24}$ */
-@d CODE_PAGE_WIDTH       24
-@d CODE_PAGE_MASK        (CODE_PAGE_LENGTH - 1)
-@d CODE_PAGE_MAX         (CODE_PAGE_LENGTH - 1)
-@d INSTRUCTION_LENGTH    (CODE_PAGE_LENGTH / sizeof (instruction))
-@#
-@d OBJECTDB_SPLIT_BOTTOM 0x00ffc0
-@d OBJECTDB_SPLIT_TOP    0x030000
-@d OBJECTDB_SPLIT_GAP    6 /* to |0x3000000| */
-@d OBJECTDB_TABLE        0x03ffc0
-@d OBJECTDB_ROW          0x00003f
-@d OBJECTDB_TABLE_LENGTH (1 << 12)
-@d OBJECTDB_ROW_LENGTH   (1 << 6)
-@d OBJECTDB_MAX          (OBJECTDB_TABLE_LENGTH * OBJECTDB_ROW_LENGTH)
+@d ADDRESS_INVALID INTPTR_MAX
+@d OBJECTDB_LENGTH (1 << 16)
 @<Type def...@>=
 typedef uintptr_t address; /* |void *| would also be acceptable but for
                                 arithmetic. */
@@ -3254,8 +3240,8 @@ typedef uintptr_t address; /* |void *| would also be acceptable but for
 typedef int32_t instruction;
 
 @ @<Global...@>=
-shared cell Program_ObjectDB = NIL; /* Array of multiples of |OBJECTDB_ROW_LENGTH|. */
-shared half Program_ObjectDB_Free = 0; /* Multiple of |OBJECTDB_ROW_LENGTH|. */
+shared cell Program_ObjectDB = NIL;
+shared half Program_ObjectDB_Free = 0;
 shared cell Program_Export_Table = NIL; /* Pairs of (name . index). */
 shared address *Program_Export_Base = NULL; /* Array indexed in to. */
 shared half Program_Export_Free = 0; /* Next available array slot. */
@@ -3284,11 +3270,13 @@ extern unique error_code Trapped;
 extern shared long Interpret_Count, Interpret_Limit;
 
 @
+@d CODE_PAGE_LENGTH 0x10000l
+@d CODE_PAGE_MASK   (CODE_PAGE_LENGTH - 1)
 @d instruction_page(O) ((O) & ~CODE_PAGE_MASK)
 
 @<Fun...@>=
 error_code init_vm (void);
-error_code vm_locate_entry (cell, address *);
+error_code vm_locate_entry (cell, word *, address *);
 
 @ @<Initialise program...@>=
 for (i = 0; i < LERR_LENGTH; i++)
@@ -3297,7 +3285,7 @@ Trap_Handler = (address *) Empty_Trap_Handler;
 @#
 orabort(init_osthread_mutex(&Program_Lock, false, false));
 orabort(new_array(0, fix(0), &Program_ObjectDB));
-orabort(alloc_mem(NULL, CODE_PAGE_LENGTH, 1 << CODE_PAGE_WIDTH,
+orabort(alloc_mem(NULL, CODE_PAGE_LENGTH, CODE_PAGE_LENGTH,
         (void **) &Program_Export_Base));
 assert((address) Program_Export_Base == instruction_page((address)
         Program_Export_Base));
@@ -3328,6 +3316,7 @@ init_vm (void)
 @ @c
 error_code
 vm_locate_entry (cell     label,
+                 word    *index,
                  address *ret)
 {
         cell loffset;
@@ -3340,11 +3329,13 @@ vm_locate_entry (cell     label,
                 return LERR_MISSING;
         orreturn(int_value(A(loffset)->dex, &coffset));
         assert(coffset >= 0 && coffset < Program_Export_Free);
+        if (index != NULL)
+                *index = coffset;
         *ret = Program_Export_Base[coffset];
         return LERR_NONE;
 }
 
-@* Registers. There are too many general registers. They have no
+@* Registers. There are still too many general registers. They have no
 run-time state associated with them except a name.
 
 @d register_id_c(O) (A(O)->sin)
@@ -3365,64 +3356,32 @@ run-time state associated with them except a name.
 @d LR_r12           12
 @d LR_r13           13
 @d LR_r14           14
-@d LR_r15           15
-@d LR_r16           16
-@d LR_r17           17
-@d LR_r18           18
-@d LR_r19           19
-@d LR_r20           20
-@d LR_r21           21
-@d LR_r22           22
-@d LR_r23           23
-@d LR_r24           24
-@d LR_r25           25
-@d LR_r26           26
-@d LR_r27           27
-@d LR_r28           28
-@d LR_r29           29
-@d LR_r30           30
-@d LR_r31           31
-@d LR_r32           32
-@d LR_r33           33
-@d LR_r34           34
-@d LR_r35           35
-@d LR_r36           36
-@d LR_r37           37
-@d LR_r38           38
-@d LR_r39           39
-@d LR_r40           40
-@d LR_r41           41
-@d LR_r42           42
-@d LR_GENERAL       42
+@d LR_GENERAL       15
 
 @ Some global state isn't represented by a register, perhaps these
 should be: |Root|, |SCOW_Attributes|, |Threads|. More?
 
-@d LR_Scrap         43
-@d LR_Accumulator   44
-@d LR_Argument_List 45
-@d LR_Control_Link  46 /* Special: push/pop */
-@d LR_Environment   47 /* Typed: environment? */
-@d LR_Expression    48
-@d LR_Root          49
-@d LR_Heap_Shared   50 /* Typed: heap */
-@d LR_Heap_Thread   51 /* Typed: heap */
-@d LR_Heap_Trap     52 /* Typed: heap */
-@d LR_Symbol_Table  53 /* RO: hash table */
-@d LR_Arg1          54
-@d LR_Arg2          55
-@d LR_Result        56
-@d LR_Trap_Arg1     57
-@d LR_Trap_Arg2     58
-@d LR_Trap_Result   59
-@d LR_CELL          59
+@d LR_Scrap         15
+@d LR_Accumulator   16
+@d LR_Argument_List 17
+@d LR_Control_Link  18 /* Special: push/pop */
+@d LR_Environment   19 /* Typed: environment? */
+@d LR_Expression    20
+@d LR_Root          21
+@d LR_Arg1          22
+@d LR_Arg2          23
+@d LR_Result        24
+@d LR_Trap_Arg1     25
+@d LR_Trap_Arg2     26
+@d LR_Trap_Result   27
+@d LR_CELL          27
 @#
-@d LR_Ip            60 /* RO: Pseudo int */
-@d LR_Trap_Handler  61 /* RO: Pseudo array */
-@d LR_Trap_Ip       62 /* RO: Pseudo int */
-@d LR_Trapped       63 /* RO: Pseudo bool */
-@d LR_SPECIAL       63
-@d LR_LENGTH        64 /* $2^6$ */
+@d LR_Ip            28 /* RO: Pseudo int */
+@d LR_Trap_Handler  29 /* RO: Pseudo array */
+@d LR_Trap_Ip       30 /* RO: Pseudo int */
+@d LR_Trapped       31 /* RO: Pseudo bool */
+@d LR_SPECIAL       31
+@d LR_LENGTH        32 /* $2^5$ */
 @<Global...@>=
 unique cell *Register[LR_CELL + 1] = {NULL}; /* The registers. */
 shared cell Register_Table[LR_LENGTH] = {NIL}; /* Run-time register objects. */
@@ -3473,10 +3432,6 @@ shared char *Register_Label[LR_LENGTH] = {
         [LR_Environment]  = "VM:Environment",@|
         [LR_Root]         = "VM:Root",@|
         [LR_Expression]   = "VM:Expression",@|
-        [LR_Heap_Shared]  = "VM:Heap-Shared",@|
-        [LR_Heap_Thread]  = "VM:Heap-Thread",@|
-        [LR_Heap_Trap]    = "VM:Heap-Trap",@|
-        [LR_Symbol_Table] = "VM:Symbol-Table",@|
         [LR_Trap_Arg1]    = "VM:Trap-Arg1",@|
         [LR_Trap_Arg2]    = "VM:Trap-Arg2",@|
         [LR_Trap_Result]  = "VM:Trap-Result",@|
@@ -3503,34 +3458,6 @@ shared char *Register_Label[LR_LENGTH] = {
         [LR_r12]          = "VM:R12",@|
         [LR_r13]          = "VM:R13",@|
         [LR_r14]          = "VM:R14",@|
-        [LR_r15]          = "VM:R15",@|
-        [LR_r16]          = "VM:R16",@|
-        [LR_r17]          = "VM:R17",@|
-        [LR_r18]          = "VM:R18",@|
-        [LR_r19]          = "VM:R19",@|
-        [LR_r20]          = "VM:R20",@|
-        [LR_r21]          = "VM:R21",@|
-        [LR_r22]          = "VM:R22",@|
-        [LR_r23]          = "VM:R23",@|
-        [LR_r24]          = "VM:R24",@|
-        [LR_r25]          = "VM:R25",@|
-        [LR_r26]          = "VM:R26",@|
-        [LR_r27]          = "VM:R27",@|
-        [LR_r28]          = "VM:R28",@|
-        [LR_r29]          = "VM:R29",@|
-        [LR_r30]          = "VM:R30",@|
-        [LR_r31]          = "VM:R31",@|
-        [LR_r32]          = "VM:R32",@|
-        [LR_r33]          = "VM:R33",@|
-        [LR_r34]          = "VM:R34",@|
-        [LR_r35]          = "VM:R35",@|
-        [LR_r36]          = "VM:R36",@|
-        [LR_r37]          = "VM:R37",@|
-        [LR_r38]          = "VM:R38",@|
-        [LR_r39]          = "VM:R39",@|
-        [LR_r40]          = "VM:R40",@|
-        [LR_r41]          = "VM:R41",@|
-        [LR_r42]          = "VM:R42",@|
 };
 
 @ @<Initialise ass...@>=
@@ -3578,7 +3505,6 @@ typedef enum {
         OP_ADDRESS,
         OP_ARRAY_P,
         OP_BODY,
-        OP_BRANCH,
         OP_CAR,
         OP_CDR,
         OP_CLOSURE,
@@ -3599,6 +3525,8 @@ typedef enum {
         OP_INTEGER_P,
         OP_JOIN,
         OP_JUMP,
+        OP_JUMPIF,
+        OP_JUMPNOT,
         OP_LENGTH,
         OP_LOAD,
         OP_LOOKUP,
@@ -3615,6 +3543,7 @@ typedef enum {
         OP_POKE8_M,
         OP_POKE_M,
         OP_PRIMITIVE_P,
+        OP_REPLACE_M,
         OP_RESUMPTION_P,
         OP_SEGMENT_P,
         OP_SIGNATURE,
@@ -3626,8 +3555,6 @@ typedef enum {
         OP_SYNTAX_P,
         OP_TABLE,
         OP_TRAP,
-        OP_WIDEBRANCH,
-        OP_WIDESPORK,
         OPCODE_LENGTH
 } opcode;
 
@@ -3643,13 +3570,12 @@ shared opcode_table Op[OPCODE_LENGTH] = {@|
         [OP_ENVIRONMENT_P]  = { NIL, AREG, ALOB, NARG },@|
         [OP_RESUMPTION_P]   = { NIL, AREG, ALOB, NARG },@|
         [OP_PRIMITIVE_P]    = { NIL, AREG, ALOB, NARG },@|
-        [OP_WIDEBRANCH]     = { NIL, AADD, NARG, NARG },@|
         [OP_CLOSURE_P]      = { NIL, AREG, ALOB, NARG },@|
         [OP_INTEGER_P]      = { NIL, AREG, ALOB, NARG },@|
-        [OP_SIGNATURE]      = { NIL, AREG, ALOB, NARG },@|
-        [OP_WIDESPORK]      = { NIL, AADD, NARG, NARG },@|
+        [OP_REPLACE_M]      = { NIL, AREG, ALOB, NARG },@|
         [OP_SEGMENT_P]      = { NIL, AREG, ALOB, NARG },@|
-        [OP_DEFINE_M]       = { NIL, ALOT, ALOT, ALOT },@|
+        [OP_SIGNATURE]      = { NIL, AREG, ALOB, NARG },@|
+        [OP_DEFINE_M]       = { NIL, AREG, ALOB, NARG },@|
         [OP_EXISTS_P]       = { NIL, AREG, ALOT, ALOT },@|
         [OP_SYMBOL_P]       = { NIL, AREG, ALOB, NARG },@|
         [OP_SYNTAX_P]       = { NIL, AREG, ALOB, NARG },@|
@@ -3663,11 +3589,12 @@ shared opcode_table Op[OPCODE_LENGTH] = {@|
         [OP_CMPLE_P]        = { NIL, AREG, ALOT, ALOT },@|
         [OP_CMPLT_P]        = { NIL, AREG, ALOT, ALOT },@|
         [OP_DELIMIT]        = { NIL, AREG, NARG, NARG },@|
+        [OP_JUMPNOT]        = { NIL, AREG, AADD, NARG },@|
         [OP_POKE2_M]        = { NIL, AREG, ALOT, ALOT },@|
         [OP_POKE4_M]        = { NIL, AREG, ALOT, ALOT },@|
         [OP_POKE8_M]        = { NIL, AREG, ALOT, ALOT },@|
-        [OP_BRANCH]         = { NIL, AREG, AADD, NARG },@|
         [OP_EXTEND]         = { NIL, AREG, ALOB, NARG },@|
+        [OP_JUMPIF]         = { NIL, AREG, AADD, NARG },@|
         [OP_LENGTH]         = { NIL, AREG, ALOB, NARG },@|
         [OP_LOOKUP]         = { NIL, AREG, ALOT, ALOT },@|
         [OP_PAIR_P]         = { NIL, AREG, ALOB, NARG },@|
@@ -3705,12 +3632,11 @@ shared char *Opcode_Label[OPCODE_LENGTH] = {@|
         [OP_ENVIRONMENT_P]  = "VM:ENVIRONMENT?",@|
         [OP_RESUMPTION_P]   = "VM:RESUMPTION?",@|
         [OP_PRIMITIVE_P]    = "VM:PRIMITIVE?",@|
-        [OP_WIDEBRANCH]     = "VM:WIDEBRANCH",@|
         [OP_CLOSURE_P]      = "VM:CLOSURE?",@|
         [OP_INTEGER_P]      = "VM:INTEGER?",@|
-        [OP_SIGNATURE]      = "VM:SIGNATURE",@|
-        [OP_WIDESPORK]      = "VM:WIDESPORK",@|
+        [OP_REPLACE_M]      = "VM:REPLACE!",@|
         [OP_SEGMENT_P]      = "VM:SEGMENT?",@|
+        [OP_SIGNATURE]      = "VM:SIGNATURE",@|
         [OP_DEFINE_M]       = "VM:DEFINE!",@|
         [OP_EXISTS_P]       = "VM:EXISTS?",@|
         [OP_SYMBOL_P]       = "VM:SYMBOL?",@|
@@ -3725,11 +3651,12 @@ shared char *Opcode_Label[OPCODE_LENGTH] = {@|
         [OP_CMPLE_P]        = "VM:CMPLE?",@|
         [OP_CMPLT_P]        = "VM:CMPLT?",@|
         [OP_DELIMIT]        = "VM:DELIMIT",@|
+        [OP_JUMPNOT]        = "VM:JUMPNOT",@|
         [OP_POKE2_M]        = "VM:POKE2!",@|
         [OP_POKE4_M]        = "VM:POKE4!",@|
         [OP_POKE8_M]        = "VM:POKE8!",@|
-        [OP_BRANCH]         = "VM:BRANCH",@|
         [OP_EXTEND]         = "VM:EXTEND",@|
+        [OP_JUMPIF]         = "VM:JUMPIF",@|
         [OP_LENGTH]         = "VM:LENGTH",@|
         [OP_LOOKUP]         = "VM:LOOKUP",@|
         [OP_PAIR_P]         = "VM:PAIR?",@|
@@ -3976,7 +3903,7 @@ for (i = 0; i < PRIMITIVE_LENGTH; i++) {
 k = 11 + 7; /* |strlen(PRIMITIVE_WRAPPER)| */
 memmove(btmp, PRIMITIVE_DEFAULT, k);
 orreturn(new_symbol_buffer((byte *) btmp, k, NULL, &ltmp));
-orreturn(vm_locate_entry(ltmp, &adefault));
+orreturn(vm_locate_entry(ltmp, NULL, &adefault));
 @#
 k = 11; /* |strlen(PRIMITIVE_PREFIX)| */
 btmp[k - 1] = '/'; /* |memmove(btmp, PRIMITIVE_PREFIX, k)| */
@@ -3985,7 +3912,7 @@ for (i = 0; i < PRIMITIVE_LENGTH; i++) {
         for (j = 0; Primitive_Label[i][j]; j++, bptr++)
                 *bptr = Primitive_Label[i][j];
         orreturn(new_symbol_buffer((byte *) btmp, k + j, NULL, &ltmp));
-        reason = vm_locate_entry(ltmp, &atmp);
+        reason = vm_locate_entry(ltmp, NULL, &atmp);
         if (reason == LERR_MISSING)
                 Primitive[i].wrapper = adefault;
         else if (failure_p(reason))
@@ -3994,7 +3921,7 @@ for (i = 0; i < PRIMITIVE_LENGTH; i++) {
                 Primitive[i].wrapper = atmp;
 }
 orreturn(new_symbol_const(PRIMITIVE_INTERPRET, &ltmp));
-orreturn(vm_locate_entry(ltmp, &Interpret_Closure));
+orreturn(vm_locate_entry(ltmp, NULL, &Interpret_Closure));
 
 @* Stack. Based on list or array.
 
@@ -4130,46 +4057,100 @@ stack_array_reduce (cell *stack)
 
 @* Interpreter.
 
-@d IB(I,B)  ((int32_t) (((char *) &(I))[B]))
-@d UB(I,B)  ((uint32_t) (((unsigned char *) &(I))[B]))
+Argument flavours:
+
+ARGH, NARG, NARG TRAP           Encode as AREG, ALOG
+ALOT, ALOT, ALOT DEFINE!        ""
+NARG, NARG, NARG HALT           ""
+AREG, NARG, NARG DELIMIT        ""
+
+AADD, NARG, NARG JUMP + WIDEs
+AREG, AADD, NARG
+
+AREG, ALOB, NARG
+AREG, ALOT, ALOT
+
+Majority of instructions are one-arg or two-arg (plus destination):
+
+One arg: 16 or 19 bits
+Objects can be integers, special, from registers (popping) or via a table
+2 instruction variants, integer or indirect
+If indirect reg(p) in an arg or 15 bits to identify a table offset
+
+Two arg:
+4 instruction variants, one for each arg being integer or not
+ can encode whether arg is int in the spare bits of the dest reg
+  means 1 variant in opcode space
+ or in other words, instruction variance is in 2nd byte
+if integer, value is signed 8 bit
+ otherwise highest bit is register or special
+  if register, next bit is popping then 5 or 6 bit reg
+  if special most bits are wasted, no fixnums
+Dest byte only destination; 3 extra bits
+
+Majority remainder are addressing: Conditional, forking or goto
+Use 'destination' reg for condition so no possibility for popping
+2 variants, relative or indirect
+indirect is reg or table, possibly 3rd variant if not spare bit
+   
+8 bits for instruction
+3 bits for variance
+5 bits for destination
+16 bits vary
+
+Some ops have no destination, eg. HALT, TRAP, JUMP.
+
+nb. use of char * and array deref is the best kind of incorrect.
+
+@d IB(I,B)   ((int32_t) (((unsigned char *) &(I))[B]))
+@d IINT(I)   ((int32_t) ((IB((I), 2) << 8) | IB((I), 3)))
+@d OP(I)     (IB((I), 0))
 @#
-@d MODE(I)  ((UB((I), 0) >> 6) & 0x03)
-@d OP(I)    ((UB((I), 0) >> 0) & 0x3f)
+@d FLAGS(I)  (betoh32((I) & htobe32(LBC_FLAGS)))
+@d INTP(I,B) (IB((I), 1) & (1 << (9 - (B))))
+@d SINT(I)   ((int16_t) (betoh32(I) & 0xffff))
+@d UINT(I)   ((uint16_t) (betoh32(I) & 0xffff))
+@d SBIG(I)   ((int32_t) (UBIG(I) | SIGN(I)))
+@d SIGN(I)   ((0xffc00000 * ((betoh32(I) & 0x00200000) >> 21)))
+@d UBIG(I)   ((uint32_t) (betoh32(I) & 0x003fffff))
+@d REGP(I,B) ((B) == 0 || !(IB((I), (B) + 1) & 0x80))
+@d REG(I,B)  (IB((I), (B) + 1) & 0x1f)
+@d POP(I,B)  (IB((I), (B) + 1) & 0x20)
+@d VAL(I,B)  ((int) (IB((I), (B) + 1) & 0x7f))
+
+@d LBC_OPCODE           0xff000000
+@d LBC_FLAGS            0x00c00000
+@d LBC_TARGET           0x003f0000
+@d LBC_TARGET_POPPING   0x00200000
 @#
-@d SINT(I)  ((int16_t) (be32toh(I) & 0xffff))
-@d UINT(I)  ((uint16_t) (be32toh(I) & 0xffff))
+@d LBC_ADDRESS_REGISTER 0x00000000 /* Zero. */
+@d LBC_ADDRESS_RELATIVE 0x00800000
+@d LBC_ADDRESS_INDIRECT 0x00400000
+@d LBC_ADDRESS_ABSOLUTE 0x00c00000 /* Unused */
 @#
-@d TBLLO(I) ((UB((I), 2) << 8) | UB((I), 3))
-@d TBLHI(I) ((UB((I), 1) & 0xc0) << 10)
-@d TABLE(I) (TBLHI(I) | TBLLO(I))
+@d LBC_OBJECT_REGISTER  0x00000000 /* Zero. */
+@d LBC_OBJECT_INTEGER   0x00800000
+@d LBC_OBJECT_TABLE     0x00400000
+@d LBC_OBJECT_RESERVED  0x00c00000 /* Unused */
 @#
-@d REG(I,B) (UB((I), (B)) & 0x3f)
-@d POP(I,B) (UB((I), (B)) & 0x80)
+@d LBC_FIRST_INTEGER    0x00800000
+@d LBC_FIRST_SPECIAL    0x00008000
+@d LBC_FIRST_POPPING    0x00002000
 @#
-@d BYTECODE_ADDRESS_DIRECT   0 /* Unsigned 16/24 bit offset; unused. */
-@d BYTECODE_ADDRESS_INDIRECT 1 /* Unsigned 16/24 bit offset to |PROGRAM_EXPORT_BASE|
-                                has pointer-size address. */
-@d BYTECODE_ADDRESS_RELATIVE 2 /* Signed 16 bit delta. */
-@d BYTECODE_ADDRESS_REGISTER 3 /* Integer in a register */
-@d BYTECODE_FIRST_REGISTER   2 /* These are not backwards. */
-@d BYTECODE_SECOND_REGISTER  1
-@d BYTECODE_OBJECT_CONSTANT  0 /* Small fixed integers also; ignore low byte */
-@d BYTECODE_OBJECT_INTEGER   1 /* 16 bit signed. */
-@d BYTECODE_OBJECT_REGISTER  2 /* Ignore low byte */
-@d BYTECODE_OBJECT_TABLE     3 /* Index into global table. */
-@d BYTECODE_CONSTANT_INTEGER 0x80
-@d BYTECODE_CONSTANT_SPECIAL 0x00
+@d LBC_SECOND_INTEGER   0x00400000
+@d LBC_SECOND_SPECIAL   0x00000080
+@d LBC_SECOND_POPPING   0x00000020
+
 @<Fun...@>=
 error_code interpret (void);
 error_code interpret_address16 (instruction, address *);
 error_code interpret_address24 (instruction, address *);
 error_code interpret_argument (instruction, int, cell *);
-int32_t interpret_int16 (instruction, bool);
-int32_t interpret_int24 (instruction, bool);
+error_code interpret_integer (instruction, int, cell *);
 error_code interpret_register (instruction, int, cell *);
 error_code interpret_save (instruction, cell);
 error_code interpret_solo_argument (instruction, cell *);
-error_code interpret_tiny_object (instruction, int, cell *);
+error_code interpret_special (instruction, int, cell *);
 @
 @d pins(O) for (int _i = 0; _i < 4; _i++)
         printf("%02hhx", ((char *) (O))[_i])
@@ -4216,18 +4197,48 @@ interpret_argument (instruction  ins,
                     int          argc,
                     cell        *ret)
 {
-        bool regp;
+        bool intp;
 
         assert(argc >= 0 && argc <= 2);
         switch (argc) {
-        case 0: regp = true;@+ break;
-        case 1: regp = MODE(ins) & BYTECODE_FIRST_REGISTER;@+ break;
-        case 2: regp = MODE(ins) & BYTECODE_SECOND_REGISTER;@+ break;
+        case 0: intp = false;@+ break;
+        case 1: intp = FLAGS(ins) & LBC_FIRST_INTEGER;@+ break;
+        case 2: intp = FLAGS(ins) & LBC_SECOND_INTEGER;@+ break;
         }
-        if (regp)
+        if (intp)
+                return interpret_integer(ins, argc, ret);
+        else if (REGP(ins, argc))
                 return interpret_register(ins, argc, ret);
         else
-                return interpret_tiny_object(ins, argc, ret);
+                return interpret_special(ins, argc, ret);
+}
+
+@ @c
+error_code
+interpret_integer (instruction  ins,
+                   int          argc,
+                   cell        *ret)
+{
+        return new_int_c(IB(ins, argc + 1), ret);
+}
+
+@ @c
+error_code
+interpret_special (instruction  ins,
+                   int          argc,
+                   cell        *ret)
+{
+        static cell look[] = { NIL, LFALSE, LTRUE, VOID, LEOF, INVALID0,
+                INVALID1, UNDEFINED };
+        cell value;
+
+        if (VAL(ins, argc) < 0 || VAL(ins, argc) > sizeof (look))
+                return LERR_INCOMPATIBLE;
+        value = look[VAL(ins, argc)];
+        if (fixed_p(value) || !special_p(value) || !valid_p(value))
+                return LERR_INCOMPATIBLE;
+        *ret = value;
+        return LERR_NONE;
 }
 
 @ For {\it reading\/}.
@@ -4239,7 +4250,7 @@ interpret_register (instruction  ins,
                     cell        *ret)
 {
         assert(argc >= 0 && argc <= 2);
-        switch (REG(ins, argc + 1)) {
+        switch (REG(ins, argc)) {
         case LR_Trap_Handler:@;
                 return LERR_INCOMPATIBLE;
         case LR_Ip:
@@ -4256,15 +4267,15 @@ interpret_register (instruction  ins,
                 *ret = Error[Trapped];
                 return LERR_NONE;
         case LR_Control_Link:
-                if (POP(ins, argc + 1))
-                        return stack_array_pop(Register[REG(ins, argc + 1)], ret);
+                if (POP(ins, argc))
+                        return stack_array_pop(Register[REG(ins, argc)], ret);
                 else
-                        return stack_array_peek(Register[REG(ins, argc + 1)], ret);
+                        return stack_array_peek(Register[REG(ins, argc)], ret);
         default:
-                if (argc && POP(ins, argc + 1))
-                        return stack_list_pop(Register[REG(ins, argc + 1)], ret);
+                if (argc && POP(ins, argc))
+                        return stack_list_pop(Register[REG(ins, argc)], ret);
                 else
-                        *ret = *Register[REG(ins, argc + 1)];
+                        *ret = *Register[REG(ins, argc)];
                 return LERR_NONE;
         }
 }
@@ -4277,16 +4288,17 @@ interpret_solo_argument (instruction  ins,
         long index;
         int16_t value;
 
-        switch(MODE(ins)) {
-        case BYTECODE_OBJECT_CONSTANT:@;
-                return interpret_tiny_object(ins, 1, ret);
-        case BYTECODE_OBJECT_INTEGER:@;
+        switch(FLAGS(ins)) {
+        case LBC_OBJECT_REGISTER:@;
+                if (REGP(ins, 1))
+                        return interpret_register(ins, 1, ret);
+                else
+                        return interpret_special(ins, 1, ret);
+        case LBC_OBJECT_INTEGER:@;
                 value = SINT(ins);
                 return new_int_c(value, ret);
-        case BYTECODE_OBJECT_REGISTER:@;
-                return interpret_register(ins, 1, ret);
-        case BYTECODE_OBJECT_TABLE:@;
-                index = TABLE(ins);
+        case LBC_OBJECT_TABLE:@;
+                index = UINT(ins);
                 if (index > Program_ObjectDB_Free)
                         return LERR_OUT_OF_BOUNDS;
                 *ret = array_base(Program_ObjectDB)[index];
@@ -4294,32 +4306,6 @@ interpret_solo_argument (instruction  ins,
         default:
                 return LERR_INTERNAL;
         }
-}
-
-@ @c
-error_code
-interpret_tiny_object (instruction  ins,
-                       int          argc,
-                       cell        *ret)
-{
-        char value;
-        bool wasfix;
-
-        assert(argc >= 1 && argc <= 2);
-        value = UB(ins, argc + 1);
-        wasfix = value & 0x80;
-        value = ((value & 0x7f) | ((value & 0x40) << 1));
-        if (wasfix)
-                *ret = fix(value);
-        else {
-                if (value)
-                        value = (value * 2) - 1;
-                if (!valid_p(value))
-                        return LERR_INCOMPATIBLE;
-                else
-                        *ret = value;
-        }
-        return LERR_NONE;
 }
 
 @ @c
@@ -4332,25 +4318,23 @@ interpret_address16 (instruction  ins,
         error_code reason;
 
         from = Ip - sizeof (instruction);
-        switch (MODE(ins)) {
-        case BYTECODE_ADDRESS_DIRECT:@;
-                to = interpret_int16(ins, false) | instruction_page(from);
-                break;
-        case BYTECODE_ADDRESS_RELATIVE:@;
-                to = interpret_int16(ins, true) + from;
-                if (instruction_page(to) != instruction_page(from))
-                        return LERR_OUT_OF_BOUNDS;
-                break;
-        case BYTECODE_ADDRESS_INDIRECT:@;
-                ivia = interpret_int16(ins, false);
+        switch (FLAGS(ins)) {
+        case LBC_ADDRESS_ABSOLUTE:@;
+                return LERR_UNIMPLEMENTED;
+        case LBC_ADDRESS_INDIRECT:@;
+                ivia = UINT(ins);
                 if (ivia >= (address) Program_Export_Free)
                         return LERR_OUT_OF_BOUNDS;
                 to = Program_Export_Base[ivia];
                 break;
-        case BYTECODE_ADDRESS_REGISTER:@;
+        case LBC_ADDRESS_REGISTER:@;
                 orreturn(interpret_register(ins, 1, &rvia));
-                assert(pointer_p(rvia));
+                if (!pointer_p(rvia))
+                        return LERR_INCOMPATIBLE;
                 to = (address) pointer(rvia);
+                break;
+        case LBC_ADDRESS_RELATIVE:@;
+                to = SINT(ins) + from;
                 break;
         }
         *ret = to;
@@ -4370,51 +4354,27 @@ interpret_address24 (instruction  ins,
         error_code reason;
 
         from = Ip - sizeof (instruction);
-        switch (MODE(ins)) {
-        case BYTECODE_ADDRESS_DIRECT:@;
-                to = interpret_int24(ins, false) | instruction_page(from);
-                break;
-        case BYTECODE_ADDRESS_RELATIVE:@;
-                to = interpret_int24(ins, true) + from;
-                if (instruction_page(to) != instruction_page(from))
-                        return LERR_OUT_OF_BOUNDS;
-                break;
-        case BYTECODE_ADDRESS_INDIRECT:@;
-                ivia = interpret_int24(ins, false);
+        switch (FLAGS(ins)) {
+        case LBC_ADDRESS_ABSOLUTE:@;
+                return LERR_UNIMPLEMENTED;
+        case LBC_ADDRESS_INDIRECT:@;
+                ivia = UBIG(ins);
                 if (ivia >= (address) Program_Export_Free)
                         return LERR_OUT_OF_BOUNDS;
                 to = Program_Export_Base[ivia];
                 break;
-        case BYTECODE_ADDRESS_REGISTER:@;
+        case LBC_ADDRESS_REGISTER:@;
                 orreturn(interpret_register(ins, 0, &rvia));
-                assert(pointer_p(rvia));
+                if (!pointer_p(rvia))
+                        return LERR_INCOMPATIBLE;
                 to = (address) pointer(rvia);
+                break;
+        case LBC_ADDRESS_RELATIVE:@;
+                to = SBIG(ins) + from;
                 break;
         }
         *ret = to;
         return LERR_NONE;
-}
-
-@ @c
-int32_t
-interpret_int16 (instruction ins,
-                 bool        sign)
-{
-        int32_t rval;
-        rval = sign ? SINT(ins) : UINT(ins);
-        return rval;
-}
-
-@ @c
-int32_t
-interpret_int24 (instruction ins,
-                 bool        sign)
-{
-        int32_t rval;
-        rval = (UB(ins, 1) << 16) | UINT(ins);
-        if (sign && (UB(ins, 1) & 0x80))
-                rval |= 0xff000000;
-        return rval;
 }
 
 @ @c
@@ -4423,29 +4383,23 @@ error_code
 interpret_save (instruction ins,
                 cell        result)
 {
-        switch (REG(ins, 1)) {
+        switch (REG(ins, 0)) {
         case LR_Ip:@; /* Could be mutable, but why? */
         case LR_Root:@;
-        case LR_Symbol_Table:@;
         case LR_Trap_Handler:@; /* TODO */
         case LR_Trap_Ip:@;
         case LR_Trapped:@;
                 return LERR_IMMUTABLE;
         case LR_Control_Link:@;
-                return stack_array_push(Register[REG(ins, 1)], result);
+                return stack_array_push(Register[REG(ins, 0)], result);
                 break;
         case LR_Environment:
                 if (!environment_p(result))
                         return LERR_INCOMPATIBLE;
-                *Register[REG(ins, 1)] = result;
+                *Register[REG(ins, 0)] = result;
                 return LERR_NONE;
-        case LR_Heap_Shared:@;
-        case LR_Heap_Thread:@;
-        case LR_Heap_Trap:
-                if (!heap_p(result))
-                        return LERR_INCOMPATIBLE;
         default:@;
-                *Register[REG(ins, 1)] = result;
+                *Register[REG(ins, 0)] = result;
                 return LERR_NONE;
         }
 }
@@ -4458,7 +4412,7 @@ default:
                 reason = LERR_INSTRUCTION;
         goto Trap;
 case OP_TRAP:
-        ortrap(interpret_argument(ins, 1, &VM_Arg1));
+        ortrap(interpret_integer(ins, 0, &VM_Arg1));
         assert(fixed_p(VM_Arg1));
         reason = fixed_value(VM_Arg1);
 Trap:
@@ -4483,20 +4437,15 @@ case OP_HALT:@;
 case OP_JUMP:@;
         ortrap(interpret_address24(ins, &Ip));
         break;
-case OP_BRANCH:@; /* Although using |interpret_argument| we know arg 0
-                        must be a register. */
+case OP_JUMPIF:@;
         ortrap(interpret_argument(ins, 0, &VM_Result));
-        if (POP(ins, 1)) {
-                if (false_p(VM_Result))
-                        ortrap(interpret_address16(ins, &Ip));
-        } else {
-                if (true_p(VM_Result))
-                        ortrap(interpret_address16(ins, &Ip));
-        }
+        if (true_p(VM_Result))
+                ortrap(interpret_address16(ins, &Ip));
         break;
-case OP_WIDEBRANCH:@;
-        if (true_p(Accumulator))
-                ortrap(interpret_address24(ins, &Ip));
+case OP_JUMPNOT:@;
+        ortrap(interpret_argument(ins, 0, &VM_Result));
+        if (false_p(VM_Result))
+                ortrap(interpret_address16(ins, &Ip));
         break;
 
 @ @<Carry out...@>=
@@ -4598,14 +4547,14 @@ case OP_TABLE:@;
         ortrap(interpret_save(ins, VM_Result));
         break;
 case OP_DEFINE_M:@;
-        ortrap(interpret_argument(ins, 0, &VM_Result)); /* Replace? */
-        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Table */
-        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Datum */
+case OP_REPLACE_M:@;
+        ortrap(interpret_argument(ins, 0, &VM_Arg1)); /* Table */
+        ortrap(interpret_solo_argument(ins, &VM_Arg2)); /* Datum */
         assert(environment_p(VM_Arg1) || hashtable_p(VM_Arg1));
         if (environment_p(VM_Arg1))
-                ortrap(env_save_m_imp(VM_Arg1, VM_Arg2, true_p(VM_Result)));
+                ortrap(env_save_m_imp(VM_Arg1, VM_Arg2, OP(ins) == OP_REPLACE_M));
         else
-                ortrap(hashtable_save_m(VM_Arg1, VM_Arg2, true_p(VM_Result)));
+                ortrap(hashtable_save_m(VM_Arg1, VM_Arg2, OP(ins) == OP_REPLACE_M));
         break;
 
 @ The CONS opcode calls cons.
@@ -4920,7 +4869,7 @@ case OP_MUL:
 @d ARGUMENT_OBJECT           4
 @d ARGUMENT_REGISTER         5
 @d ARGUMENT_REGISTER_POPPING 6
-@d ARGUMENT_RELATIVE         7
+@d ARGUMENT_RELATIVE_ADDRESS 7
 @d ARGUMENT_TABLE            8
 @d ARGUMENT_LENGTH           9
 @#
@@ -6114,7 +6063,7 @@ error_code assembly_encode_AREG (int, cell, instruction *);
 error_code assembly_finish_m (cell, cell *);
 error_code assembly_fix_forward_links_m (cell, cell, cell);
 error_code assembly_install_m (cell, cell *);
-error_code assembly_validate_integer (int, bool, cell, word *);
+bool assembly_validate_integer (int, bool, cell, word *);
 
 @
 @d assembly_in_progress_p(O) (assembly_p(O)
@@ -6183,10 +6132,7 @@ assembly_set_statement_m (cell o,
         assert(lineno >= 0);
         assert(statement_p(statement));
         body = array_base(o)[ASSEMBLY_PROGRESS_BODY];
-        grow = array_length_c(body);
-        while (grow <= lineno)
-                if ((grow += 100) > CODE_PAGE_LENGTH)
-                        return LERR_OUT_OF_BOUNDS;
+        grow = (lineno + 0x80) & ~0x7f; /* Round to next multiple of 128. */
         if (grow > array_length_c(body))
                 orreturn(array_resize_m(body, grow, NIL));
         array_base(body)[lineno] = statement;
@@ -6637,7 +6583,7 @@ assembly_append_statement_m (cell  o,
 {
         cell argument, delta, label, lineat, lineno, link, op;
         int i;
-        word cdelta, clineno;
+        word cdelta, clineno, ignored;
         half tablerow;
         error_code reason;
 
@@ -6675,7 +6621,7 @@ assembly_append_statement_m (cell  o,
                         cdelta = fixed_value(lineat) - fixed_value(lineno);
                         orreturn(new_int_c(cdelta, &delta));
                         orreturn(statement_set_argument_m(statement,
-                                i, ARGUMENT_RELATIVE, delta));
+                                i, ARGUMENT_RELATIVE_ADDRESS, delta));
                         break;
                 case ARGUMENT_REGISTER:
                 case ARGUMENT_REGISTER_POPPING:
@@ -6683,13 +6629,13 @@ assembly_append_statement_m (cell  o,
                         break;
                 case ARGUMENT_OBJECT:
                         orassert(statement_instruction(statement, &op));
-                        if ((integer_p(A(argument)->dex)
-                                    && statement_integer_fits_p(statement,
-                                        i, A(argument)->dex))
-                                  || (special_p(A(argument)->dex) && !fixed_p(A(argument)->dex)))
+                        if (integer_p(A(argument)->dex)
+                                    && assembly_validate_integer(16,
+                                        true, A(argument)->dex, &ignored))
                                 break;
-                        else if (opcode_signature_c(op)[i] != ALOB)
-                                return LERR_INCOMPATIBLE;
+                        if (special_p(A(argument)->dex)
+                                    && !fixed_p(A(argument)->dex))
+                                break;
                         orreturn(assembly_install_object_m(o,
                                 A(argument)->dex, &tablerow));
                         orreturn(new_int_c(tablerow, &link));
@@ -6701,7 +6647,7 @@ assembly_append_statement_m (cell  o,
 
         assert(fixed_p(lineno));
         clineno = fixed_value(lineno);
-        assert(clineno >= 0 && clineno < CODE_PAGE_MAX);
+        assert(clineno >= 0);
         assembly_set_statement_m(o, clineno, statement);
         if (!null_p(label)) {
                 assembly_set_backward_address_m(o, label, lineno);
@@ -6742,7 +6688,7 @@ assembly_fix_forward_links_m (cell o,
                 assembly_statement(o, fixed_value(linefrom), &statement);
                 assert(statement_p(statement));
                 orreturn(statement_set_argument_m(statement,
-                        fixed_value(argid), ARGUMENT_RELATIVE, delta));
+                        fixed_value(argid), ARGUMENT_RELATIVE_ADDRESS, delta));
 
         }
         return assembly_clear_forward_argument_list_m(o, link);
@@ -6840,7 +6786,7 @@ for (i = 0; i < hashtable_length_c(far_address); i++) {
                 delta = fixed_value(lineto) - fixed_value(linefrom);
                 assembly_statement(o, fixed_value(linefrom), &statement);
                 statement_set_argument_m(statement,
-                        fixed_value(argid), ARGUMENT_RELATIVE, fix(delta));
+                        fixed_value(argid), ARGUMENT_RELATIVE_ADDRESS, fix(delta));
         }
         hashtable_erase_m(far_argument, A(next)->sin, false);
 }
@@ -6921,7 +6867,7 @@ TODO: memmove occasionally segfaults.
 objectdb = array_base(o)[ASSEMBLY_READY_OBJECTDB];
 new_objectdb_length = Program_ObjectDB_Free;
 i = new_objectdb_length + array_length_c(objectdb);
-if (i > OBJECTDB_MAX) {
+if (i >= OBJECTDB_LENGTH) {
         reason = LERR_LIMIT;
         goto Trap;
 }
@@ -6980,12 +6926,6 @@ for (i = 0; i < hashtable_length_c(array_base(o)[ASSEMBLY_READY_EXPORT]); i++) {
         assert(fixed_p(A(label)->dex)); /* destination offset from
                                                 start of program code */
         ito = fixed_value(A(label)->dex);
-        assert(ito >= 0 && (address) ito < INSTRUCTION_LENGTH);
-        if ((address) ito >= INSTRUCTION_LENGTH - ioffset) {
-                reason = LERR_OUT_OF_BOUNDS;
-                goto Trap;
-        }
-@#
         real = ito * sizeof (instruction);
         real += boffset;
         real |= page;
@@ -7013,10 +6953,8 @@ for (i = 0; i < array_length_c(body); i++) {
         if (opb->arg0 == NARG) {
                 assert(opb->arg1 == NARG && opb->arg2 == NARG);
                 statement_argument(lins, fix(0), &arg);
-                if (!null_p(arg)) {
-                        reason = LERR_INCOMPATIBLE;
-                        goto Trap;
-                }
+                if (!null_p(arg))
+                        goto incompatible;
                 goto finish_arguments;
         }
         @<Encode the first argument@>@;
@@ -7028,10 +6966,8 @@ finish_arguments:
 
 @ @<Encode the first argument@>=
 statement_argument(lins, fix(0), &arg);
-if (null_p(arg)) {
-        reason = LERR_INCOMPATIBLE;
-        goto Trap;
-}
+if (null_p(arg))
+        goto incompatible;
 switch (opb->arg0) {
 case AADD:
         @<Encode a single address argument and |break|@>
@@ -7051,50 +6987,50 @@ default:
 @<Encode a single address ...@>=
 assert(opb->arg1 == NARG && opb->arg2 == NARG);
 statement_argument(lins, fix(1), &tmp);
-if (!null_p(tmp)) {
-        reason = LERR_INCOMPATIBLE;
-        goto Trap;
-}
+if (!null_p(tmp))
+        goto incompatible;
 switch (fixed_value(A(arg)->sin)) {
-case ARGUMENT_RELATIVE:
-        ortrap(assembly_validate_integer(24, true, A(arg)->dex, &wvalue));
-        if (wvalue < -i || wvalue == 0 || wvalue > array_length_c(body) - i) {
+case ARGUMENT_RELATIVE_ADDRESS:
+        if (!assembly_validate_integer(22, true, A(arg)->dex, &wvalue)
+                    || wvalue == 0 || wvalue < -i
+                    || wvalue > array_length_c(body) - i) {
                 reason = LERR_OUT_OF_BOUNDS;
                 goto Trap;
         }
         wvalue *= sizeof (instruction);
-        ins |= htobe32((wvalue & 0xffffff) | (BYTECODE_ADDRESS_RELATIVE << 30));
+        ins |= htobe32((wvalue & 0x3fffff) | LBC_ADDRESS_RELATIVE);
         break;
 case ARGUMENT_FAR_ADDRESS:
-        ortrap(vm_locate_entry(A(arg)->dex, &avalue));
+        ortrap(vm_locate_entry(A(arg)->dex, &wvalue, &avalue)); /* Table index */
         assert(instruction_page(avalue) != page);
-        ins |= htobe32(ivalue & 0xffffff);
-        ins |= htobe32(BYTECODE_ADDRESS_INDIRECT << 30);
+        ins |= htobe32((wvalue & 0x3fffff) | LBC_ADDRESS_INDIRECT);
+        break;
+case ARGUMENT_REGISTER:
+case ARGUMENT_REGISTER_POPPING:
+        ortrap(assembly_encode_AREG(0, arg, &ivalue));
+        ins |= ivalue;
+        ins |= htobe32(LBC_ADDRESS_REGISTER); /* In fact this is 0. */
         break;
 default:
-        ortrap(assembly_encode_AREG(0, arg, &ivalue)); /* Checks for argument type. */
-        ins |= ivalue;
-        ins |= htobe32(BYTECODE_ADDRESS_REGISTER << 30);
-        break;
+incompatible: /* This exit point is common; here is as good a place as any. */
+        reason = LERR_INCOMPATIBLE;
+        goto Trap;
 }
 break;
 
-@ TODO: Allow the error object to be obtained from a register.
+@ These can be combined.
 
-@.TODO@>
 @<Encode an error identifier ...@>=
 assert(opb->arg1 == NARG && opb->arg2 == NARG);
-if (A(arg)->sin != fix(ARGUMENT_ERROR) || !error_p(A(arg)->dex)) {
-        reason = LERR_INCOMPATIBLE;
-        goto Trap;
-}
+if (A(arg)->sin != fix(ARGUMENT_ERROR) || !error_p(A(arg)->dex))
+        goto incompatible;
 statement_argument(lins, fix(1), &tmp);
-if (!null_p(tmp)) {
-        reason = LERR_INCOMPATIBLE;
-        goto Trap;
-}
-ortrap(assembly_validate_integer(7, true, error_id_c(A(arg)->dex), &wvalue));
-ins |= htobe32((wvalue | 0x80) << 8);
+if (!null_p(tmp))
+        goto incompatible;
+if (!assembly_validate_integer(8, true, error_id_c(A(arg)->dex), &wvalue))
+        goto incompatible; /* Overkill; guaranteed by the error object. */
+ortrap(assembly_encode_ALOT(0, arg, &ivalue));
+ins |= ivalue;
 break;
 
 @ @<Encode the first object ...@>=
@@ -7139,23 +7075,24 @@ default:
 @<Encode a 16-bit address ...@>=
 assert(opb->arg2 == NARG);
 switch (fixed_value(A(arg)->sin)) {
-case ARGUMENT_RELATIVE:
-        ortrap(assembly_validate_integer(16, true, A(arg)->dex, &wvalue));
-        if (wvalue < -i || wvalue == 0 || wvalue > array_length_c(body) - i) {
+case ARGUMENT_RELATIVE_ADDRESS:
+        if (!assembly_validate_integer(16, true, A(arg)->dex, &wvalue)
+                    || wvalue == 0 || wvalue < -i
+                    || wvalue > array_length_c(body) - i) {
                 reason = LERR_OUT_OF_BOUNDS;
                 goto Trap;
         }
         wvalue *= sizeof (instruction);
-        ins |= htobe32((wvalue & 0xffff) | (BYTECODE_ADDRESS_RELATIVE << 30));
+        ins |= htobe32((wvalue & 0xffff) | LBC_ADDRESS_RELATIVE);
         break;
 case ARGUMENT_REGISTER:
 case ARGUMENT_REGISTER_POPPING:
         ortrap(assembly_encode_AREG(1, arg, &ivalue));
-        ins |= ivalue | htobe32((BYTECODE_ADDRESS_REGISTER << 30));
+        ins |= ivalue;
+        ins |= htobe32(LBC_ADDRESS_REGISTER); /* In fact this is 0. */
         break;
 default:
-        reason = LERR_INCOMPATIBLE;
-        goto Trap;
+        goto incompatible;
 }
 break;
 
@@ -7166,40 +7103,30 @@ assert(opb->arg2 == NARG);
 switch (fixed_value(A(arg)->sin)) {
 case ARGUMENT_TABLE:
         assert(integer_p(A(arg)->dex)); // assembly table offset
-        if (!fixed_p(A(arg)->dex)
-                    || (wvalue = fixed_value(A(arg)->dex)) < 0
-                    || wvalue > OBJECTDB_MAX) {
-                reason = LERR_INCOMPATIBLE;
-                goto Trap;
-        } else if ((wvalue += Program_ObjectDB_Free) > OBJECTDB_MAX) {
+        if (!assembly_validate_integer(16, false, A(arg)->dex, &wvalue))
+                goto incompatible;
+        else if ((wvalue += Program_ObjectDB_Free) >= OBJECTDB_LENGTH) {
                 reason = LERR_OUT_OF_BOUNDS;
                 goto Trap;
         }
-        wvalue = (wvalue & (OBJECTDB_SPLIT_BOTTOM | OBJECTDB_ROW))
-                | ((wvalue & (OBJECTDB_SPLIT_TOP)) << OBJECTDB_SPLIT_GAP);
-        ins |= htobe32(wvalue | (BYTECODE_OBJECT_TABLE << 30));
+        ins |= htobe32((wvalue & 0xffff) | LBC_OBJECT_TABLE);
         break;
 case ARGUMENT_OBJECT:
-        if (fixed_p(A(arg)->dex)
-                    && fixed_value(A(arg)->dex) >= TINY_MIN
-                    && fixed_value(A(arg)->dex) <= TINY_MAX) {
-                ortrap(assembly_encode_ALOT(1, arg, &ivalue)); /* Checks for argument type. */
-                ins |= ivalue;
-        } else if (integer_p(A(arg)->dex)) {
-                orassert(int_value(A(arg)->dex, &wvalue));
-                assert(wvalue >= INT16_MIN && wvalue <= INT16_MAX);
-                ins |= htobe32((wvalue & 0xffff) | (BYTECODE_OBJECT_INTEGER << 30));
+        if (integer_p(A(arg)->dex)) {
+                if (!assembly_validate_integer(16, true, A(arg)->dex, &wvalue))
+                        goto incompatible;
+                ins |= htobe32((wvalue & 0xffff) | LBC_OBJECT_INTEGER);
         } else {
-                assert(special_p(A(arg)->dex));
+                if (!special_p(A(arg)->dex))
+                        goto incompatible;
 case ARGUMENT_REGISTER:
 case ARGUMENT_REGISTER_POPPING:
-                ortrap(assembly_encode_ALOT(1, arg, &ivalue)); /* Checks for argument type. */
+                ortrap(assembly_encode_ALOT(1, arg, &ivalue));
                 ins |= ivalue;
         }
         break;
 default:
-        reason = LERR_INCOMPATIBLE;
-        goto Trap;
+        goto incompatible;
 }
 break;
 
@@ -7212,10 +7139,8 @@ break;
 @ @<Encode the third argument@>=
 if (opb->arg2 != NARG) {
         statement_argument(lins, fix(2), &arg);
-        if (null_p(arg)) {
-                reason = LERR_INCOMPATIBLE;
-                goto Trap;
-        }
+        if (null_p(arg))
+                goto incompatible;
         ortrap(assembly_encode_ALOT(2, arg, &ivalue));
         ins |= ivalue;
 }
@@ -7225,7 +7150,7 @@ number to |OP_TRAP|. 16 bits encode relative offsets and any 16 bit
 integer.
 
 @c
-error_code
+bool
 assembly_validate_integer (int   width,
                            bool  signed_p,
                            cell  lvalue,
@@ -7234,31 +7159,43 @@ assembly_validate_integer (int   width,
         word min, max, cvalue;
         error_code reason;
 
-        switch (width) {
-        case 7:
-                assert(signed_p);
-                min = ASR(INT8_MIN, 1);
-                max = ASR(INT8_MAX, 1);
+        assert(integer_p(lvalue));
+        assert(signed_p == 0 || signed_p == 1);
+        switch (width | signed_p) {
+        default:
+        case 8:
+                abort();
+        case 9:
+                min = -0x80;
+                max = 0x7f;
                 break;
         case 16:
-                min = signed_p ? INT16_MIN : 0;
-                max = signed_p ? INT16_MAX : UINT16_MAX;
+                min = 0;
+                max = 0xffff;
                 break;
-        case 24:
-                min = ASR(signed_p ? INT32_MIN : 0, 8);
-                max = ASR(signed_p ? INT32_MAX : UINT32_MAX, 8);
+        case 17:
+                min = -0x8000;
+                max = 0x7fff;
+                break;
+        case 22:
+                min = 0;
+                max = 0x3fffff;
+                break;
+        case 23:
+                min = -0x200000;
+                max = 0x1fffff;
                 break;
         }
-        orreturn(int_value(lvalue, &cvalue));
+        reason = int_value(lvalue, &cvalue);
+        if (reason == LERR_LIMIT)
+                return false;
+        else
+                assert(!failure_p(reason));
         if (cvalue < min || cvalue > max)
-                return LERR_INCOMPATIBLE;
+                return false;
         *ret = cvalue;
-        return LERR_NONE;
+        return true;
 }
-
-@ @d TINY_MIN -0x40
-  @d TINY_MAX  0x3f
-  @d TINY_MASK 0x7f
 
 @ @c
 error_code
@@ -7266,19 +7203,31 @@ assembly_encode_ALOT (int          argc,
                       cell         argv,
                       instruction *ret)
 {
+        static int mask[3] = { 0,
+                htobe32(LBC_FIRST_INTEGER),
+                htobe32(LBC_SECOND_INTEGER) }; // part of opcode
+
         assert(argc >= 0 && argc <= 2);
         assert(argument_p(argv));
+        if (A(argv)->sin == fix(ARGUMENT_ERROR)) {
+                argv = fixed_value(error_id_c(A(argv)->dex));
+                goto integer;
+        }
         if (A(argv)->sin != fix(ARGUMENT_OBJECT))
                 return assembly_encode_AREG(argc, argv, ret);
+        assert(argc != 0);
         assert(special_p(A(argv)->dex));
         if (fixed_p(A(argv)->dex)) {
-                assert((fixed_value(A(argv)->dex) >= TINY_MIN
-                    && fixed_value(A(argv)->dex) <= TINY_MAX));
-                argv = BYTECODE_CONSTANT_INTEGER | (fixed_value(A(argv)->dex) & TINY_MASK);
-        } else
-                argv = BYTECODE_CONSTANT_SPECIAL | (((A(argv)->dex + 1) / 2) & TINY_MASK);
-        assert(BYTECODE_OBJECT_CONSTANT == 0);
-        *ret = htobe32(argv << ((2 - argc) * 8));
+                if (!assembly_validate_integer(8, true, A(argv)->dex, &argv))
+                        return LERR_INCOMPATIBLE;
+integer:
+                argv = argv & 0xff;
+                *ret = mask[argc];
+        } else {
+                argv = (((A(argv)->dex + 1) / 2) & 0x7f) | 0x80;
+                *ret = 0;
+        }
+        *ret |= htobe32(argv << ((2 - argc) * 8));
         return LERR_NONE;
 }
 
@@ -7295,13 +7244,8 @@ assembly_encode_AREG (int          argc,
         popping = A(argv)->sin == fix(ARGUMENT_REGISTER_POPPING);
         assert(popping || A(argv)->sin == fix(ARGUMENT_REGISTER));
         assert(register_p(A(argv)->dex));
-        argv = fixed_value(register_id_c(A(argv)->dex)) | (popping << 7);
+        argv = fixed_value(register_id_c(A(argv)->dex)) | (popping << 5);
         argv <<= ((2 - argc) * 8);
-        assert(BYTECODE_FIRST_REGISTER == BYTECODE_OBJECT_REGISTER);
-        if (argc == 1)
-                argv |= BYTECODE_FIRST_REGISTER << 30;
-        else if (argc == 2)
-                argv |= BYTECODE_SECOND_REGISTER << 30;
         *ret = htobe32(argv);
         return LERR_NONE;
 }
@@ -8642,9 +8586,9 @@ llt_Evaluator__prepare (llt_header *th)
         Interpret_Count = 0;
         Interpret_Limit = tc->interpret_limit;
         ortrap(new_symbol_const(PROGRAM_EVALUATE, &label));
-        ortrap(vm_locate_entry(label, &Ip));
+        ortrap(vm_locate_entry(label, NULL, &Ip));
         ortrap(new_symbol_const(PROGRAM_EXIT, &label));
-        ortrap(vm_locate_entry(label, &fin));
+        ortrap(vm_locate_entry(label, NULL, &fin));
         ortrap(new_pointer(fin, &label));
         ortrap(stack_array_push(&Control_Link, label));
 @#
@@ -8871,9 +8815,9 @@ llt_Reader__prepare (llt_header *th)
         Interpret_Count = 0;
         Interpret_Limit = tc->interpret_limit;
         ortrap(new_symbol_const(PROGRAM_READ, &label));
-        ortrap(vm_locate_entry(label, &Ip));
+        ortrap(vm_locate_entry(label, NULL, &Ip));
         ortrap(new_symbol_const(PROGRAM_EXIT, &label));
-        ortrap(vm_locate_entry(label, &fin));
+        ortrap(vm_locate_entry(label, NULL, &fin));
         ortrap(new_pointer(fin, &label));
         ortrap(stack_array_push(&Control_Link, label));
 @#
@@ -9190,13 +9134,13 @@ llt_Closure__prepare (llt_header *th)
         memmove(segment_base(tc->ssource), tc->csource, length);
 @#
         ortrap(new_symbol_const(PROGRAM_EXIT, &label));
-        ortrap(vm_locate_entry(label, &fin));
+        ortrap(vm_locate_entry(label, NULL, &fin));
         ortrap(new_pointer(fin, &jexit));
         ortrap(stack_array_push(&Control_Link, jexit));
         General[0] = tc->ssource;
         General[1] = fix(0);
         ortrap(new_symbol_const(PROGRAM_READ, &label));
-        ortrap(vm_locate_entry(label, &Ip));
+        ortrap(vm_locate_entry(label, NULL, &Ip));
         Interpret_Count = Interpret_Limit = 0;
         ortrap(interpret());
         General[0] = General[1] = NIL;
@@ -9206,7 +9150,7 @@ llt_Closure__prepare (llt_header *th)
         Interpret_Limit = tc->interpret_limit;
         ortrap(stack_array_push(&Control_Link, jexit));
         ortrap(new_symbol_const(PROGRAM_EVALUATE, &label));
-        ortrap(vm_locate_entry(label, &Ip));
+        ortrap(vm_locate_entry(label, NULL, &Ip));
         Expression = tc->lsource;
         return LLT_RUN_CONTINUE;
 Trap:

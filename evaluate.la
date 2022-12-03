@@ -25,7 +25,8 @@
 #       (LOOKUP) and control returns to the address saved on the
 #       stack. This instruction has the public label !Return for
 #       use in the frequent operation of popping an address off the
-#       stack and jumping to it in a conditional BRANCH instruction.
+#       stack and jumping to it in a conditional JUMPIF/JUMPNOT
+#       instruction.
 #
 #       If the expression being evaluated is a pair then it denotes
 #       a combiner which requires more work, performed by Combine/Start.
@@ -41,34 +42,34 @@
 !Exit   HALT
 !Evaluate
         SYMBOL? tmp,expr
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         LOOKUP  acc,env,expr    Look for the symbol in the Environment.
 !Return JUMP    =clink
 1h      PAIR?   tmp,expr
-        BRANCH  tmp,@Combine/Start
+        JUMPIF  tmp,@Combine/Start
         SYNTAX? tmp,expr
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         CAR     acc,expr
         CDR     expr,expr
         LOAD    tmp,'quote
         CMPIS?  tmp,acc,tmp
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         LOAD    tmp,'quasiquote
         CMPIS?  tmp,acc,tmp
-        BRANCH  =tmp,@2f
+        JUMPNOT tmp,@2f
         TRAP    'unimplemented  ...
 2h      LOAD    tmp,'unquote
         CMPIS?  tmp,acc,tmp
-        BRANCH  =tmp,@2f
+        JUMPNOT tmp,@2f
         TRAP    'unimplemented  ...
 2h      LOAD    tmp,'splice
         CMPIS?  tmp,acc,tmp
-        BRANCH  =tmp,@2f
+        JUMPNOT tmp,@2f
         TRAP    'unimplemented  ...
 2h      TRAP    'unimplemented
 1h      LOAD    acc,expr        Save the expression in the Accumulator.
         JUMP    =clink          There is no need to JUMP via !Return; only
-;                               in a BRANCH instruction.
+;                               in a JUMPIF/JUMPNOT instruction.
 
 #       The first item in a list, or the combiner, determines how
 #       a list will be combined (or the sinister half of a pair ---
@@ -119,11 +120,11 @@ Combine/Start
 Combine/Dispatch
         LOAD          expr,acc
         PRIMITIVE?    tmp,expr
-        BRANCH        tmp,@Combine-Primitive
+        JUMPIF        tmp,@Combine-Primitive
         CLOSURE?      tmp,expr
-        BRANCH        tmp,@Combine-Closure
+        JUMPIF        tmp,@Combine-Closure
         RESUMPTION?   tmp,expr
-        BRANCH        tmp,@Combine-Primitive
+        JUMPIF        tmp,@Combine-Primitive
         TRAP          'uncombinable
 
 #       After combination is finally complete and the result is in
@@ -190,7 +191,7 @@ Combine-Closure
 
 Combine-Closure/signature/next
         CMPIS?  tmp,r0,()       Finished?
-        BRANCH  tmp,@Combine-Closure/signature/finish
+        JUMPIF  tmp,@Combine-Closure/signature/finish
         CAR     acc,r0          Strategy.
         CDR     r0,r0           Next signature.
         CAR     r1,acc          Argument's binding label.
@@ -199,9 +200,9 @@ Combine-Closure/signature/next
         LOAD    tmp,'eval       Check if this strategy is eval, otherwise
 ;                               continue at Combine-Closure/signature/eval-list?
         CMPIS?  tmp,acc,tmp
-        BRANCH  =tmp,@Combine-Closure/signature/eval-list?
+        JUMPNOT tmp,@Combine-Closure/signature/eval-list?
         PAIR?   tmp,args        Is the remaining Arguments a pair?
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 
 #       To evaluate an argument which will be bound in a closure's
@@ -253,7 +254,7 @@ Combine-Closure/signature/next
 Combine-Closure/signature/eval-list?
         LOAD    tmp,'eval-list
         CMPIS?  tmp,acc,tmp
-        BRANCH  =tmp,@Combine-Closure/signature/copy?
+        JUMPNOT tmp,@Combine-Closure/signature/copy?
         PEND    tmp,@Combine/Evaluate-List/Start
         CONS    expr,tmp,expr
 
@@ -266,9 +267,9 @@ Combine-Closure/signature/eval-list?
 
 Combine-Closure/signature/eval-list/next
         CMPIS?  tmp,args,()
-        BRANCH  tmp,@Combine-Closure/signature/eval-list/finish
+        JUMPIF  tmp,@Combine-Closure/signature/eval-list/finish
         PAIR?   tmp,args
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand   Improper list
 1h      PEND    tmp,@Combine/Evaluate-Argument
         CONS    expr,tmp,expr
@@ -333,7 +334,7 @@ Combine-Closure/signature/eval-list/finish
 
 Combine-Closure/signature/finish
         CMPIS?  tmp,args,()     Signature ended with unhandled arguments?
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      LOAD    r1,=clink       Restore spilled registers.
         LOAD    r0,=clink
@@ -342,7 +343,7 @@ Combine-Closure/signature/finish
         LOAD    clink,acc
         PEND    clink,@Combine-Closure/Ready
 1h      CMPIS?  tmp,expr,()     Finished?
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         LOAD    clink,=expr     Move the next item from Expression.
         JUMP    @1b
 1h      JUMP    =clink          Arguments is now ().
@@ -417,7 +418,7 @@ Combine/Evaluate-List/Finish
         LOAD    expr,=args
         LOAD    acc,()
 1h      CMPIS?  tmp,expr,()
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         CONS    acc,=expr,acc
         JUMP    @1b
 1h      CONS    acc,=clink,acc
@@ -452,8 +453,8 @@ Combine-Closure/Ready
         OPEN    env,expr        Closure environment
         EXTEND  env,env
 1h      CMPIS?  tmp,args,()
-        BRANCH  tmp,@1f
-        DEFINE! #t,env,=args
+        JUMPIF  tmp,@1f
+        DEFINE! env,=args
         JUMP    @1b
 1h      LOAD    clink,r0        Prepare to enter !Primitive/do
         BODY    r0,expr         Closure body
@@ -476,9 +477,9 @@ Combine-Closure/Ready
 Combine-Closure/signature/copy?
         LOAD    tmp,'copy
         CMPIS?  tmp,acc,tmp
-        BRANCH  =tmp,@Combine-Closure/signature/copy-list?
+        JUMPNOT tmp,@Combine-Closure/signature/copy-list?
         PAIR?   tmp,args
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      PEND    tmp,@Combine/Copy-Argument
         CONS    expr,tmp,expr
@@ -500,7 +501,7 @@ Combine-Closure/signature/copy?
 Combine-Closure/signature/copy-list?
         LOAD    tmp,'copy-list
         CMPIS?  tmp,acc,tmp
-        BRANCH  =tmp,@Combine-Closure/signature/environment?
+        JUMPNOT tmp,@Combine-Closure/signature/environment?
         PEND    tmp,@Combine/Copy-Argument
         CONS    expr,tmp,expr
         CONS    expr,args,expr
@@ -525,9 +526,9 @@ Combine-Closure/signature/copy-list?
 Combine-Closure/signature/environment?
         LOAD    tmp,'environment
         CMPIS?  tmp,acc,tmp
-        BRANCH  =tmp,@Combine-Closure/signature/continuation?
+        JUMPNOT tmp,@Combine-Closure/signature/continuation?
         CMPIS?  tmp,args,()
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      PEND    tmp,@Combine/Copy-Environment
         CONS    expr,tmp,expr
@@ -560,10 +561,10 @@ Combine/Copy-Environment
 Combine-Closure/signature/continuation?
         LOAD    tmp,'environment
         CMPIS?  tmp,acc,tmp
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         TRAP    'unimplemented
 1h      CMPIS?  tmp,args,()
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand   Too many arguments.
 1h      PEND    tmp,@Combine/Copy-Continuation
         CONS    expr,tmp,expr
@@ -605,16 +606,16 @@ Combine-Primitive
 
 Combine-Primitive/signature/next
         CMPIS?  tmp,r0,()       Finished?
-        BRANCH  tmp,@Combine-Primitive/signature/finish
+        JUMPIF  tmp,@Combine-Primitive/signature/finish
         LOAD    acc,=r0         Next formal
         CAR     r1,acc          Register `binding', an integer.
         CDR     acc,acc
         CAR     acc,acc         Strategy
         LOAD    tmp,'eval
         CMPIS?  tmp,acc,tmp
-        BRANCH  =tmp,@Combine-Primitive/signature/copy?
+        JUMPNOT tmp,@Combine-Primitive/signature/copy?
         PAIR?   tmp,args
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      PEND    tmp,@Combine/Evaluate-Argument
         CONS    expr,tmp,expr
@@ -634,9 +635,9 @@ Combine-Primitive/signature/next
 Combine-Primitive/signature/copy?
         LOAD    tmp,'copy
         CMPIS?  tmp,acc,tmp
-        BRANCH  =tmp,@Combine-Primitive/signature/copy-list?
+        JUMPNOT tmp,@Combine-Primitive/signature/copy-list?
         PAIR?   tmp,args
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand   Improper list
 1h      PEND    tmp,@Combine/Copy-Argument
         CONS    expr,tmp,expr
@@ -671,7 +672,7 @@ Combine-Primitive/signature/copy-list?
 
 Combine-Primitive/signature/finish
         CMPIS?  tmp,args,()
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      LOAD    args,expr
         LOAD    r1,=clink
@@ -681,7 +682,7 @@ Combine-Primitive/signature/finish
         LOAD    clink,expr
         PEND    clink,@Combine-Primitive/Ready
 1h      CMPIS?  tmp,args,()
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         LOAD    clink,=args
         JUMP    @1b
 1h      JUMP    =clink          Args is now ()
@@ -703,22 +704,22 @@ Combine-Primitive/signature/finish
 Combine-Primitive/Ready
         ADDRESS acc,=clink      Discard the closure after obtaining its address.
         CMPIS?  tmp,args,()
-        BRANCH  tmp,acc         If there are no arguments proceed directly
+        JUMPIF  tmp,acc         If there are no arguments proceed directly
 ;                               to the primitive implementation.
         CAR     expr,args       First argument.
         CAR     tmp,expr        First register number.
         CMPIS?  tmp,tmp,0
-        BRANCH  tmp,@0f
+        JUMPIF  tmp,@0f
         CAR     tmp,expr        There's no spare space to store the register
 ;                               number! Extract it again.
         CMPIS?  tmp,tmp,1
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         CAR     tmp,expr
         CMPIS?  tmp,tmp,2
-        BRANCH  tmp,@2f
+        JUMPIF  tmp,@2f
         CAR     tmp,expr
         CMPIS?  tmp,tmp,3
-        BRANCH  tmp,@3f
+        JUMPIF  tmp,@3f
         TRAP    'lossless-error No primitive has more than 4 arguments; this
 ;                               instruction `is' unreachable.
 0h      LOAD    clink,r0
@@ -882,21 +883,21 @@ Combine-Primitive/Ready
 
 Primitive/lambda/validate-formals/next
         CMPIS?  tmp,r0,()       Finished?
-        BRANCH  tmp,@Primitive/lambda/validate-formals/finish
+        JUMPIF  tmp,@Primitive/lambda/validate-formals/finish
         SYMBOL? tmp,r0          Is the (remaining) list really a symbol?
-        BRANCH  tmp,@Primitive/lambda/validate-formals/consume
+        JUMPIF  tmp,@Primitive/lambda/validate-formals/consume
         PAIR?   tmp,r0          Is the remaining list list-like?
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      CAR     r1,r0           Next binding label.
         SYMBOL? tmp,r1
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      EXISTS? tmp,r3,r1       Check that this label is unique.
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         TRAP    'conflicted-binding
 1h      CONS    tmp,r1,r1
-        DEFINE! #t,r3,tmp          Record that this label was used.
+        DEFINE! r3,tmp          Record that this label was used.
         CONS    tmp,r1,r2       Create a new signature strategy for this
 ;                               binding.
         CONS    r4,tmp,r4       Include the strategy in the signature.
@@ -916,7 +917,7 @@ Primitive/lambda/validate-formals/next
 
 Primitive/lambda/validate-formals/consume
         EXISTS? tmp,r3,r0
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         TRAP    'conflicted-binding
 1h      LOAD    r2,'eval-list
         CONS    r2,r2,()
@@ -940,7 +941,7 @@ Primitive/lambda/validate-formals/consume
 Primitive/lambda/validate-formals/finish
         LOAD    r0,()
 1h      CMPIS?  tmp,r4,()
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         CAR     tmp,r4
         CONS    r0,tmp,r0
         CDR     r4,r4
@@ -1000,14 +1001,14 @@ Primitive/lambda/validate-formals/finish
 
 Primitive/vov/validate-body
         CMPIS?  tmp,r1,()
-        BRANCH  tmp,@3f
+        JUMPIF  tmp,@3f
         LOAD    acc,r1
 1h      PAIR?   tmp,acc         Looks like a list so far?
-        BRANCH  tmp,@2f
+        JUMPIF  tmp,@2f
         TRAP    'incompatible-operand
 2h      CDR     acc,acc         Remaining instructions.
         CMPIS?  tmp,acc,()      Finished?
-        BRANCH  =tmp,@1b
+        JUMPNOT tmp,@1b
 3h      CLOSURE acc,r0,r1       Close over processed/validated formals &
 ;                               validated body.
         JUMP    @!Restore/r1
@@ -1038,7 +1039,7 @@ Primitive/vov/validate-formals/next
         CDR     r0,r0
 Primitive/vov/validate-formals/first
         CMPIS?  tmp,r0,()
-        BRANCH  tmp,@Primitive/vov/validate-formals/finish
+        JUMPIF  tmp,@Primitive/vov/validate-formals/finish
 
 #       Following on from Primitive/vov/validate-formals/next, here
 #       each individual formal is validated. The formals passed to
@@ -1057,59 +1058,59 @@ Primitive/vov/validate-formals/first
 
 Primitive/vov/validate-formals/continue
         PAIR?   tmp,r0          Does the (next) formal item continue a list?
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      CAR     r1,r0           Next formal; should also be list.
         PAIR?   tmp,r1
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      CAR     r2,r1           Binding label, should be unique symbol.
         SYMBOL? tmp,r2
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      EXISTS? tmp,r3,r2       See if the binding label has been used already.
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         TRAP    'conflicted-binding
 1h      CONS    tmp,r2,r2       Create a record of this label.
-        DEFINE! #t,r3,tmp
+        DEFINE! r3,tmp
         CDR     r2,r1           The argument strategy, should be a list of one.
         PAIR?   tmp,r2
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      CDR     tmp,r2
         CMPIS?  tmp,tmp,()
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      CAR     r2,r2           The argument strategy.
         LOAD    tmp,'eval
         CMPIS?  tmp,r2,tmp
-        BRANCH  tmp,@Primitive/vov/validate-formals/next
+        JUMPIF  tmp,@Primitive/vov/validate-formals/next
         LOAD    tmp,'copy
         CMPIS?  tmp,r2,tmp
-        BRANCH  tmp,@Primitive/vov/validate-formals/next
+        JUMPIF  tmp,@Primitive/vov/validate-formals/next
         LOAD    tmp,'eval-list
         CMPIS?  tmp,r2,tmp
-        BRANCH  tmp,@Primitive/vov/validate-formals/next%final
+        JUMPIF  tmp,@Primitive/vov/validate-formals/next%final
         LOAD    tmp,'copy-list
         CMPIS?  tmp,r2,tmp
-        BRANCH  tmp,@Primitive/vov/validate-formals/next%final
+        JUMPIF  tmp,@Primitive/vov/validate-formals/next%final
         LOAD    tmp,'environment
         CMPIS?  tmp,r2,tmp
-        BRANCH  =tmp,@2f
+        JUMPNOT tmp,@2f
         EXISTS? tmp,r4,r2       Has the environment been requested already?
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         TRAP    'incompatible-operand
 1h      CONS    tmp,r2,r2
-        DEFINE! #t,r4,tmp          ... it has now.
+        DEFINE! r4,tmp          ... it has now.
         JUMP    @Primitive/vov/validate-formals/next%final
 2h      LOAD    tmp,'continuation
         CMPIS?  tmp,r2,tmp
-        BRANCH  tmp,@2f
+        JUMPIF  tmp,@2f
         EXISTS? tmp,r4,r2       Requested continuation already?
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
 2h      TRAP    'incompatible-operand
 1h      CONS    tmp,r2,r2
-        DEFINE! #t,r4,tmp          Record this request.
+        DEFINE! r4,tmp          Record this request.
         JUMP    @Primitive/vov/validate-formals/next%final
 
 #       This is a copy of Primitive/vov/validate-formals/next &
@@ -1128,63 +1129,63 @@ Primitive/vov/validate-formals/continue
 Primitive/vov/validate-formals/next%final
         CDR     r0,r0
         CMPIS?  tmp,r0,()
-        BRANCH  tmp,@Primitive/vov/validate-formals/finish
+        JUMPIF  tmp,@Primitive/vov/validate-formals/finish
 Primitive/vov/validate-formals/continue%final
 1h      PAIR?   tmp,r0
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      CAR     r1,r0           Formal.
         PAIR?   tmp,r1
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      CAR     r2,r1           Label.
         SYMBOL? tmp,r2
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      EXISTS? tmp,r3,r2
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         TRAP    'conflicted-binding
 1h      CONS    tmp,r2,r2
-        DEFINE! #t,r3,tmp          Record this label.
+        DEFINE! r3,tmp          Record this label.
         CDR     r2,r1           (Strategy).
         PAIR?   tmp,r2
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      CDR     tmp,r2
         CMPIS?  tmp,tmp,()
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      CAR     r2,r2           Strategy.
         LOAD    tmp,'environment
         CMPIS?  tmp,r2,tmp
-        BRANCH  =tmp,@2f
+        JUMPNOT tmp,@2f
         EXISTS? tmp,r4,r2
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         TRAP    'incompatible-operand
 1h      CONS    tmp,r2,r2
-        DEFINE! #t,r4,tmp          Record this request.
+        DEFINE! r4,tmp          Record this request.
         JUMP    @Primitive/vov/validate-formals/next%final
 2h      LOAD    tmp,'continuation
         CMPIS?  tmp,r2,tmp
-        BRANCH  =tmp,@2f
+        JUMPNOT tmp,@2f
         EXISTS? tmp,r4,r2
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
 2h      TRAP    'incompatible-operand
 1h      CONS    tmp,r2,r2
-        DEFINE! #t,r4,tmp          Record this request.
+        DEFINE! r4,tmp          Record this request.
         JUMP    @Primitive/vov/validate-formals/next%final
 
 !Primitive/do
         PEND    acc,@Primitive/do/next
         CMPIS?  tmp,r0,()
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         LOAD    acc,#VOID
         JUMP    @!Restore/r0
         LOAD    args,()
 1h      PAIR?   tmp,r0
-        BRANCH  tmp,@2f
+        JUMPIF  tmp,@2f
         CMPIS?  tmp,r0,()
-        BRANCH  tmp,@3f
+        JUMPIF  tmp,@3f
         TRAP    'incompatible-operand
 2h      CONS    args,acc,args
         CONS    args,=r0,args
@@ -1196,7 +1197,7 @@ Primitive/vov/validate-formals/continue%final
 1h      LOAD    clink,=args
         LOAD    clink,=args
         CMPIS?  tmp,args,()
-        BRANCH  =tmp,@1b
+        JUMPNOT tmp,@1b
         LOAD    tmp,=clink      Discard first branch directive.
 Primitive/do/next
         LOAD    expr,=clink
@@ -1212,26 +1213,29 @@ Primitive/do/next
         LOAD    acc,#f
 Primitive/define!/imp
         ENVIRONMENT? tmp,r0
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      SYMBOL? tmp,r1
-#       BRANCH  =tmp,@Primitive/define!/procedure
+#       JUMPNOT tmp,@Primitive/define!/procedure
         CMPIS?  tmp,r2,()
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         TRAP    'incompatible-operand
 1h      CDR     tmp,r2
         CMPIS?  tmp,tmp,()
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      CAR     expr,r2
         LOAD    r2,acc
         PEND    clink,@1f
         JUMP    @!Evaluate
 1h      ENVIRONMENT? tmp,r0
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      CONS    r1,r1,acc
-        DEFINE! r2,r0,r1
+        JUMPIF  r2,@1f
+        DEFINE! r0,r1
+        JUMP    @!Restore/r2
+1h      REPLACE! r0,r1
         JUMP    @!Restore/r2
 
 !Primitive/current-environment
@@ -1249,7 +1253,7 @@ Primitive/define!/imp
         JUMP    @!Restore/r0
 !Primitive/boolean?
         CMPIS?  acc,r0,#f
-        BRANCH  acc,@1f
+        JUMPIF  acc,@1f
         CMPIS?  acc,r0,#t
 1h      JUMP    @!Restore/r0
 !Primitive/false?
@@ -1287,24 +1291,24 @@ Primitive/define!/imp
         JUMP    @!Restore/r1
 !Primitive/car
         PAIR?   acc,r0
-        BRANCH  =acc,@1b
+        JUMPNOT acc,@1b
         CAR     acc,r0
         JUMP    @!Restore/r0
 !Primitive/cdr
         PAIR?   acc,r0
-        BRANCH  =acc,@1b
+        JUMPNOT acc,@1b
         CDR     acc,r0
         JUMP    @!Restore/r0
 
 1h      TRAP    'incompatible-operand
 !Primitive/symbol/key
         SYMBOL? acc,r0
-        BRANCH  =acc,@1b
+        JUMPNOT acc,@1b
 #       SLO     acc,'symbol/key
         JUMP    =clink
 !Primitive/symbol/segment
         SYMBOL? acc,r0
-        BRANCH  =acc,@1b
+        JUMPNOT acc,@1b
 #       SLO     acc,'symbol/segment     Read-only
         JUMP    =clink
 
@@ -1313,25 +1317,25 @@ Primitive/define!/imp
 1h      TRAP    'incompatible-operand
 !Primitive/new-segment
         CMPLE?  tmp,r0,0
-        BRANCH  tmp,@1b
+        JUMPIF  tmp,@1b
         CMPLE?  tmp,r1,0
-        BRANCH  tmp,@1b
+        JUMPIF  tmp,@1b
 #       SLO     acc,'new-segment
         JUMP    =clink
 
 1h      TRAP    'incompatible-operand
 !Primitive/segment/resize!
         SEGMENT? tmp,r0
-        BRANCH  =tmp,@1b
+        JUMPNOT tmp,@1b
         CMPLE?  tmp,r1,0
-        BRANCH  tmp,@1b
+        JUMPIF  tmp,@1b
 #       SLO     acc,'segment/resize!
         JUMP    =clink
 
 1h      TRAP    'incompatible-operand
 !Primitive/segment/length
         SEGMENT? tmp,r0
-        BRANCH  =tmp,@1b
+        JUMPNOT tmp,@1b
 #       SLO     acc,'segment/length
         JUMP    =clink
 
@@ -1344,15 +1348,15 @@ Primitive/define!/imp
 3h      LOAD    clink,r3        Prepare to clobber r3
         LOAD    r3,acc          Segment length
         CMPGE?  tmp,r1,0
-        BRANCH  =tmp,@2b        !(off >= 0)?
+        JUMPNOT tmp,@2b        !(off >= 0)?
         CMPGE?  tmp,r1,r3
-        BRANCH  tmp,@2b         off >= max?
+        JUMPIF  tmp,@2b         off >= max?
         CMPGE?  tmp,r2,0
-        BRANCH  =tmp,@2b        !(length >= 0)?
+        JUMPNOT tmp,@2b        !(length >= 0)?
         LOAD    clink,r4        Prepare to clobber r4
         ADD     r4,r1,r2
         CMPLE?  tmp,r4,r3
-        BRANCH  tmp,@1b         (off + length >= max)?
+        JUMPIF  tmp,@1b         (off + length >= max)?
         LOAD    r4,=clink       Restore clobbered registers.
         LOAD    r3,=clink
 #       SLO     acc,'segment->symbol
@@ -1364,9 +1368,9 @@ Primitive/define!/imp
 1h      TRAP    'incompatible-operand
 !Primitive/new-array
         CMPGE?  tmp,r0,0
-        BRANCH  =tmp,@1b
+        JUMPNOT tmp,@1b
         INTEGER? tmp,r1
-        BRANCH  =tmp,@1b
+        JUMPNOT tmp,@1b
 #       SLO     acc,'new-array
         JUMP    =clink
 
@@ -1377,25 +1381,25 @@ Primitive/define!/imp
 1h      TRAP    'incompatible-operand
 !Primitive/array/resize!
         ARRAY?  tmp,r0
-        BRANCH  =tmp,@1b
+        JUMPNOT tmp,@1b
         CMPGE?  tmp,r1,0
-        BRANCH  =tmp,@1b
+        JUMPNOT tmp,@1b
         INTEGER? tmp,r2
-        BRANCH  =tmp,@1b
+        JUMPNOT tmp,@1b
 #       SLO     acc,'array/resize!
         JUMP    =clink
 
 1h      TRAP    'incompatible-operand
 !Primitive/array/length
         ARRAY?  tmp,r0
-        BRANCH  =tmp,@1b
+        JUMPNOT tmp,@1b
 #       SLO     acc,'array/length
         JUMP    =clink
 
 1h      TRAP    'incompatible-operand
 !Primitive/array/offset
         ARRAY?  tmp,r0
-        BRANCH  =tmp,@1b
+        JUMPNOT tmp,@1b
 #       SLO     acc,'array/offset
         JUMP    =clink
 
@@ -1411,10 +1415,10 @@ Primitive/array/ref/find
         LOAD    clink,r2
         SUB     r2,r1,acc
         CMPLT?  tmp,r2,0
-        BRANCH  tmp,@1b
+        JUMPIF  tmp,@1b
 #       SLO     acc,'array/length
         CMPGE?  tmp,r2,acc
-        BRANCH  tmp,@1b
+        JUMPIF  tmp,@1b
         LOAD    r1,r2
         LOAD    r2,=clink
         JUMP    =clink
@@ -1450,26 +1454,26 @@ Primitive/array/set!/imp
 
 Primitive/read-expression/terminator?
         CMPEQ?  acc,r3,#x28     (
-        BRANCH  acc,@1f
+        JUMPIF  acc,@1f
         CMPEQ?  acc,r3,#x29     )
-        BRANCH  acc,@1f
+        JUMPIF  acc,@1f
 Primitive/read-expression/space?
         CMPEQ?  acc,r3,#x20     Space
-        BRANCH  acc,@1f
+        JUMPIF  acc,@1f
         CMPEQ?  acc,r3,#x0a     Line Feed
-        BRANCH  acc,@1f
+        JUMPIF  acc,@1f
         CMPEQ?  acc,r3,#x09     Horizontal Tab
 1h      JUMP    =clink
 
 Primitive/read-expression/digit?
         CMPGE?  acc,r3,#x30     0
-        BRANCH  =acc,@1f
+        JUMPNOT acc,@1f
         CMPLE?  acc,r3,#x39     9
 1h      JUMP    =clink
 
 Primitive/read-expression/printable?
         CMPGT?  acc,r3,#x20     Control codes & space
-        BRANCH  =acc,@1f
+        JUMPNOT acc,@1f
         LOAD    tmp,#x7f        Delete & Non-ASCII
         CMPLT?  acc,r3,tmp
 1h      JUMP    =clink
@@ -1479,30 +1483,30 @@ Primitive/read-expression/printable?
 Primitive/read-expression/unimplemented-or-forbidden?
         LOAD    tmp,#x7b        {
         CMPEQ?  acc,r3,tmp
-        BRANCH  acc,@1f
+        JUMPIF  acc,@1f
         LOAD    tmp,#x7d        }
         CMPEQ?  acc,r3,tmp
-        BRANCH  acc,@1f
+        JUMPIF  acc,@1f
         LOAD    tmp,#x5b        [
         CMPEQ?  acc,r3,tmp
-        BRANCH  acc,@1f
+        JUMPIF  acc,@1f
         LOAD    tmp,#x5d        ]
         CMPEQ?  acc,r3,tmp
-        BRANCH  acc,@1f
+        JUMPIF  acc,@1f
         CMPEQ?  acc,r3,#x24     $
-        BRANCH  acc,@1f
+        JUMPIF  acc,@1f
         CMPEQ?  acc,r3,#x22     "
-        BRANCH  acc,@1f
+        JUMPIF  acc,@1f
         CMPEQ?  acc,r3,#x2c     ,
-        BRANCH  acc,@1f
+        JUMPIF  acc,@1f
         LOAD    tmp,#x60        `
         CMPEQ?  acc,r3,tmp
-        BRANCH  acc,@1f
+        JUMPIF  acc,@1f
         CMPEQ?  acc,r3,#x3b     ;
-        BRANCH  acc,@1f
+        JUMPIF  acc,@1f
         LOAD    tmp,#x7c        |
         CMPEQ?  acc,r3,tmp
-        BRANCH  acc,@1f
+        JUMPIF  acc,@1f
 Primitive/read-expression/forbidden?
         LOAD    tmp,#x5c        \
         CMPEQ?  acc,r3,tmp
@@ -1518,7 +1522,7 @@ Primitive/read-expression/forbidden?
 #
 Primitive/read-expression/source-byte
         CMPGE?  acc,r1,r2
-        BRANCH  acc,@1f
+        JUMPIF  acc,@1f
         PEEK    r3,r0,r1
 1h      JUMP    =clink
 
@@ -1538,18 +1542,18 @@ Primitive/read-expression/source-byte
 #
 !Primitive/read-expression
         SEGMENT? tmp,r0
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
 0h      TRAP    'incompatible-operand
 1h      INTEGER? tmp,r1
-        BRANCH  =tmp,@0b
+        JUMPNOT tmp,@0b
         CMPLT?  tmp,r1,0
-        BRANCH  tmp,@0b
+        JUMPIF  tmp,@0b
         LENGTH  acc,r0
         CMPGE?  tmp,r1,acc
-        BRANCH  tmp,@0b
+        JUMPIF  tmp,@0b
 #       SLO     acc,'segment/length
 #       CMPGE?  tmp,r1,acc
-#       BRANCH  tmp,@0b
+#       JUMPIF  tmp,@0b
         LOAD    clink,r2
         LOAD    clink,r3
         LOAD    clink,r4
@@ -1571,15 +1575,15 @@ Primitive/read-expression/source-byte
 Primitive/read-expression/finished
         LOAD    tmp,'object
         CMPIS?  tmp,r3,tmp
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         JUMP    @!Restore/r7-2
 1h      LOAD    tmp,'close
         CMPIS?  tmp,r3,tmp
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         TRAP    'unopened-list
 1h      LOAD    tmp,'dot
         CMPIS?  tmp,r3,tmp
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         TRAP    'non-list-tail
 #       Is eof
 1h      TRAP    'missing
@@ -1595,53 +1599,53 @@ Primitive/read-expression/next
 Primitive/read-expression/imp
         PEND    clink,@1f
         JUMP    @Primitive/read-expression/source-byte
-1h      BRANCH  =acc,@1f
+1h      JUMPNOT acc,@1f
         LOAD    r3,'eof
         JUMP    =clink
 1h      PEND    clink,@1f
         JUMP    @Primitive/read-expression/space?
-1h      BRANCH  acc,@Primitive/read-expression/next
+1h      JUMPIF  acc,@Primitive/read-expression/next
         PEND    clink,@1f
         JUMP    @Primitive/read-expression/printable?
-1h      BRANCH  acc,@1f
+1h      JUMPIF  acc,@1f
         TRAP    'unprintable
 1h      PEND    clink,@1f
         JUMP    @Primitive/read-expression/unimplemented-or-forbidden?
-1h      BRANCH  =acc,@1f
+1h      JUMPNOT acc,@1f
         TRAP    'syntax-error
 #
 #       In r3 is a printable, non-space character that's valid to
 #       begin an expression.
 1h      CMPIS?  tmp,r3,#x28     (
-        BRANCH  tmp,@Primitive/read-expression/begin-list
+        JUMPIF  tmp,@Primitive/read-expression/begin-list
 1h      CMPIS?  tmp,r3,#x2e     .
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         ADD     r1,r1,1
         LOAD    r3,'dot
         JUMP    =clink
 1h      CMPIS?  tmp,r3,#x29     )
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
 #       ADD     r1,r1,1
         LOAD    acc,()
         LOAD    r3,'close
         JUMP    =clink
 1h      CMPIS?  tmp,r3,#x27     '
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         LOAD    r3,'quote
         JUMP    @Primitive/read-expression/quote
 1h      CMPIS?  tmp,r3,#x23     #
-        BRANCH  tmp,@Primitive/read-expression/special
+        JUMPIF  tmp,@Primitive/read-expression/special
 1h      CMPIS?  tmp,r3,#x2d     -; offset is not incremented yet
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         LOAD    r5,#t
         JUMP    @Primitive/read-expression/possible-number
 1h      CMPIS?  tmp,r3,#x2b     +; offset is not incremented yet
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         LOAD    r5,#f
         JUMP    @Primitive/read-expression/possible-number
 1h      PEND    clink,@1f
         JUMP    @Primitive/read-expression/digit?
-1h      BRANCH  acc,@Primitive/read-expression/number
+1h      JUMPIF  acc,@Primitive/read-expression/number
         JUMP    @Primitive/read-expression/symbol
 
 Primitive/read-expression/quote
@@ -1667,13 +1671,13 @@ Primitive/read-expression/begin-list
 Primitive/read-expression/continue-list
         LOAD    tmp,'object
         CMPIS?  tmp,r3,tmp
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         LOAD    tmp,'close
         CMPIS?  tmp,r3,tmp
-        BRANCH  tmp,@Primitive/read-expression/close-list
+        JUMPIF  tmp,@Primitive/read-expression/close-list
         LOAD    tmp,'dot
         CMPIS?  tmp,r3,tmp
-        BRANCH  tmp,@Primitive/read-expression/list-tail
+        JUMPIF  tmp,@Primitive/read-expression/list-tail
         TRAP    'unclosed-list  From eof.
 
 1h      CONS    clink,acc,=clink
@@ -1687,7 +1691,7 @@ Primitive/read-expression/continue-list
 Primitive/read-expression/close-list
         LOAD    r3,=clink
 1h      CMPIS?  tmp,r3,()
-        BRANCH  tmp,@2f
+        JUMPIF  tmp,@2f
         CONS    acc,=r3,acc
         JUMP    @1b
 2h      LOAD    r3,'object
@@ -1698,7 +1702,7 @@ Primitive/read-expression/close-list
 #
 Primitive/read-expression/list-tail
         CMPIS?  tmp,clink,()    Just started?
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         TRAP    'non-list-tail
 1h      PEND    clink,@Primitive/read-expression/list-tail/expression
         JUMP    @Primitive/read-expression/next
@@ -1706,14 +1710,14 @@ Primitive/read-expression/list-tail
 Primitive/read-expression/list-tail/expression
         LOAD    tmp,'object
         CMPIS?  tmp,r3,tmp
-        BRANCH  tmp,@2f
+        JUMPIF  tmp,@2f
         LOAD    tmp,'dot
         CMPIS?  tmp,r3,tmp
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         TRAP    'double-tail
 1h      LOAD    tmp,'close
         CMPIS?  tmp,r3,tmp
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         TRAP    'unterminated-tail
 1h      TRAP    'unclosed-list  Is EOF.
 2h      LOAD    clink,acc
@@ -1723,14 +1727,14 @@ Primitive/read-expression/list-tail/expression
 Primitive/read-expression/list-tail/finish
         LOAD    tmp,'close
         CMPIS?  tmp,r3,tmp
-        BRANCH  tmp,@2f
+        JUMPIF  tmp,@2f
         LOAD    tmp,'dot
         CMPIS?  tmp,r3,tmp
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         TRAP    'double-tail
 1h      LOAD    tmp,'eof
         CMPIS?  tmp,r3,tmp
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         TRAP    'unclosed-list
 1h      TRAP    'tail-mid-list
 2h      LOAD    acc,=clink      Restore the dotted tail.
@@ -1758,19 +1762,19 @@ Primitive/read-expression/symbol/next
         ADD     r1,r1,1
         PEND    clink,@1f
         JUMP    @Primitive/read-expression/source-byte
-1h      BRANCH  acc,@Primitive/read-expression/symbol/finish ... if #eof.
+1h      JUMPIF  acc,@Primitive/read-expression/symbol/finish ... if #eof.
         PEND    clink,@1f
         JUMP    @Primitive/read-expression/terminator?
-1h      BRANCH  =acc,@1f
+1h      JUMPNOT acc,@1f
         PEND    clink,@Primitive/read-expression/back-up
         JUMP    @Primitive/read-expression/symbol/finish
 1h      PEND    clink,@1f
         JUMP    @Primitive/read-expression/printable?
-1h      BRANCH  acc,@2f
+1h      JUMPIF  acc,@2f
         TRAP    'unprintable
 2h      PEND    clink,@1f
         JUMP    @Primitive/read-expression/forbidden?
-1h      BRANCH  =acc,@Primitive/read-expression/symbol/next
+1h      JUMPNOT acc,@Primitive/read-expression/symbol/next
         TRAP    'syntax-error
 
 #       (In)    r0: segment
@@ -1798,39 +1802,39 @@ Primitive/read-expression/special
         ADD     r1,r1,1
         PEND    clink,@1f
         JUMP    @Primitive/read-expression/source-byte
-1h      BRANCH  =acc,@2f        if !#eof.
+1h      JUMPNOT acc,@2f        if !#eof.
         TRAP    'syntax-error
 2h      PEND    clink,@1f
         JUMP    @Primitive/read-expression/printable?
-1h      BRANCH  acc,@2f
+1h      JUMPIF  acc,@2f
         TRAP    'unprintable
 2h      LOAD    tmp,#x46        F
         CMPIS?  tmp,r3,tmp
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
 2h      LOAD    r4,#f
         JUMP    @Primitive/read-expression/boolean
 1h      LOAD    tmp,#x66        f
         CMPIS?  tmp,r3,tmp
-        BRANCH  tmp,@2b
+        JUMPIF  tmp,@2b
         LOAD    tmp,#x54        T; use r4 to save a few ops
         CMPIS?  r4,r3,tmp
-        BRANCH  r4,@Primitive/read-expression/boolean
+        JUMPIF  r4,@Primitive/read-expression/boolean
         LOAD    tmp,#x74        t
         CMPIS?  r4,r3,tmp
-        BRANCH  r4,@Primitive/read-expression/boolean
+        JUMPIF  r4,@Primitive/read-expression/boolean
         LOAD    tmp,#x5c        \
         CMPIS?  tmp,r3,tmp
-        BRANCH  tmp,@Primitive/read-expression/rune
+        JUMPIF  tmp,@Primitive/read-expression/rune
         JUMP    @Primitive/read-expression/special-number
 
 Primitive/read-expression/boolean
 3h      ADD     r1,r1,1
         PEND    clink,@1f
         JUMP    @Primitive/read-expression/source-byte
-1h      BRANCH  acc,@2f         if #eof.
+1h      JUMPIF  acc,@2f         if #eof.
         PEND    clink,@1f
         JUMP    @Primitive/read-expression/terminator?
-1h      BRANCH  =acc,@3f
+1h      JUMPNOT acc,@3f
         SUB     r1,r1,1
         JUMP    @2f
 3h      TRAP    'syntax-error
@@ -1846,13 +1850,13 @@ Primitive/read-expression/possible-number
         ADD     r1,r1,1
         PEND    clink,@1f
         JUMP    @Primitive/read-expression/source-byte
-1h      BRANCH  acc,@Primitive/read-expression/symbol/finish ... if #eof.
+1h      JUMPIF  acc,@Primitive/read-expression/symbol/finish ... if #eof.
         PEND    clink,@1f       Look for a digit starting a signed
 ;                               base 10 number.
         JUMP    @Primitive/read-expression/digit?
-1h      BRANCH  acc,@Primitive/read-expression/number
+1h      JUMPIF  acc,@Primitive/read-expression/number
         CMPIS?  acc,r3,#x23     #
-        BRANCH  =acc,@1f
+        JUMPNOT acc,@1f
         ADD     r1,r1,1         Found a signed number; move to the base
 ;                               indicator character.
         PEND    clink,@Primitive/read-expression/special-number/imp
@@ -1864,32 +1868,32 @@ Primitive/read-expression/special-number
         LOAD    r5,#f
         JUMP    @1f
 Primitive/read-expression/special-number/imp
-        BRANCH  =acc,@1f        COMEFROM @Primitive/read-expression/source-byte
+        JUMPNOT acc,@1f        COMEFROM @Primitive/read-expression/source-byte
         TRAP    'syntax-error   [-+]#
 1h      LOAD    tmp,#x42        B
         CMPIS?  tmp,r3,tmp
-        BRANCH  tmp,@Primitive/read-expression/binary
+        JUMPIF  tmp,@Primitive/read-expression/binary
         LOAD    tmp,#x62        b
         CMPIS?  tmp,r3,tmp
-        BRANCH  tmp,@Primitive/read-expression/binary
+        JUMPIF  tmp,@Primitive/read-expression/binary
         LOAD    tmp,#x64        D
         CMPIS?  tmp,r3,tmp
-        BRANCH  tmp,@Primitive/read-expression/decimal
+        JUMPIF  tmp,@Primitive/read-expression/decimal
         LOAD    tmp,#x64        d
         CMPIS?  tmp,r3,tmp
-        BRANCH  tmp,@Primitive/read-expression/decimal
+        JUMPIF  tmp,@Primitive/read-expression/decimal
         LOAD    tmp,#x6f        O
         CMPIS?  tmp,r3,tmp
-        BRANCH  tmp,@Primitive/read-expression/octal
+        JUMPIF  tmp,@Primitive/read-expression/octal
         LOAD    tmp,#x6f        o
         CMPIS?  tmp,r3,tmp
-        BRANCH  tmp,@Primitive/read-expression/octal
+        JUMPIF  tmp,@Primitive/read-expression/octal
         LOAD    tmp,#x58        X
         CMPIS?  tmp,r3,tmp
-        BRANCH  tmp,@Primitive/read-expression/hex
+        JUMPIF  tmp,@Primitive/read-expression/hex
         LOAD    tmp,#x78        x
         CMPIS?  tmp,r3,tmp
-        BRANCH  tmp,@Primitive/read-expression/hex
+        JUMPIF  tmp,@Primitive/read-expression/hex
         TRAP    'syntax-error
 
 Primitive/read-expression/binary
@@ -1917,23 +1921,23 @@ Primitive/read-expression/number/next
         ADD     r1,r1,1
         PEND    clink,@1f
         JUMP    @Primitive/read-expression/source-byte
-1h      BRANCH  =acc,@1f        ... unless eof.
+1h      JUMPNOT acc,@1f        ... unless eof.
 2h      CMPEQ?  acc,r1,r4
-        BRANCH  =acc,@Primitive/read-expression/number/finish
+        JUMPNOT acc,@Primitive/read-expression/number/finish
         TRAP    'syntax-error
 1h      PEND    clink,@1f
         JUMP    @Primitive/read-expression/terminator?
-1h      BRANCH  acc,@2b
+1h      JUMPIF  acc,@2b
         CMPGE?  tmp,r3,#x30     0
-        BRANCH  tmp,@3f         Possibly a digit.
+        JUMPIF  tmp,@3f         Possibly a digit.
 2h      PEND    clink,@1f       Wrong, but how?
         JUMP    @Primitive/read-expression/printable?
-1h      BRANCH  acc,@1f
+1h      JUMPIF  acc,@1f
         TRAP    'unprintable
 1h      TRAP    'syntax-error
 3h      SUB     r3,r3,#x30      0
         CMPLT?  tmp,r3,r7       Small enough?
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         ADD     r3,r3,#x30
         JUMP    @2b
 1h      MUL     r6,r6,r7
@@ -1945,39 +1949,39 @@ Primitive/read-expression/hex
         ADD     r1,r1,1
         PEND    clink,@1f
         JUMP    @Primitive/read-expression/source-byte
-1h      BRANCH  =acc,@1f
+1h      JUMPNOT acc,@1f
         TRAP    'syntax-error
         PEND    clink,@1f
         JUMP    @Primitive/read-expression/terminator?
-1h      BRANCH  =acc,@1f
+1h      JUMPNOT acc,@1f
         TRAP    'syntax-error
 Primitive/read-expression/hex/digit
 1h      LOAD    tmp,#x66        f
         CMPLE?  acc,r3,tmp
-        BRANCH  acc,@1f
+        JUMPIF  acc,@1f
         TRAP    'syntax-error
 1h      LOAD    acc,#x61        a
         CMPGE?  tmp,r3,acc
-        BRANCH  =tmp,@1f
+        JUMPNOT tmp,@1f
         SUB     r4,r3,acc
         JUMP    @2f
 
 1h      LOAD    tmp,#x46        F
         CMPLE?  tmp,r3,tmp
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'syntax-error
 1h      LOAD    acc,#x41        A
         CMPGE?  tmp,r3,acc
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         SUB     r4,r3,acc
         JUMP    @2f
 
 1h      CMPLE?  tmp,r3,#x39     9
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'syntax-error
 1h      LOAD    acc,#x30        0; put in the accumulator to match the letters' algorithm.
         CMPGE?  tmp,r3,acc
-        BRANCH  tmp,@1f
+        JUMPIF  tmp,@1f
         TRAP    'syntax-error
 2h      MUL     r6,r6,#x10
         SUB     r4,r3,acc
@@ -1985,14 +1989,14 @@ Primitive/read-expression/hex/digit
         ADD     r1,r1,1
         PEND    clink,@1f
         JUMP    @Primitive/read-expression/source-byte
-1h      BRANCH  acc,@Primitive/read-expression/number/finish
+1h      JUMPIF  acc,@Primitive/read-expression/number/finish
         PEND    clink,@1f
         JUMP    @Primitive/read-expression/terminator?
-1h      BRANCH  acc,@Primitive/read-expression/number/finish
+1h      JUMPIF  acc,@Primitive/read-expression/number/finish
         JUMP    @Primitive/read-expression/hex/digit
 
 Primitive/read-expression/number/finish
-        BRANCH  =r5,@1f         Negate?
+        JUMPNOT r5,@1f         Negate?
         SUB     r6,0,r6
 1h      LOAD    acc,r6          Number
         LOAD    r3,'object
