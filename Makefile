@@ -39,7 +39,7 @@ lossless.idx-in: lossless.tex
 lossless.pdf: lossless.idx llfig-1.pdf
 
 initialise.c: lossless.w
-initialise.o: initialise.c evaluate.c
+initialise.o: initialise.c evaluate.c barbaroi.c
 
 barbaroi.c: bin/bin2c barbaroi.ll
 	bin/bin2c LL_BARBAROI_C Barbaroi_Source barbaroi.ll >barbaroi.c
@@ -101,7 +101,7 @@ pack:
 clean:
 	rm -f core *.core *.idx *.idx-in *.log *.scn *.toc *.o
 	rm -f liblossless.so lossless
-	rm -f lossless.[ch] initialise.c testless.[ch] evaluate.c
+	rm -f lossless.[ch] initialise.c testless.[ch] barbaroi.c evaluate.c
 	rm -f lossless.tex lossless.pdf
 	rm -f lossless*tgz
 	rm -fr t

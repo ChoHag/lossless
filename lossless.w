@@ -3296,8 +3296,8 @@ error_code
 init_vm (void)
 {
         address atmp, adefault;
-        cell copy[3], eval[3], list[3];
-        cell ltmp, sig_copy, sig_eval, sig_list;
+        cell copy[3], eval[3], list[3], optional[3];
+        cell ltmp, jexit, sig_copy, sig_eval, sig_list, sig_optional;
         cell sig[SIGNATURE_LENGTH];
         char btmp[1024], *bptr; /* Way more space than necessary. */
         int i, j, k;
@@ -3309,6 +3309,7 @@ init_vm (void)
         @<Initialise \Ls/ primitives@>@;
         @<Initialise evaluator and other bytecode@>@;
         @<Link \Ls/ primitives to installed bytecode@>@;
+        @<Initialise \Ls/ procedures@>@;
         VM_Ready = true;
         return LERR_NONE;
 }
@@ -3724,8 +3725,10 @@ typedef enum {
         PRIMITIVE_CURRENT_ENVIRONMENT,
         PRIMITIVE_DEFINE_M,
         PRIMITIVE_DO,
+        PRIMITIVE_EVAL,
         PRIMITIVE_FALSE_P,
         PRIMITIVE_INTEGER_P,
+        PRIMITIVE_IF,
         PRIMITIVE_IS_P,
         PRIMITIVE_LAMBDA,
         PRIMITIVE_MUL,
@@ -3734,6 +3737,7 @@ typedef enum {
         PRIMITIVE_NEW_SYMBOL_SEGMENT,
         PRIMITIVE_NULL_P,
         PRIMITIVE_PAIR_P,
+        PRIMITIVE_QUOTE,
         PRIMITIVE_ROOT_ENVIRONMENT,
         PRIMITIVE_SEGMENT_LENGTH,
         PRIMITIVE_SEGMENT_P,
@@ -3754,8 +3758,12 @@ enum {
         SIGNATURE_1,
         SIGNATURE_2,
         SIGNATURE_3,
+        SIGNATURE_C,
         SIGNATURE_CL,
+        SIGNATURE_EL,
+        SIGNATURE_EO,
         SIGNATURE_ECL,
+        SIGNATURE_ECO,
         SIGNATURE_L,
         SIGNATURE_LENGTH
 };
@@ -3777,8 +3785,10 @@ shared primitive Primitive[PRIMITIVE_LENGTH] = {
         PO(PRIMITIVE_CURRENT_ENVIRONMENT, SIGNATURE_0,   NULL),@/
         PO(PRIMITIVE_DEFINE_M,            SIGNATURE_ECL, NULL),@/
         PO(PRIMITIVE_DO,                  SIGNATURE_L,   NULL),@/
+        PO(PRIMITIVE_EVAL,                SIGNATURE_EO,  NULL),@/
         PO(PRIMITIVE_FALSE_P,             SIGNATURE_1,   NULL),@/
         PO(PRIMITIVE_INTEGER_P,           SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_IF,                  SIGNATURE_ECO, NULL),@/
         PO(PRIMITIVE_IS_P,                SIGNATURE_2,   NULL),@/
         PO(PRIMITIVE_LAMBDA,              SIGNATURE_CL,  NULL),@/
         PO(PRIMITIVE_MUL,                 SIGNATURE_2,   NULL),@/
@@ -3787,6 +3797,7 @@ shared primitive Primitive[PRIMITIVE_LENGTH] = {
         PO(PRIMITIVE_NEW_SYMBOL_SEGMENT,  SIGNATURE_3,   NULL),@/
         PO(PRIMITIVE_NULL_P,              SIGNATURE_1,   NULL),@/
         PO(PRIMITIVE_PAIR_P,              SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_QUOTE,               SIGNATURE_C,   NULL),@/
         PO(PRIMITIVE_ROOT_ENVIRONMENT,    SIGNATURE_0,   NULL),@/
         PO(PRIMITIVE_SEGMENT_LENGTH,      SIGNATURE_1,   NULL),@/
         PO(PRIMITIVE_SEGMENT_P,           SIGNATURE_1,   NULL),@/
@@ -3820,8 +3831,10 @@ shared char *Primitive_Label[PRIMITIVE_LENGTH] = {
         [PRIMITIVE_CURRENT_ENVIRONMENT] = "current-environment",
         [PRIMITIVE_DEFINE_M]            = "define!",
         [PRIMITIVE_DO]                  = "do",
+        [PRIMITIVE_EVAL]                = "eval",
         [PRIMITIVE_FALSE_P]             = "false?",
         [PRIMITIVE_INTEGER_P]           = "integer?",
+        [PRIMITIVE_IF]                  = "if",
         [PRIMITIVE_IS_P]                = "is?",
         [PRIMITIVE_LAMBDA]              = "lambda",
         [PRIMITIVE_MUL]                 = "*",
@@ -3830,6 +3843,7 @@ shared char *Primitive_Label[PRIMITIVE_LENGTH] = {
         [PRIMITIVE_NEW_SYMBOL_SEGMENT]  = "segment->symbol",
         [PRIMITIVE_NULL_P]              = "null?",
         [PRIMITIVE_PAIR_P]              = "pair?",
+        [PRIMITIVE_QUOTE]               = "quote",
         [PRIMITIVE_ROOT_ENVIRONMENT]    = "root-environment",
         [PRIMITIVE_SEGMENT_LENGTH]      = "segment/length",
         [PRIMITIVE_SEGMENT_P]           = "segment?",
@@ -3857,6 +3871,8 @@ orreturn(new_symbol_const("copy", &sig_copy));
 orreturn(cons(sig_copy, NIL, &sig_copy));
 orreturn(new_symbol_const("copy-list", &sig_list));
 orreturn(cons(sig_list, NIL, &sig_list));
+orreturn(new_symbol_const("optional", &sig_optional));
+orreturn(cons(sig_optional, NIL, &sig_optional));
 @#
 orreturn(cons(fix(0), sig_copy, copy + 0));
 orreturn(cons(fix(1), sig_copy, copy + 1));
@@ -3868,6 +3884,9 @@ orreturn(cons(fix(0), sig_eval, eval + 0));
 orreturn(cons(fix(1), sig_eval, eval + 1));
 orreturn(cons(fix(2), sig_eval, eval + 2));
 orreturn(cons(fix(3), sig_eval, eval + 3));
+orreturn(cons(fix(0), sig_optional, optional + 0));
+orreturn(cons(fix(1), sig_optional, optional + 1));
+orreturn(cons(fix(2), sig_optional, optional + 2));
 @#
 sig[SIGNATURE_0] = NIL;
 @#
@@ -3880,14 +3899,26 @@ orreturn(cons(eval[2], NIL, sig + SIGNATURE_3));
 orreturn(cons(eval[1], sig[SIGNATURE_3], sig + SIGNATURE_3));
 orreturn(cons(eval[0], sig[SIGNATURE_3], sig + SIGNATURE_3));
 @#
+orreturn(cons(copy[0], NIL, sig + SIGNATURE_C));
+@#
 orreturn(cons(list[0], NIL, sig + SIGNATURE_L));
 @#
 orreturn(cons(list[1], NIL, sig + SIGNATURE_CL));
 orreturn(cons(copy[0], sig[SIGNATURE_CL], sig + SIGNATURE_CL));
 @#
+orreturn(cons(list[1], NIL, sig + SIGNATURE_EL));
+orreturn(cons(eval[0], sig[SIGNATURE_EL], sig + SIGNATURE_EL));
+@#
 orreturn(cons(list[2], NIL, sig + SIGNATURE_ECL));
 orreturn(cons(copy[1], sig[SIGNATURE_ECL], sig + SIGNATURE_ECL));
 orreturn(cons(eval[0], sig[SIGNATURE_ECL], sig + SIGNATURE_ECL));
+@#
+orreturn(cons(optional[1], NIL, sig + SIGNATURE_EO));
+orreturn(cons(eval[0], sig[SIGNATURE_EO], sig + SIGNATURE_EO));
+@#
+orreturn(cons(optional[2], NIL, sig + SIGNATURE_ECO));
+orreturn(cons(copy[1], sig[SIGNATURE_ECO], sig + SIGNATURE_ECO));
+orreturn(cons(eval[0], sig[SIGNATURE_ECO], sig + SIGNATURE_ECO));
 @#
 for (i = 0; i < PRIMITIVE_LENGTH; i++) {
         Primitive[i].signature = sig[Primitive[i].signature];
@@ -3981,7 +4012,7 @@ error_code
 init_stack_array (cell *ret)
 {
         error_code reason;
-        orreturn(new_array(1 + (32 * CELL_BYTES), fix(0), ret));
+        orreturn(new_array(1 + (64 * CELL_BYTES), fix(0), ret));
         array_base(*ret)[0] = fix(1);
         return LERR_NONE;
 }
@@ -7325,6 +7356,34 @@ orreturn(new_assembly_buffer((byte *) Evaluate_Source,
         Evaluate_Source_Length, &ltmp));
 orreturn(assembly_install_m(ltmp, &ltmp));
 Evaluate_Program = ltmp;
+
+@ @<Data...@>=
+#include "barbaroi.c"
+
+@ @<Extern...@>=
+extern shared char Barbaroi_Source[];
+extern shared long Barbaroi_Source_Length;
+
+@ @<Initialise \Ls/ procedures@>=
+orreturn(new_segment(Barbaroi_Source_Length, 0, &ltmp));
+memmove(segment_base(ltmp), Barbaroi_Source, Barbaroi_Source_Length);
+General[0] = ltmp; /* Buffer */
+General[1] = fix(0); /* Starting offset */
+@#
+orreturn(new_symbol_const(PROGRAM_EXIT, &ltmp)); /* Locate return address. */
+orreturn(vm_locate_entry(ltmp, NULL, &atmp));
+orreturn(new_pointer(atmp, &jexit));
+orreturn(stack_array_push(&Control_Link, jexit));
+orreturn(new_symbol_const(PROGRAM_READ, &ltmp)); /* Locate read primitive. */
+orreturn(vm_locate_entry(ltmp, NULL, &Ip));
+orreturn(interpret()); /* Read \.{barbaroi.ll}. */
+Expression = Accumulator;
+@#
+orreturn(stack_array_push(&Control_Link, jexit));
+orreturn(new_symbol_const(PROGRAM_EVALUATE, &ltmp));
+orreturn(vm_locate_entry(ltmp, NULL, &Ip));
+orreturn(interpret()); /* Evaluate \.{barbaroi.ll}. */
+General[0] = General[1] = Expression = Accumulator = NIL;
 
 @** Threads.
 

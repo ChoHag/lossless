@@ -635,7 +635,7 @@ Combine-Primitive/signature/next
 Combine-Primitive/signature/copy?
         LOAD    tmp,'copy
         CMPIS?  tmp,acc,tmp
-        JUMPNOT tmp,@Combine-Primitive/signature/copy-list?
+        JUMPNOT tmp,@Combine-Primitive/signature/optional?
         PAIR?   tmp,args
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand   Improper list
@@ -644,6 +644,36 @@ Combine-Primitive/signature/copy?
         CONS    expr,=args,expr
         CONS    expr,r1,expr
         JUMP    @Combine-Primitive/signature/next
+
+#       (In) Accumulator: Strategy label
+#       (In) Arguments: Unscanned arguments
+#       (In) Expression: Evaluation queue
+#       (In) r1: Binding label
+
+Combine-Primitive/signature/optional?
+        LOAD    tmp,'optional
+        CMPIS?  tmp,acc,tmp
+        JUMPNOT tmp,@Combine-Primitive/signature/copy-list?
+
+        CMPIS?  tmp,args,()
+        JUMPIF  tmp,@2f
+
+        PAIR?   tmp,args
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+
+1h      CDR     tmp,args
+        CMPIS?  tmp,tmp,()
+        JUMPIF  tmp,@2f
+        TRAP    'incompatible-operand
+
+2h      PEND    tmp,@Combine/Copy-Argument
+        CONS    expr,tmp,expr
+        CONS    expr,args,expr
+        CONS    expr,r1,expr
+        LOAD    args,()
+
+        JUMP    @Combine-Primitive/signature/finish
 
 #       The only argument strategy remaining is copy-list which
 #       will also always be the last strategy.
@@ -848,11 +878,11 @@ Combine-Primitive/Ready
 #       the formals list. The final validated signature is built
 #       in r4 while r1 to r3 are spare space for the validation.
 #
-#       (In) Control-Link: ...
+#       (In) Control-Link: r1 r0 ...
 #       (In) r0: formals (unvalidated)
 #       (In) r1: body (unvalidated)
 #
-#       (Out) Control-Link: r4 r3 r2 r1 ...
+#       (Out) Control-Link: r4 r3 r2 body r1 r0 ...
 #       (Out) r2: (eval)
 #       (Out) r3: Hashtable of binding labels
 #       (Out) r4: Budding signature
@@ -995,6 +1025,8 @@ Primitive/lambda/validate-formals/finish
 #       With a valid formals signature in r0 validating the body
 #       is simply a matter of ensuring it's a proper list.
 #
+#       TODO: watch out for self-referential lists --- tortoise & hare.
+#
 #       (In) Control-Link: ...
 #       (In) r0: Formals (validated)
 #       (In) r1: Body (unvalidated)
@@ -1105,7 +1137,7 @@ Primitive/vov/validate-formals/continue
         JUMP    @Primitive/vov/validate-formals/next%final
 2h      LOAD    tmp,'continuation
         CMPIS?  tmp,r2,tmp
-        JUMPIF  tmp,@2f
+        JUMPNOT tmp,@2f
         EXISTS? tmp,r4,r2       Requested continuation already?
         JUMPNOT tmp,@1f
 2h      TRAP    'incompatible-operand
@@ -1203,20 +1235,22 @@ Primitive/do/next
         LOAD    expr,=clink
         JUMP    @!Evaluate
 
+#       (In) Control-Link: r2 r1 r0 ...
 #       (In) r0: Environment
 #       (In) r1: Label or label & closure formals
 #       (In) r2: Value or body of lambda expression
+#
 !Primitive/set!
-        LOAD    acc,#t
+        PEND    clink,@Primitive/define!/set!
         JUMP    @Primitive/define!/imp
 !Primitive/define!
-        LOAD    acc,#f
+        PEND    clink,@Primitive/define!/define!
 Primitive/define!/imp
         ENVIRONMENT? tmp,r0
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      SYMBOL? tmp,r1
-#       JUMPNOT tmp,@Primitive/define!/procedure
+        JUMPNOT tmp,@Primitive/define!/lambda
         CMPIS?  tmp,r2,()
         JUMPNOT tmp,@1f
         TRAP    'incompatible-operand
@@ -1225,18 +1259,78 @@ Primitive/define!/imp
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      CAR     expr,r2
-        LOAD    r2,acc
         PEND    clink,@1f
         JUMP    @!Evaluate
 1h      ENVIRONMENT? tmp,r0
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      CONS    r1,r1,acc
-        JUMPIF  r2,@1f
+        JUMP    =clink
+Primitive/define!/define!
         DEFINE! r0,r1
         JUMP    @!Restore/r2
-1h      REPLACE! r0,r1
+Primitive/define!/set!
+        REPLACE! r0,r1
         JUMP    @!Restore/r2
+
+#       (In) Control-Link: P/d r2 r1 r0 ...
+#       (In) r0: Environment
+#       (In) r1: Label or label & closure formals
+#       (In) r2: Value or body of lambda expression
+
+Primitive/define!/lambda
+        PEND    clink,@Primitive/define!/lambda/continue
+        LOAD    clink,r0        Save environment
+        CAR     clink,r1        Save label
+        CDR     r0,r1           Formals
+        LOAD    r1,r2           Body
+        JUMP    @!Primitive/lambda
+
+Primitive/define!/lambda/continue
+1h      CONS    r1,r1,acc
+        JUMP    =clink
+
+#       (In) Control-Link: r1 r0 ...
+#       (In) r0: expression
+#       (In) r1: Empty list or of environment
+#
+!Primitive/eval
+        CMPIS?  tmp,r1,()
+        JUMPNOT tmp,@1f
+        LOAD    expr,r0
+        PEND    clink,@!Restore/r1
+        JUMP    @!Evaluate
+1h      CAR     expr,r1
+        PEND    clink,@1f
+        JUMP    @!Evaluate
+1h      ENVIRONMENT? tmp,acc
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      LOAD    clink,env
+        LOAD    env,acc
+        LOAD    expr,r0
+        PEND    clink,@1f
+        JUMP    @!Evaluate
+1h      LOAD    env,=clink
+        JUMP    @!Restore/r1
+
+#       (In) Control-Link: r1 r0 ...
+#       (In) r0: condition
+#       (In) r1: consequent
+#       (In) r2: () or list of alternate
+!Primitive/if
+        CMPIS?  tmp,r2,()
+        JUMPNOT tmp,@1f
+        LOAD    r2,#VOID
+        JUMP    @2f
+1h      CAR     r2,r2
+2h      CMPIS?  tmp,r0,#f
+        JUMPIF  tmp,@1f
+        LOAD    expr,r1         Consequent
+        JUMP    @2f
+1h      LOAD    expr,r2         Alternate
+2h      PEND    clink,@!Restore/r2
+        JUMP    @!Evaluate
 
 !Primitive/current-environment
         LOAD    acc,env
@@ -1245,6 +1339,10 @@ Primitive/define!/imp
 !Primitive/root-environment
         LOAD    acc,root
         JUMP    =clink
+
+!Primitive/quote
+        LOAD    acc,r0
+        JUMP    @!Restore/r0
 
 ########
 
@@ -1497,11 +1595,6 @@ Primitive/read-expression/unimplemented-or-forbidden?
         JUMPIF  acc,@1f
         CMPEQ?  acc,r3,#x22     "
         JUMPIF  acc,@1f
-        CMPEQ?  acc,r3,#x2c     ,
-        JUMPIF  acc,@1f
-        LOAD    tmp,#x60        `
-        CMPEQ?  acc,r3,tmp
-        JUMPIF  acc,@1f
         CMPEQ?  acc,r3,#x3b     ;
         JUMPIF  acc,@1f
         LOAD    tmp,#x7c        |
@@ -1620,18 +1713,24 @@ Primitive/read-expression/imp
         JUMPIF  tmp,@Primitive/read-expression/begin-list
 1h      CMPIS?  tmp,r3,#x2e     .
         JUMPNOT tmp,@1f
-        ADD     r1,r1,1
-        LOAD    r3,'dot
-        JUMP    =clink
+        JUMP    @Primitive/read-expression/dot
 1h      CMPIS?  tmp,r3,#x29     )
         JUMPNOT tmp,@1f
-#       ADD     r1,r1,1
         LOAD    acc,()
         LOAD    r3,'close
         JUMP    =clink
 1h      CMPIS?  tmp,r3,#x27     '
         JUMPNOT tmp,@1f
         LOAD    r3,'quote
+        JUMP    @Primitive/read-expression/quote
+1h      LOAD    tmp,#x60        `
+        CMPIS?  tmp,r3,tmp
+        JUMPNOT tmp,@1f
+        LOAD    r3,'quasiquote
+        JUMP    @Primitive/read-expression/quote
+1h      CMPEQ?  tmp,r3,#x2c     ,
+        JUMPNOT tmp,@1f
+        LOAD    r3,'unquote
         JUMP    @Primitive/read-expression/quote
 1h      CMPIS?  tmp,r3,#x23     #
         JUMPIF  tmp,@Primitive/read-expression/special
@@ -1647,6 +1746,54 @@ Primitive/read-expression/imp
         JUMP    @Primitive/read-expression/digit?
 1h      JUMPIF  acc,@Primitive/read-expression/number
         JUMP    @Primitive/read-expression/symbol
+
+#       dot followed by terminator: 'dot into r3, JUMP =clink
+#       dot followed by [^.], syntax error
+#       dotdot followed by [^.], syntax error
+#       dotdotdot followed by !terminator: syntax error
+#       otherwise symbol
+#
+#       r1 is at the first .
+
+Primitive/read-expression/dot
+        LOAD    r4,r1
+        ADD     r1,r1,1
+        PEND    clink,@1f
+        JUMP    @Primitive/read-expression/source-byte
+1h      JUMPNOT acc,@1f
+9h      LOAD    r3,'dot
+        JUMP    =clink
+1h      PEND    clink,@1f
+        JUMP    @Primitive/read-expression/terminator?
+1h      JUMPIF  acc,@9b
+        CMPIS?  tmp,r3,#x2e     .
+        JUMPIF  tmp,@1f
+        TRAP    'syntax-error   "." followed by not "."
+
+1h      ADD     r1,r1,1         ".." so far
+        PEND    clink,@1f
+        JUMP    @Primitive/read-expression/source-byte
+1h      JUMPNOT acc,@1f
+        TRAP    'syntax-error   ".." exactly, eof
+1h      PEND    clink,@1f
+        JUMP    @Primitive/read-expression/terminator?
+1h      JUMPNOT acc,@1f
+        TRAP    'syntax-error   ".." exactly, terminated in-band
+1h      CMPIS?  tmp,r3,#x2e     .
+        JUMPIF  tmp,@1f
+        TRAP    'syntax-error   ".." followed by not "."
+
+1h      ADD     r1,r1,1         "..." so far
+        PEND    clink,@1f
+        JUMP    @Primitive/read-expression/source-byte
+1h      JUMPNOT acc,@1f
+        JUMP    @Primitive/read-expression/symbol/finish
+1h      PEND    clink,@1f
+        JUMP    @Primitive/read-expression/terminator?
+1h      JUMPNOT acc,@1f         "..." exactly, terminated in-band
+        PEND    clink,@Primitive/read-expression/back-up
+        JUMP    @Primitive/read-expression/symbol/finish
+1h      TRAP    'syntax-error   "..." unterminated
 
 Primitive/read-expression/quote
         LOAD    clink,r3        Quoting method
@@ -1996,7 +2143,7 @@ Primitive/read-expression/hex/digit
         JUMP    @Primitive/read-expression/hex/digit
 
 Primitive/read-expression/number/finish
-        JUMPNOT r5,@1f         Negate?
+        JUMPNOT r5,@1f          Negate?
         SUB     r6,0,r6
 1h      LOAD    acc,r6          Number
         LOAD    r3,'object

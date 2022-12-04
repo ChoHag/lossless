@@ -4,7 +4,7 @@
 
 (define! (root-environment) *VOID* (do))
 
-(define! (root-environment) REMark (vov ((E vov/env)) *VOID*))
+(define! (root-environment) REMark (vov ((ignore copy-list))))
 
 (define! (root-environment) -: REMark) (-: Now we have comments. :-)
 
@@ -94,9 +94,9 @@
         ugly, these implement (define-here! LABEL VALUE) and its
         mutating analogue set-here! to save on keyboard wear :-)
 
-(define! (root-environment) define-here! (vov ((ARGS vov/args) (ENV vov/env))
+(define! (root-environment) define-here! (vov ((ARGS copy-list) (ENV environment))
         (eval (cons define! (cons (list current-environment) ARGS)) ENV)))
-(define! (root-environment) set-here! (vov ((ARGS vov/args) (ENV vov/env))
+(define! (root-environment) set-here! (vov ((ARGS copy-list) (ENV environment))
         (eval (cons set! (cons (list current-environment) ARGS)) ENV)))
 
 (define! (root-environment) (not OBJECT) (if OBJECT #f #t))
@@ -177,7 +177,7 @@
                 validating lambda operators which are defined below;
                 this program returns a new let-like operator :-)
 
-        (define-here! (-let LAMBDA) (vov ((CALLER-ARGS vov/args) (CALLER-ENV vov/env))
+        (define-here! (-let LAMBDA) (vov ((CALLER-ARGS copy-list) (CALLER-ENV environment))
                 (signature/assert! CALLER-ARGS pair?)
                 (if (symbol? (car CALLER-ARGS))
                         (do     (signature/assert!
@@ -256,7 +256,7 @@
                         (-: This is nasty... :-)
                         (eval (cons PROGRAM
                                 (walk   (lambda (NEXT REST)
-                                                (cons (cons quote NEXT) REST))
+                                                (cons (list quote NEXT) REST))
                                         (-append LIST)))))
 
                 (-: Also define here other common iterators :-)
@@ -279,12 +279,12 @@
                 constructor: (vau (BINDINGS) ENVIRONMENT BODY) :-)
 
         (define! (root-environment) vau (vov
-                ((AUTHOR-ARGS vov/args) (AUTHOR-ENV vov/env))
+                ((AUTHOR-ARGS copy-list) (AUTHOR-ENV environment))
                 (apply (lambda (FORMAL-ARGS FORMAL-ENV . BODY)
                         (eval   (list   vov
-                                        (list   '(CALLER-ARGS vov/arguments)
+                                        (list   '(CALLER-ARGS copy-list)
                                                 (list FORMAL-ENV
-                                                        'vov/environment))
+                                                        'environment))
                                         (list   apply
                                                 (cons lambda
                                                         (cons FORMAL-ARGS BODY))
@@ -292,8 +292,8 @@
                                 AUTHOR-ENV)
                         ) AUTHOR-ARGS)))
 
-        (-: Used to scan the formals for any which are a list (of
-                two); those which are not are combined with the
+        (-: Used to scan the formals for any which are a list of
+                two. Those which are not are combined with the
                 object? predicate which permits anything except *VOID* :-)
 
         (define-here! (-lambda/validating/expand-formal FORMAL)
@@ -373,7 +373,7 @@
                                                 VAL
                                                 (-and (cdr ARGS) ENV))
                                         #f))))
-        (vov ((ARGS vov/args) (ENV vov/env))
+        (vov ((ARGS copy-list) (ENV environment))
                 (signature/assert! ARGS list?)
                 (-and ARGS ENV))))
 (define! (root-environment) or (let ()
@@ -382,7 +382,7 @@
                         #f
                         (let ((VAL (eval (car ARGS) ENV)))
                                 (if VAL VAL (-or (cdr ARGS) ENV)))))
-        (vov ((ARGS vov/args) (ENV vov/env))
+        (vov ((ARGS copy-list) (ENV environment))
                 (signature/assert! ARGS list?)
                 (-or ARGS ENV))))
 
@@ -392,15 +392,15 @@
 
 It will transform an expression of the form:
 
-        (cond ((<clause1> <expression1> ---) (<clause2> <expression2> ---) ---))
+        (cond ((<clause1> <expression1> ...) (<clause2> <expression2> ...) ...))
 
 to
 
         (if (<clause1>)
-            (do <expression1> ---)
+            (do <expression1> ...)
             (if (<clause2>)
-                (do <expression2> ---)
-                ---))
+                (do <expression2> ...)
+                ...))
 
 With provision for a final test-less else clause and/or changing a
 condition of the form
@@ -412,7 +412,7 @@ to
         (let ((TEMP (<clause>)))
             (if TEMP
                 (<expression> TEMP)
-                ---))
+                ...))
 
 The case operator performs a similar transformation with a specific
 type of clause explained below. :-)
@@ -499,10 +499,10 @@ type of clause explained below. :-)
                 (eval (cons case% (cons is? (cons VALUE TESTS))) ENV)))
 
         (-: Transform each clause from:
-                ((x y z) foo---) to ((or (is? T X) ---) foo---)
-                ((x y z) => foo) to ((or (is? T X) ---) (foo T))
+                ((x y z) foo...) to ((or (is? T X) ...) foo...)
+                ((x y z) => foo) to ((or (is? T X) ...) (foo T))
                 (else => foo) to (else (foo T))
-                (else foo---) is left as-is.
+                (else foo...) is left as-is.
             The final application to cond will catch a misplaced else clause. :-)
         (define-here! (-case/each MATCH TEMP CANDIDATES . ACTION)
                 (if (and (pair? ACTION) (is? (car ACTION) '=>))
