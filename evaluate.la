@@ -1346,9 +1346,131 @@ Primitive/define!/lambda/continue
 
 ########
 
-!Primitive/array?
-        ARRAY?  acc,0
+!Primitive/record?
+        RECORD? acc,r0,r0
         JUMP    @!Restore/r0
+
+!Primitive/record%instance?
+        RECORD? acc,r0,()
+        JUMPNOT acc,@1f
+        LOAD    acc,#f
+        JUMP    @!Restore/r0
+1h      RECORD? acc,r0,r0
+        JUMP    @!Restore/r0
+
+!Primitive/record%template?
+        RECORD? acc,r0,()
+        JUMP    @!Restore/r0
+
+!Primitive/record/instance-of?
+        RECORD? tmp,r0,r0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      RECORD? tmp,r0,()
+        JUMPIF  tmp,@1f
+        TEMPLATE r0,r0
+1h      RECORD? acc,r1,r0
+        JUMP    @!Restore/r0
+
+#       (new-record <unique-label> ...)
+#
+!Primitive/new-record
+        CMPIS?  tmp,r0,()
+        JUMPNOT tmp,@1f
+        TRAP    'incompatible-operand
+1h      PAIR?   tmp,r0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      LOAD    clink,r1
+        LOAD    clink,r2
+        TABLE   r1,1
+        LOAD    r2,0
+Primitive/new-record/next
+        PAIR?   tmp,r0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CAR     acc,r0
+        SYMBOL? tmp,acc
+        JUMPIF  tmp,@1f
+1h      TRAP    'incompatible-operand
+        EXISTS? tmp,r1,acc
+        JUMPNOT tmp,@1f
+        TRAP    'incompatible-operand     conflicted-binding?
+1h      CONS    acc,acc,r2
+        DEFINE! r1,acc
+        ADD     r2,r2,1
+        CDR     r0,r0
+        CMPIS?  tmp,r0,()
+        JUMPNOT tmp,@Primitive/new-record/next
+        RECORD  acc,r1
+        JUMP    @!Restore/r2
+
+#       (new-instance <record>)
+#
+!Primitive/new-instance
+        RECORD? tmp,r0,r0       Instance or template?
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      RECORD  acc,r0
+        JUMP    @!Restore/r0
+
+!Primitive/record/length
+        RECORD? tmp,r0,r0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      LENGTH  acc,r0
+        JUMP    @!Restore/r0
+
+#       (record/ref <record> <label>)
+!Primitive/record/ref
+        PEND    clink,@!Restore/r1
+Primitive/record/ref/imp
+        RECORD? tmp,r0,()       Template?
+        JUMPNOT tmp,@1f
+                TRAP    'incompatible-operand
+1h      RECORD? tmp,r0,r0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+
+        INTEGER? tmp,r1
+        JUMPIF  tmp,@2f
+        SYMBOL? tmp,r1
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      LOOKUP  r1,r0,r1
+        INTEGER? tmp,r1
+        JUMPIF  tmp,@3f
+        TRAP    'incompatible-operand
+
+2h      CMPGE?  tmp,r1,0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      LENGTH  tmp,r0
+        CMPLT?  tmp,r1,tmp
+        JUMPNOT tmp,@3f
+        TRAP    'incompatible-operand
+
+3h      REF     acc,r0,r1
+        JUMP    =clink
+
+!Primitive/record/set!
+        PEND    clink,@1f
+        JUMP    @Primitive/record/ref/imp
+1h      SET!    r0,r1,r2
+        JUMP    @!Restore/r2
+
+!Primitive/record/template
+        RECORD? tmp,r0,()
+        JUMPIF  tmp,@2f
+        RECORD? tmp,r0,r0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      TEMPLATE r0,r0
+2h      LOAD    acc,r0
+        JUMP    @!Restore/r0
+
+########
+
 !Primitive/boolean?
         CMPIS?  acc,r0,#f
         JUMPIF  acc,@1f
@@ -1460,78 +1582,192 @@ Primitive/define!/lambda/continue
 #       SLO     acc,'segment->symbol
         JUMP    =clink
 
+########
+
+!Primitive/array?
+        ARRAY?  acc,0
+        JUMP    @!Restore/r0
+
 #       r0: length
-#       r1: offset
-#       r2: filler
-1h      TRAP    'incompatible-operand
+#       r1: filler
 !Primitive/new-array
-        CMPGE?  tmp,r0,0
-        JUMPNOT tmp,@1b
-        INTEGER? tmp,r1
-        JUMPNOT tmp,@1b
-#       SLO     acc,'new-array
-        JUMP    =clink
+        INTEGER? tmp,r0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CMPGE?  tmp,r0,0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      ARRAY   acc,r0,r1
+        JUMP    @!Restore/r1
 
 #       r0: array
 #       r1: new length
-#       r2: new offset
-#       r3: new filler
-1h      TRAP    'incompatible-operand
+#       r2: new filler
 !Primitive/array/resize!
         ARRAY?  tmp,r0
-        JUMPNOT tmp,@1b
-        CMPGE?  tmp,r1,0
-        JUMPNOT tmp,@1b
-        INTEGER? tmp,r2
-        JUMPNOT tmp,@1b
-#       SLO     acc,'array/resize!
-        JUMP    =clink
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      INTEGER? tmp,r1
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CMPGE?  tmp,r0,0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      RESIZE! r0,r1,r2
+        JUMP    @!Restore/r2
 
-1h      TRAP    'incompatible-operand
 !Primitive/array/length
         ARRAY?  tmp,r0
-        JUMPNOT tmp,@1b
-#       SLO     acc,'array/length
-        JUMP    =clink
-
-1h      TRAP    'incompatible-operand
-!Primitive/array/offset
-        ARRAY?  tmp,r0
-        JUMPNOT tmp,@1b
-#       SLO     acc,'array/offset
-        JUMP    =clink
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      LENGTH  acc,r0
+        JUMP    @!Restore/r0
 
 #       r0: array
-#       r1: index + offset
-#       r2 (set!): value
-1h      LOAD    r2,=clink
-        TRAP    'incompatible-operand
+#       r1: index
 !Primitive/array/ref
-#       SLO     acc,'array/offset
         PEND    clink,@Primitive/array/ref/imp
-Primitive/array/ref/find
-        LOAD    clink,r2
-        SUB     r2,r1,acc
-        CMPLT?  tmp,r2,0
-        JUMPIF  tmp,@1b
-#       SLO     acc,'array/length
-        CMPGE?  tmp,r2,acc
-        JUMPIF  tmp,@1b
-        LOAD    r1,r2
-        LOAD    r2,=clink
-        JUMP    =clink
-!Primitive/array/set!
-#       SLO     acc,'array/offset
-        PEND    clink,@Primitive/array/set!/imp
-        JUMP    @Primitive/array/ref/find
-Primitive/array/ref/imp
-#       SLO     acc,'array/ref
-        JUMP    =clink
-Primitive/array/set!/imp
-#       SLO     acc,'array/set!
-        JUMP    =clink
 
-# TODO: Hashtables
+Primitive/array/ref/check
+        ARRAY?  tmp,r0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+
+1h      INTEGER? tmp,r1
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+
+1h      CMPGE?  tmp,r1,0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+
+1h      LENGTH  tmp,r0
+        CMPLT?  tmp,r1,tmp
+        JUMPIF  tmp,=clink
+        TRAP    'out-of-bounds
+
+Primitive/array/ref/imp
+        REF     acc,r0,r1
+        JUMP    @!Restore/r1
+
+!Primitive/array/set!
+        PEND    clink,@Primitive/array/set!/imp
+        JUMP    @Primitive/array/ref/check
+Primitive/array/set!/imp
+        SET!    r0,r1,r2
+        JUMP    @!Restore/r1
+
+########
+
+!Primitive/hashtable?
+        TABLE?  acc,r0
+        JUMP    @!Restore/r0
+
+!Primitive/new-hashtable
+        INTEGER? tmp,r0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CMPGE?  tmp,r0,0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      TABLE   acc,r0
+        JUMP    @!Restore/r0
+
+!Primitive/hashtable/blocked
+        TABLE?  tmp,r0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      BLOCKED acc,r0
+        JUMP    @!Restore/r0
+
+#       r0: hashtable
+#       r1: label
+#       r2: value
+#
+!Primitive/hashtable/define!
+        TABLE?  tmp,r0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      SYMBOL? tmp,r1
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CONS    tmp,r1,r2
+        DEFINE! r0,tmp
+        JUMP    @!Restore/r2
+
+!Primitive/hashtable/erase!
+        TABLE?  tmp,r0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      SYMBOL? tmp,r1
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CMPIS?  tmp,r0,#f
+        JUMPIF  tmp,@1f
+        CMPIS?  tmp,r0,#t
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      ERASE!  r0,r1,r2
+        JUMP    @!Restore/r2
+
+#       r0: hashtable
+#       r1: label
+#
+!Primitive/hashtable/exists?
+        TABLE?  tmp,r0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      SYMBOL? tmp,r1
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      EXISTS? acc,r0,r1
+        JUMP    @!Restore/r2
+
+!Primitive/hashtable/free
+        TABLE?  tmp,r0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      FREE    acc,r0
+        JUMP    @!Restore/r0
+
+!Primitive/hashtable/length
+        TABLE?  tmp,r0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      LENGTH  acc,r0
+        JUMP    @!Restore/r0
+
+!Primitive/hashtable/ref
+        TABLE?  tmp,r0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      SYMBOL? tmp,r1
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      LOOKUP  acc,r0,r1
+        JUMP    @!Restore/r2
+
+!Primitive/hashtable/set!
+        TABLE?  tmp,r0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      SYMBOL? tmp,r1
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CONS    tmp,r1,r2
+1h      REPLACE! r0,tmp
+        JUMP    @!Restore/r2
+
+!Primitive/hashtable/used
+        TABLE?  tmp,r0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      LENGTH  acc,r0
+        FREE    tmp,r0
+        SUB     acc,acc,tmp
+        BLOCKED tmp,r0
+        SUB     acc,acc,tmp
+        JUMP    @!Restore/r0
 
 ########
 

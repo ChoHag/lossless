@@ -10,8 +10,6 @@ LTFLAGS?=       -v
 OBJECTS:=       lossless.o initialise.o
 TEST_OBJECTS:=  memless.o testless.o initialise.o
 SOURCES:=       lossless.c lossless.h
-LIB_OBJECTS:=
-LIB_SOURCES:=
 
 TEST_SCRIPTS:=  t/insanity.t \
         t/closure.t          \
@@ -63,7 +61,7 @@ lossless: $(OBJECTS)
 		-o lossless
 
 liblossless.so: $(OBJECTS)
-	$(LLCOMPILE) $(OBJECTS) $(LIB_OBJECTS) $(LDFLAGS) $(LLDFLAGS) \
+	$(LLCOMPILE) $(OBJECTS) $(LDFLAGS) $(LLDFLAGS) \
 		-shared -o liblossless.so
 
 memless.o: lossless.c

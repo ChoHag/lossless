@@ -770,9 +770,6 @@ instead of representing `a fixed' if a cell's value is exactly 15
 of a cell are set then the rest of the cell encodes as much of a
 signed integer as will fit.
 
-|UNDEFINED| is a sentinel marker which should never be realised as
-a run-time object.
-
 @d NIL            ((cell)  0) /* Nothing, the empty list, \.{()}. */
 @d LFALSE         ((cell)  1) /* Boolean false, \.{\#f} or \.{\#F}. */
 @d LTRUE          ((cell)  3) /* Boolean true, \.{\#t} or \.{\#T}. */
@@ -782,7 +779,7 @@ a run-time object.
                                         other stream. */
 @d INVALID0       ((cell)  9)
 @d INVALID1       ((cell) 11)
-@d UNDEFINED      ((cell) 13) /* The value of a variable that isn't there. */
+@d INVALID2       ((cell) 13)
 @d FIXED          ((cell) 15) /* A small fixed-width integer. */
 @#
 @d null_p(O)      ((O) == NIL) /* Might {\it not\/} be |NULL|. */
@@ -792,11 +789,9 @@ a run-time object.
 @d true_p(O)      ((O) == LTRUE)
 @d void_p(O)      ((O) == VOID)
 @d eof_p(O)       ((O) == LEOF)
-@d undefined_p(O) ((O) == UNDEFINED)
 @d fixed_p(O)     (((O) & FIXED) == FIXED) /* Mask out the value bits. */
-@d defined_p(O)   (!undefined_p(O))
-@d valid_p(O)     (fixed_p(O)
-        || ((((O) & FIXED) == (O)) && (O) != INVALID0 && (O) != INVALID1))
+@d defined_p(O)   (!special_p(O) || ((O) != INVALID0 && (O) != INVALID1
+        && (O) != INVALID2))
 @#
 @d predicate(O)   ((O) ? LTRUE : LFALSE)
 
@@ -885,8 +880,10 @@ typedef union {
 @d FORM_ASSEMBLY       (LTAG_PDEX | 0x01) /* (Partially) assembled bytecode. */
 @d FORM_CSTRUCT        (LTAG_PDEX | 0x02) /* A \CEE/ struct. */
 @d FORM_FILE_HANDLE    (LTAG_PDEX | 0x03) /* File descriptor or equivalent. */
-@d FORM_POINTER        (LTAG_PDEX | 0x04)
-@d FORM_STATEMENT      (LTAG_PDEX | 0x05) /* A single assembled statement. */
+@d FORM_POINTER        (LTAG_PDEX | 0x04) /* An unknown or anonymous pointer. */
+@d FORM_INSTANCE       (LTAG_PDEX | 0x05) /* A user object instance. */
+@d FORM_TEMPLATE       (LTAG_PDEX | 0x06) /* A user object's template. */
+@d FORM_STATEMENT      (LTAG_PDEX | 0x07) /* A single assembled statement. */
 @#
 @d FORM_PAIR           (LTAG_BOTH | 0x00) /* Two pointers (a ``cons cell''). */
 @d FORM_ARGUMENT       (LTAG_BOTH | 0x01) /* An assembly statement argument. */
@@ -914,12 +911,14 @@ implementation or are otherwise related.
 @d file_handle_p(O)    (form_p((O), FILE_HANDLE))
 @d hashtable_p(O)      (form_p((O), HASHTABLE))
 @d heap_p(O)           (form_p((O), HEAP))
+@d instance_p(O)       (form_p((O), INSTANCE))
 @d opcode_p(O)         (form_p((O), OPCODE))
 @d pointer_p(O)        (form_p((O), POINTER))
 @d register_p(O)       (form_p((O), REGISTER))
 @d rune_p(O)           (form_p((O), RUNE))
 @d statement_p(O)      (form_p((O), STATEMENT))
 @d syntax_p(O)         (form_p((O), SYNTAX))
+@d template_p(O)       (form_p((O), TEMPLATE))
 @#
 @d segment_intern_p(O) (form_p((O), SEGMENT_INTERN))
 @d segment_stored_p(O) (form_p((O), SEGMENT))
@@ -2311,9 +2310,8 @@ except to expose the value for calculation with at a higher level.
 @d ARRAY_MAX HALF_MAX
 @d array_base(O) ((cell *) segment_base(O))
 @d array_length_c(O) (segment_length_c(O) / (half) sizeof (cell))
-@d array_offset_c(O) (pointer_datum(O))
 @<Fun...@>=
-error_code new_array_imp (half, cell, cell, cell_tag, cell *);
+error_code new_array_imp (half, cell, cell_tag, cell *);
 error_code array_resize_m (cell, half, cell);
 
 @ Most arrays are normal arrays with --- at creation their slots
@@ -2322,12 +2320,11 @@ are initialised to |NIL| and they're created with |new_array|.
 Some objects are defined in terms of underlying an array store and
 begin with their contents uninitialised.
 
-@d new_array(L,O,R) /* Length, Offset, R */
-        new_array_imp((L), (O), NIL, FORM_ARRAY, (R))
+@d new_array(L,R) /* Length, R */
+        new_array_imp((L), NIL, FORM_ARRAY, (R))
 @c
 error_code
 new_array_imp (half      length,
-               cell      offset,
                cell      fill,
                cell_tag  form,
                cell     *ret)
@@ -2335,11 +2332,9 @@ new_array_imp (half      length,
         error_code reason;
 
         assert(length >= 0 && length <= ARRAY_MAX);
-        assert(integer_p(offset));
         orreturn(new_segment_imp(Heap_Thread, length * sizeof (cell),
                 sizeof (cell), form, FORM_NONE, ret));
-        pointer_set_datum_m(*ret, offset);
-        if (defined_p(fill))
+        if (!void_p(fill))
                 while (length > 0)
                         array_base(*ret)[--length] = fill;
         return LERR_NONE;
@@ -2363,7 +2358,7 @@ array_resize_m (cell o,
         assert(nlength >= 0 && nlength <= ARRAY_MAX);
         olength = array_length_c(o);
         orreturn(segment_resize_m(o, nlength * sizeof (cell)));
-        if (defined_p(fill))
+        if (!void_p(fill))
                 while (nlength > olength)
                         array_base(o)[--nlength] = fill;
         return LERR_NONE;
@@ -2476,7 +2471,7 @@ the initial free count.
 
 @d new_hashtable_imp(L,F,R) do@+ { /* Length, Free, R */
         assert(((L) == 0 && (F) == 0) || ((F) < (L)));
-        orreturn(new_array_imp((L) + 2, fix(0), NIL, FORM_HASHTABLE, (R)));
+        orreturn(new_array_imp((L) + 2, NIL, FORM_HASHTABLE, (R)));
         hashtable_set_blocked_m(*(R), 0);
         hashtable_set_free_m(*(R), (F));
 }@+ while (0)
@@ -2564,7 +2559,7 @@ copy_hashtable_imp (cell old,
                 hashfn = hashtable_key_paired;
         for (i = 0; i < hashtable_length_c(old); i++) {
                 value = hashtable_base(old)[i];
-                if (!null_p(value) && defined_p(value)) { /* Slot in |old|. */
+                if (!null_p(value) && !void_p(value)) { /* Slot in |old|. */
                         hval = hashfn(value);
                         j = hval % hashtable_length_c(new);
                         while (1) { /* Find a (guaranteed) slot in |new|. */
@@ -2764,7 +2759,7 @@ hashtable_scan (cell  o,
         *ret = hval % hashtable_length_c(o); /* Default index value. */
         while (1) { /* At least one |NIL| is guaranteed to be present. */
                 at = hashtable_base(o)[*ret];
-                if (null_p(at) || (defined_p(at) && matchfn(at, ctx)))
+                if (null_p(at) || (!void_p(at) && matchfn(at, ctx)))
                         break;
                 if (*ret == 0)
                         *ret = hashtable_length_c(o) - 1;
@@ -2797,12 +2792,7 @@ hashtable_search (cell  o,
 
         assert(hashtable_p(o));
         assert(symbol_p(label));
-        reason = hashtable_scan(o, symbol_hash_c(label), (void *) label, &idx);
-        if (reason == LERR_MISSING) {
-                *ret = UNDEFINED;
-                return LERR_NONE;
-        } else if (failure_p(reason))
-                return reason;
+        orreturn(hashtable_scan(o, symbol_hash_c(label), (void *) label, &idx));
         *ret = hashtable_base(o)[idx];
         return LERR_NONE;
 }
@@ -2820,12 +2810,7 @@ hashtable_search_raw (cell  o,
 
         proto.length = length;
         proto.buf = buf;
-        reason = hashtable_scan(o, hval, (void *) &proto, &idx);
-        if (reason == LERR_MISSING) {
-                *ret = UNDEFINED;
-                return LERR_NONE;
-        } else if (failure_p(reason))
-                return reason;
+        orreturn(hashtable_scan(o, hval, (void *) &proto, &idx));
         *ret = hashtable_base(o)[idx];
         return LERR_NONE;
 }
@@ -2898,7 +2883,7 @@ hashtable_erase_m (cell o,
         if (reason == LERR_MISSING)
                 return relax ? LERR_NONE : LERR_MISSING;
         assert(!failure_p(reason));
-        hashtable_base(o)[idx] = UNDEFINED;
+        hashtable_base(o)[idx] = VOID;
         hashtable_set_blocked_m(o, hashtable_blocked_c(o) + 1);
         return hashtable_reduce_m(o);
 }
@@ -3044,13 +3029,13 @@ new_symbol_imp (hash  hval,
         assert(length >= 0 && length < (half) SYMBOL_MAX);
         if (fresh == NULL)
                 fresh = &ignore;
-        orreturn(hashtable_search_raw(Symbol_Table, hval, buf, length,
-                &sym));
-        if (defined_p(sym)) {
+        reason = hashtable_search_raw(Symbol_Table, hval, buf, length, &sym);
+        if (!failure_p(reason)) {
                 *fresh = false;
                 *ret = sym;
                 return LERR_NONE;
-        }
+        } else if (reason != LERR_MISSING)
+                return reason;
         *fresh = true;
         if (length >= INTERN_MAX) {
                 orreturn(new_segment_imp(Heap_Thread, length + sizeof (symbol),
@@ -3172,14 +3157,48 @@ env_search (cell  o,
         assert(environment_p(o));
         assert(symbol_p(label));
         for (; !null_p(o); o = env_previous(o)) {
-                orreturn(hashtable_search(env_layer(o), label, &tmp));
-                if (defined_p(tmp)) {
+                reason = hashtable_search(env_layer(o), label, &tmp);
+                if (!failure_p(reason)) {
                         assert(pair_p(tmp));
                         *ret = A(tmp)->dex;
                         return LERR_NONE;
-                }
+                } else if (reason != LERR_MISSING)
+                        return reason;
         }
         return LERR_MISSING;
+}
+
+@* Records.
+
+@d record_p(O)               (instance_p(O) || template_p(O))
+@d record_template(O)        (pointer_datum(O))
+@d record_template_length(O) (hashtable_used_c(O))
+
+@c
+error_code
+new_record (cell  template,
+            cell *ret)
+{
+        error_code reason;
+
+        assert(hashtable_p(template)); /* Of int 0..n */
+        orreturn(copy_hashtable(template, ret));
+        TAG_SET_M(*ret, FORM_TEMPLATE);
+        pointer_set_datum_m(*ret, NIL);
+        return LERR_NONE;
+}
+
+@ @c
+error_code
+new_instance (cell  o,
+              cell *ret)
+{
+        error_code reason;
+        assert(template_p(o));
+        orreturn(new_array_imp(record_template_length(o), NIL,
+                FORM_INSTANCE, ret));
+        pointer_set_datum_m(*ret, o);
+        return LERR_NONE;
 }
 
 @* SCOW. Very little thought has gone into this object so not much
@@ -3284,7 +3303,7 @@ for (i = 0; i < LERR_LENGTH; i++)
 Trap_Handler = (address *) Empty_Trap_Handler;
 @#
 orabort(init_osthread_mutex(&Program_Lock, false, false));
-orabort(new_array(0, fix(0), &Program_ObjectDB));
+orabort(new_array(0, &Program_ObjectDB));
 orabort(alloc_mem(NULL, CODE_PAGE_LENGTH, CODE_PAGE_LENGTH,
         (void **) &Program_Export_Base));
 assert((address) Program_Export_Base == instruction_page((address)
@@ -3326,8 +3345,6 @@ vm_locate_entry (cell     label,
 
         assert(symbol_p(label));
         orreturn(hashtable_search(Program_Export_Table, label, &loffset));
-        if (undefined_p(loffset))
-                return LERR_MISSING;
         orreturn(int_value(A(loffset)->dex, &coffset));
         assert(coffset >= 0 && coffset < Program_Export_Free);
         if (index != NULL)
@@ -3504,7 +3521,9 @@ typedef enum {
         OP_HALT, /* Instruction 0 for uninitialised memory. */
         OP_ADD,
         OP_ADDRESS,
+        OP_ARRAY,
         OP_ARRAY_P,
+        OP_BLOCKED,
         OP_BODY,
         OP_CAR,
         OP_CDR,
@@ -3521,13 +3540,16 @@ typedef enum {
         OP_DEFINE_M,
         OP_DELIMIT,
         OP_ENVIRONMENT_P,
+        OP_ERASE_M,
         OP_EXISTS_P,
         OP_EXTEND,
+        OP_FREE,
         OP_INTEGER_P,
         OP_JOIN,
         OP_JUMP,
         OP_JUMPIF,
         OP_JUMPNOT,
+
         OP_LENGTH,
         OP_LOAD,
         OP_LOOKUP,
@@ -3544,9 +3566,14 @@ typedef enum {
         OP_POKE8_M,
         OP_POKE_M,
         OP_PRIMITIVE_P,
+        OP_RECORD,
+        OP_RECORD_P,
+        OP_REF,
         OP_REPLACE_M,
+        OP_RESIZE_M,
         OP_RESUMPTION_P,
         OP_SEGMENT_P,
+        OP_SET_M,
         OP_SIGNATURE,
         OP_SPORK,
         OP_SUB,
@@ -3555,6 +3582,8 @@ typedef enum {
         OP_SYNTAX,
         OP_SYNTAX_P,
         OP_TABLE,
+        OP_TABLE_P,
+        OP_TEMPLATE,
         OP_TRAP,
         OPCODE_LENGTH
 } opcode;
@@ -3578,10 +3607,14 @@ shared opcode_table Op[OPCODE_LENGTH] = {@|
         [OP_SIGNATURE]      = { NIL, AREG, ALOB, NARG },@|
         [OP_DEFINE_M]       = { NIL, AREG, ALOB, NARG },@|
         [OP_EXISTS_P]       = { NIL, AREG, ALOT, ALOT },@|
+        [OP_RECORD_P]       = { NIL, AREG, ALOT, ALOT },@|
+        [OP_RESIZE_M]       = { NIL, AREG, ALOT, ALOT },@|
         [OP_SYMBOL_P]       = { NIL, AREG, ALOB, NARG },@|
         [OP_SYNTAX_P]       = { NIL, AREG, ALOB, NARG },@|
+        [OP_TEMPLATE]       = { NIL, AREG, ALOB, NARG },@|
         [OP_ADDRESS]        = { NIL, AREG, ALOB, NARG },@|
         [OP_ARRAY_P]        = { NIL, AREG, ALOB, NARG },@|
+        [OP_BLOCKED]        = { NIL, AREG, ALOB, NARG },@|
         [OP_CLOSURE]        = { NIL, AREG, ALOT, ALOT },@|
         [OP_CMPEQ_P]        = { NIL, AREG, ALOT, ALOT },@|
         [OP_CMPGE_P]        = { NIL, AREG, ALOT, ALOT },@|
@@ -3590,25 +3623,32 @@ shared opcode_table Op[OPCODE_LENGTH] = {@|
         [OP_CMPLE_P]        = { NIL, AREG, ALOT, ALOT },@|
         [OP_CMPLT_P]        = { NIL, AREG, ALOT, ALOT },@|
         [OP_DELIMIT]        = { NIL, AREG, NARG, NARG },@|
+        [OP_ERASE_M]        = { NIL, AREG, ALOT, ALOT },@|
         [OP_JUMPNOT]        = { NIL, AREG, AADD, NARG },@|
         [OP_POKE2_M]        = { NIL, AREG, ALOT, ALOT },@|
         [OP_POKE4_M]        = { NIL, AREG, ALOT, ALOT },@|
         [OP_POKE8_M]        = { NIL, AREG, ALOT, ALOT },@|
+        [OP_TABLE_P]        = { NIL, AREG, ALOB, NARG },@|
+
         [OP_EXTEND]         = { NIL, AREG, ALOB, NARG },@|
         [OP_JUMPIF]         = { NIL, AREG, AADD, NARG },@|
         [OP_LENGTH]         = { NIL, AREG, ALOB, NARG },@|
         [OP_LOOKUP]         = { NIL, AREG, ALOT, ALOT },@|
         [OP_PAIR_P]         = { NIL, AREG, ALOB, NARG },@|
         [OP_POKE_M]         = { NIL, AREG, ALOT, ALOT },@|
+        [OP_RECORD]         = { NIL, AREG, ALOB, NARG },@|
         [OP_SYMBOL]         = { NIL, AREG, ALOT, ALOT },@|
         [OP_SYNTAX]         = { NIL, AREG, ALOT, ALOT },@|
+        [OP_ARRAY]          = { NIL, AREG, ALOT, ALOT },@|
         [OP_PEEK2]          = { NIL, AREG, ALOT, ALOT },@|
         [OP_PEEK4]          = { NIL, AREG, ALOT, ALOT },@|
         [OP_PEEK8]          = { NIL, AREG, ALOT, ALOT },@|
+        [OP_SET_M]          = { NIL, AREG, ALOT, ALOT },@|
         [OP_SPORK]          = { NIL, AREG, AADD, NARG },@|
         [OP_TABLE]          = { NIL, AREG, ALOB, NARG },@|
         [OP_BODY]           = { NIL, AREG, ALOB, NARG },@|
         [OP_CONS]           = { NIL, AREG, ALOT, ALOT },@|
+        [OP_FREE]           = { NIL, AREG, ALOB, NARG },@|
         [OP_HALT]           = { NIL, NARG, NARG, NARG },@|
         [OP_JOIN]           = { NIL, AREG, ALOB, NARG },@|
         [OP_JUMP]           = { NIL, AADD, NARG, NARG },@|
@@ -3622,6 +3662,7 @@ shared opcode_table Op[OPCODE_LENGTH] = {@|
         [OP_CDR]            = { NIL, AREG, ALOB, NARG },@|
         [OP_CMP]            = { NIL, AREG, ALOT, ALOT },@|
         [OP_MUL]            = { NIL, AREG, ALOT, ALOT },@|
+        [OP_REF]            = { NIL, AREG, ALOT, ALOT },@|
         [OP_SUB]            = { NIL, AREG, ALOT, ALOT },@/
 };
 
@@ -3640,10 +3681,14 @@ shared char *Opcode_Label[OPCODE_LENGTH] = {@|
         [OP_SIGNATURE]      = "VM:SIGNATURE",@|
         [OP_DEFINE_M]       = "VM:DEFINE!",@|
         [OP_EXISTS_P]       = "VM:EXISTS?",@|
+        [OP_RECORD_P]       = "VM:RECORD?",@|
+        [OP_RESIZE_M]       = "VM:RESIZE!",@|
         [OP_SYMBOL_P]       = "VM:SYMBOL?",@|
         [OP_SYNTAX_P]       = "VM:SYNTAX?",@|
+        [OP_TEMPLATE]       = "VM:TEMPLATE",@|
         [OP_ADDRESS]        = "VM:ADDRESS",@|
         [OP_ARRAY_P]        = "VM:ARRAY?",@|
+        [OP_BLOCKED]        = "VM:BLOCKED",@|
         [OP_CLOSURE]        = "VM:CLOSURE",@|
         [OP_CMPEQ_P]        = "VM:CMPEQ?",@|
         [OP_CMPGE_P]        = "VM:CMPGE?",@|
@@ -3652,25 +3697,32 @@ shared char *Opcode_Label[OPCODE_LENGTH] = {@|
         [OP_CMPLE_P]        = "VM:CMPLE?",@|
         [OP_CMPLT_P]        = "VM:CMPLT?",@|
         [OP_DELIMIT]        = "VM:DELIMIT",@|
+        [OP_ERASE_M]        = "VM:ERASE!",@|
         [OP_JUMPNOT]        = "VM:JUMPNOT",@|
         [OP_POKE2_M]        = "VM:POKE2!",@|
         [OP_POKE4_M]        = "VM:POKE4!",@|
         [OP_POKE8_M]        = "VM:POKE8!",@|
+        [OP_TABLE_P]        = "VM:TABLE?",@|
+
         [OP_EXTEND]         = "VM:EXTEND",@|
         [OP_JUMPIF]         = "VM:JUMPIF",@|
         [OP_LENGTH]         = "VM:LENGTH",@|
         [OP_LOOKUP]         = "VM:LOOKUP",@|
         [OP_PAIR_P]         = "VM:PAIR?",@|
         [OP_POKE_M]         = "VM:POKE!",@|
+        [OP_RECORD]         = "VM:RECORD",@|
         [OP_SYMBOL]         = "VM:SYMBOL",@|
         [OP_SYNTAX]         = "VM:SYNTAX",@|
+        [OP_ARRAY]          = "VM:ARRAY",@|
         [OP_PEEK2]          = "VM:PEEK2",@|
         [OP_PEEK4]          = "VM:PEEK4",@|
         [OP_PEEK8]          = "VM:PEEK8",@|
+        [OP_SET_M]          = "VM:SET!",@|
         [OP_SPORK]          = "VM:SPORK",@|
         [OP_TABLE]          = "VM:TABLE",@|
         [OP_BODY]           = "VM:BODY",@|
         [OP_CONS]           = "VM:CONS",@|
+        [OP_FREE]           = "VM:FREE",@|
         [OP_HALT]           = "VM:HALT",@|
         [OP_JOIN]           = "VM:JOIN",@|
         [OP_JUMP]           = "VM:JUMP",@|
@@ -3684,6 +3736,7 @@ shared char *Opcode_Label[OPCODE_LENGTH] = {@|
         [OP_CDR]            = "VM:CDR",@|
         [OP_CMP]            = "VM:CMP",@|
         [OP_MUL]            = "VM:MUL",@|
+        [OP_REF]            = "VM:REF",@|
         [OP_SUB]            = "VM:SUB",@/
 };
 
@@ -3713,7 +3766,6 @@ typedef struct {
 typedef enum {
         PRIMITIVE_ADD,
         PRIMITIVE_ARRAY_LENGTH,
-        PRIMITIVE_ARRAY_OFFSET,
         PRIMITIVE_ARRAY_P,
         PRIMITIVE_ARRAY_REF,
         PRIMITIVE_ARRAY_RESIZE_M,
@@ -3727,17 +3779,38 @@ typedef enum {
         PRIMITIVE_DO,
         PRIMITIVE_EVAL,
         PRIMITIVE_FALSE_P,
-        PRIMITIVE_INTEGER_P,
+        PRIMITIVE_HASHTABLE_BLOCKED,
+        PRIMITIVE_HASHTABLE_DEFINE_M,
+        PRIMITIVE_HASHTABLE_ERASE_M,
+        PRIMITIVE_HASHTABLE_EXISTS_P,
+        PRIMITIVE_HASHTABLE_FREE,
+        PRIMITIVE_HASHTABLE_LENGTH,
+        PRIMITIVE_HASHTABLE_P,
+        PRIMITIVE_HASHTABLE_REF,
+        PRIMITIVE_HASHTABLE_SET_M,
+        PRIMITIVE_HASHTABLE_USED,
         PRIMITIVE_IF,
+        PRIMITIVE_INTEGER_P,
         PRIMITIVE_IS_P,
         PRIMITIVE_LAMBDA,
         PRIMITIVE_MUL,
         PRIMITIVE_NEW_ARRAY,
+        PRIMITIVE_NEW_HASHTABLE,
+        PRIMITIVE_NEW_INSTANCE,
+        PRIMITIVE_NEW_RECORD,
         PRIMITIVE_NEW_SEGMENT,
         PRIMITIVE_NEW_SYMBOL_SEGMENT,
         PRIMITIVE_NULL_P,
         PRIMITIVE_PAIR_P,
         PRIMITIVE_QUOTE,
+        PRIMITIVE_RECORD_INSTANCE_OF_P,
+        PRIMITIVE_RECORD_INSTANCE_P,
+        PRIMITIVE_RECORD_LENGTH,
+        PRIMITIVE_RECORD_P,
+        PRIMITIVE_RECORD_REF,
+        PRIMITIVE_RECORD_SET_M,
+        PRIMITIVE_RECORD_TEMPLATE,
+        PRIMITIVE_RECORD_TEMPLATE_P,
         PRIMITIVE_ROOT_ENVIRONMENT,
         PRIMITIVE_SEGMENT_LENGTH,
         PRIMITIVE_SEGMENT_P,
@@ -3771,45 +3844,65 @@ enum {
 @ @d PO(P,S,F) [(P)] = { (S), NIL, ADDRESS_INVALID, (F) }
 @<Global...@>=
 shared primitive Primitive[PRIMITIVE_LENGTH] = {
-        PO(PRIMITIVE_ADD,                 SIGNATURE_2,   NULL),@/
-        PO(PRIMITIVE_ARRAY_LENGTH,        SIGNATURE_1,   NULL),@/
-        PO(PRIMITIVE_ARRAY_OFFSET,        SIGNATURE_1,   NULL),@/
-        PO(PRIMITIVE_ARRAY_P,             SIGNATURE_1,   NULL),@/
-        PO(PRIMITIVE_ARRAY_REF,           SIGNATURE_2,   NULL),@/
-        PO(PRIMITIVE_ARRAY_RESIZE_M,      SIGNATURE_2,   NULL),@/
-        PO(PRIMITIVE_ARRAY_SET_M,         SIGNATURE_3,   NULL),@/
-        PO(PRIMITIVE_BOOLEAN_P,           SIGNATURE_1,   NULL),@/
-        PO(PRIMITIVE_CAR,                 SIGNATURE_1,   NULL),@/
-        PO(PRIMITIVE_CDR,                 SIGNATURE_1,   NULL),@/
-        PO(PRIMITIVE_CONS,                SIGNATURE_2,   NULL),@/
-        PO(PRIMITIVE_CURRENT_ENVIRONMENT, SIGNATURE_0,   NULL),@/
-        PO(PRIMITIVE_DEFINE_M,            SIGNATURE_ECL, NULL),@/
-        PO(PRIMITIVE_DO,                  SIGNATURE_L,   NULL),@/
-        PO(PRIMITIVE_EVAL,                SIGNATURE_EO,  NULL),@/
-        PO(PRIMITIVE_FALSE_P,             SIGNATURE_1,   NULL),@/
-        PO(PRIMITIVE_INTEGER_P,           SIGNATURE_1,   NULL),@/
-        PO(PRIMITIVE_IF,                  SIGNATURE_ECO, NULL),@/
-        PO(PRIMITIVE_IS_P,                SIGNATURE_2,   NULL),@/
-        PO(PRIMITIVE_LAMBDA,              SIGNATURE_CL,  NULL),@/
-        PO(PRIMITIVE_MUL,                 SIGNATURE_2,   NULL),@/
-        PO(PRIMITIVE_NEW_ARRAY,           SIGNATURE_3,   NULL),@/
-        PO(PRIMITIVE_NEW_SEGMENT,         SIGNATURE_2,   NULL),@/
-        PO(PRIMITIVE_NEW_SYMBOL_SEGMENT,  SIGNATURE_3,   NULL),@/
-        PO(PRIMITIVE_NULL_P,              SIGNATURE_1,   NULL),@/
-        PO(PRIMITIVE_PAIR_P,              SIGNATURE_1,   NULL),@/
-        PO(PRIMITIVE_QUOTE,               SIGNATURE_C,   NULL),@/
-        PO(PRIMITIVE_ROOT_ENVIRONMENT,    SIGNATURE_0,   NULL),@/
-        PO(PRIMITIVE_SEGMENT_LENGTH,      SIGNATURE_1,   NULL),@/
-        PO(PRIMITIVE_SEGMENT_P,           SIGNATURE_1,   NULL),@/
-        PO(PRIMITIVE_SEGMENT_RESIZE_M,    SIGNATURE_2,   NULL),@/
-        PO(PRIMITIVE_SET_M,               SIGNATURE_ECL, NULL),@/
-        PO(PRIMITIVE_SUB,                 SIGNATURE_2,   NULL),@/
-        PO(PRIMITIVE_SYMBOL_KEY,          SIGNATURE_1,   NULL),@/
-        PO(PRIMITIVE_SYMBOL_P,            SIGNATURE_1,   NULL),@/
-        PO(PRIMITIVE_SYMBOL_SEGMENT,      SIGNATURE_1,   NULL),@/
-        PO(PRIMITIVE_TRUE_P,              SIGNATURE_1,   NULL),@/
-        PO(PRIMITIVE_VOID_P,              SIGNATURE_1,   NULL),@/
-        PO(PRIMITIVE_VOV,                 SIGNATURE_CL,  NULL),@/
+        PO(PRIMITIVE_ADD,                  SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_ARRAY_LENGTH,         SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_ARRAY_P,              SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_ARRAY_REF,            SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_ARRAY_RESIZE_M,       SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_ARRAY_SET_M,          SIGNATURE_3,   NULL),@/
+        PO(PRIMITIVE_BOOLEAN_P,            SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_CAR,                  SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_CDR,                  SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_CONS,                 SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_CURRENT_ENVIRONMENT,  SIGNATURE_0,   NULL),@/
+        PO(PRIMITIVE_DEFINE_M,             SIGNATURE_ECL, NULL),@/
+        PO(PRIMITIVE_DO,                   SIGNATURE_L,   NULL),@/
+        PO(PRIMITIVE_EVAL,                 SIGNATURE_EO,  NULL),@/
+        PO(PRIMITIVE_FALSE_P,              SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_HASHTABLE_BLOCKED,    SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_HASHTABLE_DEFINE_M,   SIGNATURE_3,   NULL),@/
+        PO(PRIMITIVE_HASHTABLE_ERASE_M,    SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_HASHTABLE_EXISTS_P,   SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_HASHTABLE_FREE,       SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_HASHTABLE_LENGTH,     SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_HASHTABLE_P,          SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_HASHTABLE_REF,        SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_HASHTABLE_SET_M,      SIGNATURE_3,   NULL),@/
+        PO(PRIMITIVE_HASHTABLE_USED,       SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_IF,                   SIGNATURE_ECO, NULL),@/
+        PO(PRIMITIVE_INTEGER_P,            SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_IS_P,                 SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_LAMBDA,               SIGNATURE_CL,  NULL),@/
+        PO(PRIMITIVE_MUL,                  SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_NEW_ARRAY,            SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_NEW_HASHTABLE,        SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_NEW_INSTANCE,         SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_NEW_RECORD,           SIGNATURE_L,   NULL),@/
+        PO(PRIMITIVE_NEW_SEGMENT,          SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_NEW_SYMBOL_SEGMENT,   SIGNATURE_3,   NULL),@/
+        PO(PRIMITIVE_NULL_P,               SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_PAIR_P,               SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_QUOTE,                SIGNATURE_C,   NULL),@/
+        PO(PRIMITIVE_RECORD_INSTANCE_OF_P, SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_RECORD_INSTANCE_P,    SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_RECORD_LENGTH,        SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_RECORD_P,             SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_RECORD_REF,           SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_RECORD_SET_M,         SIGNATURE_3,   NULL),@/
+        PO(PRIMITIVE_RECORD_TEMPLATE,      SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_RECORD_TEMPLATE_P,    SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_ROOT_ENVIRONMENT,     SIGNATURE_0,   NULL),@/
+        PO(PRIMITIVE_SEGMENT_LENGTH,       SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_SEGMENT_P,            SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_SEGMENT_RESIZE_M,     SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_SET_M,                SIGNATURE_ECL, NULL),@/
+        PO(PRIMITIVE_SUB,                  SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_SYMBOL_KEY,           SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_SYMBOL_P,             SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_SYMBOL_SEGMENT,       SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_TRUE_P,               SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_VOID_P,               SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_VOV,                  SIGNATURE_CL,  NULL),@/
 };
 
 @ @<Extern...@>=
@@ -3817,45 +3910,65 @@ extern shared primitive Primitive[];
 
 @ @<Data...@>=
 shared char *Primitive_Label[PRIMITIVE_LENGTH] = {
-        [PRIMITIVE_ADD]                 = "+",
-        [PRIMITIVE_ARRAY_LENGTH]        = "array/length",
-        [PRIMITIVE_ARRAY_OFFSET]        = "array/offset",
-        [PRIMITIVE_ARRAY_P]             = "array?",
-        [PRIMITIVE_ARRAY_REF]           = "array/ref",
-        [PRIMITIVE_ARRAY_RESIZE_M]      = "array/resize!",
-        [PRIMITIVE_ARRAY_SET_M]         = "array/set!",
-        [PRIMITIVE_BOOLEAN_P]           = "boolean?",
-        [PRIMITIVE_CAR]                 = "car",
-        [PRIMITIVE_CDR]                 = "cdr",
-        [PRIMITIVE_CONS]                = "cons",
-        [PRIMITIVE_CURRENT_ENVIRONMENT] = "current-environment",
-        [PRIMITIVE_DEFINE_M]            = "define!",
-        [PRIMITIVE_DO]                  = "do",
-        [PRIMITIVE_EVAL]                = "eval",
-        [PRIMITIVE_FALSE_P]             = "false?",
-        [PRIMITIVE_INTEGER_P]           = "integer?",
-        [PRIMITIVE_IF]                  = "if",
-        [PRIMITIVE_IS_P]                = "is?",
-        [PRIMITIVE_LAMBDA]              = "lambda",
-        [PRIMITIVE_MUL]                 = "*",
-        [PRIMITIVE_NEW_ARRAY]           = "new-array",
-        [PRIMITIVE_NEW_SEGMENT]         = "new-segment",
-        [PRIMITIVE_NEW_SYMBOL_SEGMENT]  = "segment->symbol",
-        [PRIMITIVE_NULL_P]              = "null?",
-        [PRIMITIVE_PAIR_P]              = "pair?",
-        [PRIMITIVE_QUOTE]               = "quote",
-        [PRIMITIVE_ROOT_ENVIRONMENT]    = "root-environment",
-        [PRIMITIVE_SEGMENT_LENGTH]      = "segment/length",
-        [PRIMITIVE_SEGMENT_P]           = "segment?",
-        [PRIMITIVE_SEGMENT_RESIZE_M]    = "segment/resize!",
-        [PRIMITIVE_SET_M]               = "set!",
-        [PRIMITIVE_SUB]                 = "-",
-        [PRIMITIVE_SYMBOL_KEY]          = "symbol/key",
-        [PRIMITIVE_SYMBOL_P]            = "symbol?",
-        [PRIMITIVE_SYMBOL_SEGMENT]      = "symbol/segment",
-        [PRIMITIVE_TRUE_P]              = "true?",
-        [PRIMITIVE_VOID_P]              = "void?",
-        [PRIMITIVE_VOV]                 = "vov",
+        [PRIMITIVE_ADD]                  = "+",
+        [PRIMITIVE_ARRAY_LENGTH]         = "array/length",
+        [PRIMITIVE_ARRAY_P]              = "array?",
+        [PRIMITIVE_ARRAY_REF]            = "array/ref",
+        [PRIMITIVE_ARRAY_RESIZE_M]       = "array/resize!",
+        [PRIMITIVE_ARRAY_SET_M]          = "array/set!",
+        [PRIMITIVE_BOOLEAN_P]            = "boolean?",
+        [PRIMITIVE_CAR]                  = "car",
+        [PRIMITIVE_CDR]                  = "cdr",
+        [PRIMITIVE_CONS]                 = "cons",
+        [PRIMITIVE_CURRENT_ENVIRONMENT]  = "current-environment",
+        [PRIMITIVE_DEFINE_M]             = "define!",
+        [PRIMITIVE_DO]                   = "do",
+        [PRIMITIVE_EVAL]                 = "eval",
+        [PRIMITIVE_FALSE_P]              = "false?",
+        [PRIMITIVE_HASHTABLE_BLOCKED]    = "hashtable/blocked",
+        [PRIMITIVE_HASHTABLE_DEFINE_M]   = "hashtable/define!",
+        [PRIMITIVE_HASHTABLE_ERASE_M]    = "hashtable/erase!",
+        [PRIMITIVE_HASHTABLE_EXISTS_P]   = "hashtable/exists?",
+        [PRIMITIVE_HASHTABLE_FREE]       = "hashtable/free",
+        [PRIMITIVE_HASHTABLE_LENGTH]     = "hashtable/length",
+        [PRIMITIVE_HASHTABLE_P]          = "hashtable?",
+        [PRIMITIVE_HASHTABLE_REF]        = "hashtable/ref",
+        [PRIMITIVE_HASHTABLE_SET_M]      = "hashtable/set!",
+        [PRIMITIVE_HASHTABLE_USED]       = "hashtable/used",
+        [PRIMITIVE_IF]                   = "if",
+        [PRIMITIVE_INTEGER_P]            = "integer?",
+        [PRIMITIVE_IS_P]                 = "is?",
+        [PRIMITIVE_LAMBDA]               = "lambda",
+        [PRIMITIVE_MUL]                  = "*",
+        [PRIMITIVE_NEW_ARRAY]            = "new-array",
+        [PRIMITIVE_NEW_HASHTABLE]        = "new-hashtable",
+        [PRIMITIVE_NEW_INSTANCE]         = "new-instance",
+        [PRIMITIVE_NEW_RECORD]           = "new-record",
+        [PRIMITIVE_NEW_SEGMENT]          = "new-segment",
+        [PRIMITIVE_NEW_SYMBOL_SEGMENT]   = "segment->symbol",
+        [PRIMITIVE_NULL_P]               = "null?",
+        [PRIMITIVE_PAIR_P]               = "pair?",
+        [PRIMITIVE_QUOTE]                = "quote",
+        [PRIMITIVE_RECORD_INSTANCE_OF_P] = "record/instance-of?",
+        [PRIMITIVE_RECORD_INSTANCE_P]    = "record%instance?",
+        [PRIMITIVE_RECORD_LENGTH]        = "record/length",
+        [PRIMITIVE_RECORD_P]             = "record?",
+        [PRIMITIVE_RECORD_REF]           = "record/ref",
+        [PRIMITIVE_RECORD_SET_M]         = "record/set!",
+        [PRIMITIVE_RECORD_TEMPLATE]      = "record/template",
+        [PRIMITIVE_RECORD_TEMPLATE_P]    = "record%template?",
+        [PRIMITIVE_ROOT_ENVIRONMENT]     = "root-environment",
+        [PRIMITIVE_SEGMENT_LENGTH]       = "segment/length",
+        [PRIMITIVE_SEGMENT_P]            = "segment?",
+        [PRIMITIVE_SEGMENT_RESIZE_M]     = "segment/resize!",
+        [PRIMITIVE_SET_M]                = "set!",
+        [PRIMITIVE_SUB]                  = "-",
+        [PRIMITIVE_SYMBOL_KEY]           = "symbol/key",
+        [PRIMITIVE_SYMBOL_P]             = "symbol?",
+        [PRIMITIVE_SYMBOL_SEGMENT]       = "symbol/segment",
+        [PRIMITIVE_TRUE_P]               = "true?",
+        [PRIMITIVE_VOID_P]               = "void?",
+        [PRIMITIVE_VOV]                  = "vov",
 };
 
 @ @<Global...@>=
@@ -4012,7 +4125,7 @@ error_code
 init_stack_array (cell *ret)
 {
         error_code reason;
-        orreturn(new_array(1 + (64 * CELL_BYTES), fix(0), ret));
+        orreturn(new_array(1 + (64 * CELL_BYTES), ret));
         array_base(*ret)[0] = fix(1);
         return LERR_NONE;
 }
@@ -4260,13 +4373,13 @@ interpret_special (instruction  ins,
                    cell        *ret)
 {
         static cell look[] = { NIL, LFALSE, LTRUE, VOID, LEOF, INVALID0,
-                INVALID1, UNDEFINED };
+                INVALID1, INVALID2 };
         cell value;
 
         if (VAL(ins, argc) < 0 || VAL(ins, argc) > sizeof (look))
                 return LERR_INCOMPATIBLE;
         value = look[VAL(ins, argc)];
-        if (fixed_p(value) || !special_p(value) || !valid_p(value))
+        if (fixed_p(value) || !special_p(value) || !defined_p(value))
                 return LERR_INCOMPATIBLE;
         *ret = value;
         return LERR_NONE;
@@ -4506,6 +4619,11 @@ case OP_ENVIRONMENT_P:
         VM_Result = predicate(environment_p(VM_Arg1));
         ortrap(interpret_save(ins, VM_Result));
         break;
+case OP_TABLE_P:
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        VM_Result = predicate(hashtable_p(VM_Arg1));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
 case OP_INTEGER_P:
         ortrap(interpret_solo_argument(ins, &VM_Arg1));
         VM_Result = predicate(integer_p(VM_Arg1));
@@ -4547,21 +4665,27 @@ case OP_SYNTAX_P:
 @<Carry out...@>=
 case OP_EXISTS_P:@;
 case OP_LOOKUP:@;
-        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Table */
+        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Record/Table */
         ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Label */
-        if (environment_p(VM_Arg1)) {
+#if 0
+        printf("search "); psym(VM_Arg2); printf("\n");
+#endif
+        if (environment_p(VM_Arg1))
                 reason = env_search(VM_Arg1, VM_Arg2, &VM_Result);
-                if (reason == LERR_MISSING && OP(ins) == OP_EXISTS_P)
-                        VM_Result = LFALSE;
-                else if (failure_p(reason))
-                        goto Trap;
-                else if (OP(ins) == OP_EXISTS_P)
-                        VM_Result = LTRUE;
-        } else {
-                ortrap(hashtable_search(VM_Arg1, VM_Arg2, &VM_Result));
-                if (OP(ins) == OP_EXISTS_P)
-                        VM_Result = predicate(defined_p(VM_Result));
+        else {
+                if (instance_p(VM_Arg1))
+                        VM_Arg1 = record_template(VM_Arg1);
+                else
+                        assert(hashtable_p(VM_Arg1) || template_p(VM_Arg1));
+                reason = hashtable_search(VM_Arg1, VM_Arg2, &VM_Result);
         }
+        if (OP(ins) == OP_EXISTS_P) {
+                if (failure_p(reason) && reason != LERR_MISSING)
+                        goto Trap;
+                else
+                        VM_Result = predicate(reason == LERR_NONE);
+        } else if (failure_p(reason))
+                goto Trap;
         ortrap(interpret_save(ins, VM_Result));
         break;
 case OP_EXTEND:@;
@@ -4617,6 +4741,29 @@ case OP_SYNTAX:@;
         assert(symbol_p(VM_Arg1));
         assert(defined_p(VM_Arg2));
         ortrap(new_atom(VM_Arg1, VM_Arg2, FORM_SYNTAX, &VM_Result));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+
+@ @<Carry out...@>=
+case OP_ARRAY:@;
+        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Length */
+        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Filler */
+        assert(fixed_p(VM_Arg1) && fixed_value(VM_Arg1) >= 0
+                && fixed_value(VM_Arg1) <= ARRAY_MAX);
+        assert(defined_p(VM_Arg2));
+        ortrap(new_array_imp(fixed_value(VM_Arg1), VM_Arg2, FORM_ARRAY,
+                &VM_Result));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+
+case OP_RESIZE_M:@;
+        ortrap(interpret_argument(ins, 0, &VM_Result)); /* Array */
+        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* New length */
+        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Filler */
+        assert(fixed_p(VM_Arg1) && fixed_value(VM_Arg1) >= 0
+                && fixed_value(VM_Arg1) <= ARRAY_MAX);
+        assert(defined_p(VM_Arg2));
+        ortrap(array_resize_m(VM_Result, fixed_value(VM_Arg1), VM_Arg2));
         ortrap(interpret_save(ins, VM_Result));
         break;
 
@@ -4697,7 +4844,7 @@ new_closure (cell  sign,
         assert(null_p(sign) || pair_p(sign));
         assert(null_p(body) || pair_p(body));
         orreturn(new_pointer(Interpret_Closure, &start));
-        orreturn(new_array_imp(CLOSURE_LENGTH, fix(0), NIL, FORM_CLOSURE, ret));
+        orreturn(new_array_imp(CLOSURE_LENGTH, NIL, FORM_CLOSURE, ret));
         array_base(*ret)[CLOSURE_ADDRESS] = start;
         array_base(*ret)[CLOSURE_BODY] = body;
         array_base(*ret)[CLOSURE_SIGNATURE] = sign;
@@ -4801,8 +4948,12 @@ case OP_LENGTH:@;
                 new_int_c(segment_length_c(VM_Arg1), &VM_Result);
         else if (symbol_p(VM_Arg1))
                 new_int_c(symbol_length_c(VM_Arg1), &VM_Result);
-        else if (array_p(VM_Arg1))
+        else if (array_p(VM_Arg1) || instance_p(VM_Arg1))
                 new_int_c(array_length_c(VM_Arg1), &VM_Result);
+        else if (template_p(VM_Arg1))
+                new_int_c(hashtable_used_c(VM_Arg1), &VM_Result);
+        else if (hashtable_p(VM_Arg1))
+                new_int_c(hashtable_length_c(VM_Arg1), &VM_Result);
         else if (fixed_p(VM_Arg1))
                 VM_Result = fix(0);
         else if (integer_p(VM_Arg1))
@@ -4889,6 +5040,116 @@ case OP_MUL:
         ortrap(interpret_save(ins, VM_Result));
         break;
 
+@
+RECORD? <target>,<object>,()
+RECORD? <target>,<object>,<object>
+RECORD? <target>,<object>,<record>
+@<Carry out...@>=
+case OP_RECORD_P:
+        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Object */
+        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* NIL Arg1 Template */
+        if (null_p(VM_Arg2))
+                VM_Result = predicate(template_p(VM_Arg1));
+        else if (template_p(VM_Arg2)) {
+                assert(template_p(VM_Arg2));
+                VM_Result = predicate(record_template(VM_Arg1) == VM_Arg2);
+        } else {
+                assert(VM_Arg1 == VM_Arg2);
+                VM_Result = predicate(record_p(VM_Arg1));
+        }
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+
+@
+RECORD <target>,<hashtable>
+RECORD <target>,<record>
+@<Carry out...@>=
+case OP_RECORD:
+        ortrap(interpret_solo_argument(ins, &VM_Arg1)); /* Hashtable/Record */
+        if (template_p(VM_Arg1))
+                ortrap(new_instance(VM_Arg1, &VM_Result));
+        else if (instance_p(VM_Arg1))
+                ortrap(new_instance(record_template(VM_Arg1), &VM_Result));
+        else
+                ortrap(new_record(VM_Arg1, &VM_Result));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+
+@
+REF <target>,<array>,<index>
+REF <target>,<instance>,<index>
+@<Carry out...@>=
+case OP_REF:
+        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Array/Instance */
+        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Index */
+        assert(array_p(VM_Arg1) || instance_p(VM_Arg1));
+        assert(fixed_p(VM_Arg2));
+        assert(fixed_value(VM_Arg2) >= 0);
+        if (array_p(VM_Arg1))
+                assert(fixed_value(VM_Arg2) < array_length_c(VM_Arg1));
+        else
+                assert(fixed_value(VM_Arg2) < record_template_length(VM_Arg1));
+        VM_Result = array_base(VM_Arg1)[fixed_value(VM_Arg2)];
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+
+@
+SET! <array>,<index>,<object>
+SET! <instance>,<index>,<object>
+@<Carry out...@>=
+case OP_SET_M:
+        ortrap(interpret_argument(ins, 0, &VM_Arg1)); /* Array/Instance */
+        ortrap(interpret_argument(ins, 1, &VM_Arg2)); /* Index */
+        ortrap(interpret_argument(ins, 2, &VM_Result)); /* Value */
+        assert(array_p(VM_Arg1) || instance_p(VM_Arg1));
+        assert(fixed_p(VM_Arg2));
+        assert(fixed_value(VM_Arg2) >= 0);
+        if (array_p(VM_Arg1))
+                assert(fixed_value(VM_Arg2) < array_length_c(VM_Arg1));
+        else
+                assert(fixed_value(VM_Arg2) < record_template_length(VM_Arg1));
+        array_base(VM_Arg1)[fixed_value(VM_Arg2)] = VM_Result;
+        break;
+
+@ @<Carry out...@>=
+case OP_TEMPLATE:
+        ortrap(interpret_solo_argument(ins, &VM_Arg1)); /* Instance */
+        assert(instance_p(VM_Arg1));
+        VM_Result = record_template(VM_Arg1);
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+
+@ @<Carry out...@>=
+case OP_ERASE_M:
+        ortrap(interpret_argument(ins, 0, &VM_Arg1)); /* Hashtable */
+        ortrap(interpret_argument(ins, 1, &VM_Arg2)); /* Label */
+        ortrap(interpret_argument(ins, 2, &VM_Result)); /* Required? */
+        assert(hashtable_p(VM_Arg1));
+        assert(symbol_p(VM_Arg2));
+        assert(boolean_p(VM_Result));
+        ortrap(hashtable_erase_m(VM_Arg1, VM_Arg2, true_p(VM_Result)));
+        break;
+
+@ @<Carry out...@>=
+case OP_FREE:
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        if (hashtable_p(VM_Arg1))
+                new_int_c(hashtable_free_c(VM_Arg1), &VM_Result);
+        else
+                assert(hashtable_p(VM_Arg1));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+
+@ @<Carry out...@>=
+case OP_BLOCKED:
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        assert(hashtable_p(VM_Arg1));
+        new_int_c(hashtable_blocked_c(VM_Arg1), &VM_Result);
+        ortrap(interpret_save(ins, VM_Result));
+        break;
+
+
+
 @* Assembly Statement Parser.
 
 @
@@ -4970,8 +5231,7 @@ new_statement_imp (cell  op,
 {
         error_code reason;
         assert(null_p(op) || opcode_p(op));
-        orreturn(new_array_imp(STATEMENT_LENGTH, fix(0), NIL,
-                FORM_STATEMENT, ret));
+        orreturn(new_array_imp(STATEMENT_LENGTH, NIL, FORM_STATEMENT, ret));
         array_base(*ret)[STATEMENT_INSTRUCTION] = op;
         return LERR_NONE;
 }
@@ -5082,7 +5342,7 @@ statement_set_argument_m (cell o,
         assert(statement_p(o));
         assert(id >= 0 && id <= 2);
         assert(cat >= 0 && cat < ARGUMENT_LENGTH);
-        assert(!special_p(o) || valid_p(object));
+        assert(defined_p(object));
         return new_atom(fix(cat), object, FORM_ARGUMENT,
                 array_base(o) + STATEMENT_COVEN + id);
 }
@@ -5877,21 +6137,6 @@ pstas_argument_special (statement_parser *pstate,
                 orassert(statement_set_argument_m(pstate->partial,
                         pstate->argument, ARGUMENT_OBJECT, LTRUE));
                 return pstas_pre_next_argument(pstate, offset + 1);
-        case 'U':
-                if (offset + 8 < pstate->end
-                    && pstas_source_byte(pstate, offset + 1) == 'N'
-                    && pstas_source_byte(pstate, offset + 2) == 'D'
-                    && pstas_source_byte(pstate, offset + 3) == 'E'
-                    && pstas_source_byte(pstate, offset + 4) == 'F'
-                    && pstas_source_byte(pstate, offset + 5) == 'I'
-                    && pstas_source_byte(pstate, offset + 5) == 'N'
-                    && pstas_source_byte(pstate, offset + 6) == 'E'
-                    && pstas_source_byte(pstate, offset + 8) == 'D') {
-                        orassert(statement_set_argument_m(pstate->partial,
-                                pstate->argument, ARGUMENT_OBJECT, UNDEFINED));
-                        return pstas_pre_next_argument(pstate, offset + 9);
-                } else
-                        return pstas_invalid(pstate, offset);
         case 'V':
                 if (offset + 3 < pstate->end
                     && pstas_source_byte(pstate, offset + 1) == 'O'
@@ -6111,15 +6356,15 @@ new_assembly_progress (cell *ret)
         cell backward, forward, commentary, objectdb;
         error_code reason;
 
-        orreturn(new_array(100, fix(0), &body));
+        orreturn(new_array(100, &body));
         orreturn(new_hashtable(0, &far_address));
         orreturn(new_hashtable(0, &far_argument));
-        orreturn(new_array(10, fix(0), &backward));
-        orreturn(new_array(10, fix(0), &forward));
-        orreturn(new_array(0, fix(0), &objectdb));
+        orreturn(new_array(10, &backward));
+        orreturn(new_array(10, &forward));
+        orreturn(new_array(0, &objectdb));
         orreturn(new_hashtable(0, &commentary));
         orreturn(new_segment(0, 0, &blob));
-        orreturn(new_array_imp(ASSEMBLY_PROGRESS_LENGTH, fix(0), NIL,
+        orreturn(new_array_imp(ASSEMBLY_PROGRESS_LENGTH, NIL,
                 FORM_ASSEMBLY, ret));
         array_base(*ret)[ASSEMBLY_STATUS] = fix(ASSEMBLY_STATUS_IN_PROGRESS);
         array_base(*ret)[ASSEMBLY_PROGRESS_BODY] = body;
@@ -6200,9 +6445,13 @@ assembly_has_far_address_p (cell o,
         error_code reason;
         assert(assembly_in_progress_p(o));
         assert(symbol_p(label));
-        orreturn(hashtable_search(array_base(o)[ASSEMBLY_PROGRESS_FAR_ADDRESS],
-                label, &found));
-        return defined_p(found);
+        reason = hashtable_search(array_base(o)[ASSEMBLY_PROGRESS_FAR_ADDRESS],
+                label, &found);
+        if (!failure_p(reason))
+                return true;
+        else if (reason == LERR_MISSING)
+                return false;
+        assert(!"unreachable");
 }
 
 @ @c
@@ -6250,12 +6499,14 @@ assembly_far_argument_list (cell  o,
 
         assert(assembly_in_progress_p(o));
         assert(symbol_p(label));
-        orreturn(hashtable_search(array_base(o)[ASSEMBLY_PROGRESS_FAR_ARGUMENT],
-                label, &found));
-        if (pair_p(found))
+        reason = hashtable_search(array_base(o)[ASSEMBLY_PROGRESS_FAR_ARGUMENT],
+                label, &found);
+        if (!failure_p(reason))
                 *ret = A(found)->dex;
-        else
+        else if (reason == LERR_MISSING)
                 *ret = NIL;
+        else
+                return reason;
         for (found = *ret; !null_p(found); found = A(found)->dex) {
                 assert(pair_p(found));
                 assert(pair_p(A(found)->sin));
@@ -6280,9 +6531,11 @@ assembly_append_far_argument_m (cell o,
         assert(integer_p(lineno));
         assert(argid <= 1);
         orreturn(cons(lineno, fix(argid), &tuple));
-        orreturn(hashtable_search(array_base(o)[ASSEMBLY_PROGRESS_FAR_ARGUMENT],
-                label, &found));
-        replace = defined_p(found);
+        reason = hashtable_search(array_base(o)[ASSEMBLY_PROGRESS_FAR_ARGUMENT],
+                label, &found);
+        replace = !failure_p(reason);
+        if (!replace && reason != LERR_MISSING)
+                return reason;
         if (replace) {
                 assert(pair_p(found) && A(found)->sin == label);
                 orreturn(cons(tuple, A(found)->dex, &tuple));
@@ -6433,7 +6686,7 @@ assembly_install_object_m (cell  o,
                         return LERR_NONE;
                 }
         }
-        array_resize_m(objectdb, length + 1, UNDEFINED);
+        array_resize_m(objectdb, length + 1, VOID);
         array_base(objectdb)[length] = object;
         *ret = length;
         return LERR_NONE;
@@ -6519,9 +6772,11 @@ assembly_commentary (cell  o,
         else
                 assert(symbol_p(lineno));
         table = array_base(o)[ASSEMBLY_PROGRESS_COMMENTARY];
-        orreturn(hashtable_search(table, lineno, ret));
-        if (undefined_p(*ret))
+        reason = hashtable_search(table, lineno, ret);
+        if (reason == LERR_MISSING)
                 *ret = NIL;
+        else if (failure_p(reason))
+                return reason;
         return LERR_NONE;
 }
 
@@ -6765,8 +7020,7 @@ assembly_finish_m (cell  o,
         @<Collect pending comments and reduce the code array@>@;
         @<Update in-page far links to relative@>@;
         @<Record remaining required far links@>@;
-        orreturn(new_array_imp(ASSEMBLY_READY_LENGTH, fix(0), NIL,
-                FORM_ASSEMBLY, ret));
+        orreturn(new_array_imp(ASSEMBLY_READY_LENGTH, NIL, FORM_ASSEMBLY, ret));
         array_base(*ret)[ASSEMBLY_STATUS] = fix(ASSEMBLY_STATUS_READY);
         array_base(*ret)[ASSEMBLY_READY_BODY] = body;
         array_base(*ret)[ASSEMBLY_READY_EXPORT] = exportdb;
@@ -6802,9 +7056,11 @@ for (i = 0; i < hashtable_length_c(far_address); i++) {
                 orreturn(cons(A(next)->sin, lineto, &tuple));
                 orreturn(hashtable_save_m(exportdb, tuple, false));
         }
-        orreturn(hashtable_search(far_argument, A(next)->sin, &fromlist));
-        if (undefined_p(fromlist))
+        reason = hashtable_search(far_argument, A(next)->sin, &fromlist);
+        if (reason == LERR_MISSING)
                 continue;
+        else if (failure_p(reason))
+                return reason;
         assert(pair_p(fromlist) && A(fromlist)->sin == A(next)->sin);
         fromlist = A(fromlist)->dex;
         for (; !null_p(fromlist); fromlist = A(fromlist)->dex) {
@@ -6826,7 +7082,7 @@ for (i = 0; i < hashtable_length_c(far_address); i++) {
 orreturn(new_hashtable(0, &require));
 for (i = 0; i < hashtable_length_c(far_argument); i++) {
         next = hashtable_base(far_argument)[i];
-        if (null_p(next) || !defined_p(next))
+        if (null_p(next) || void_p(next))
                 continue;
         orreturn(cons(A(next)->sin, A(next)->dex, &tuple));
         orreturn(hashtable_save_m(require, tuple, false));
@@ -6872,8 +7128,8 @@ Trap:
 
 @ @<Prepare a new code page@>=
 orreturn(alloc_mem(NULL, CODE_PAGE_LENGTH, CODE_PAGE_LENGTH, (void **) &page));
-reason = new_array_imp(ASSEMBLY_PROGRESS_LENGTH, fix(0), NIL,
-        FORM_ASSEMBLY, &new_program);
+reason = new_array_imp(ASSEMBLY_PROGRESS_LENGTH, NIL, FORM_ASSEMBLY,
+        &new_program);
 if (failure_p(reason)) {
         free_mem((void *) page);
         return reason;
@@ -6918,10 +7174,6 @@ for (i = 0; i < hashtable_length_c(array_base(o)[ASSEMBLY_READY_REQUIRE]); i++) 
         if (null_p(label) || !defined_p(label))
                 continue;
         ortrap(hashtable_search(Program_Export_Table, A(label)->sin, &found));
-        if (undefined_p(found)) {
-                reason = LERR_MISSING;
-                goto Trap;
-        }
 }
 
 @ Table of (label . address). No need to save/copy |Program_Export_Base|,
@@ -6950,7 +7202,7 @@ ortrap(copy_hashtable(Program_Export_Table, &new_table));
 next_export = Program_Export_Free;
 for (i = 0; i < hashtable_length_c(array_base(o)[ASSEMBLY_READY_EXPORT]); i++) {
         label = hashtable_base(array_base(o)[ASSEMBLY_READY_EXPORT])[i];
-        if (null_p(label) || undefined_p(label))
+        if (null_p(label) || void_p(label))
                 continue;
 @#
         assert(pair_p(label));
@@ -8445,7 +8697,7 @@ llt_Hashtable__Save_prepare (llt_header *th)
         orfail(new_hashtable(tc->new_length, &tc->test_table));
         tc->pre_length = hashtable_length_c(tc->test_table);
         for (i = 0; i < LLT_HASHTABLE_SEED; i++) {
-                if (defined_p(tc->seed[i])) {
+                if (!void_p(tc->seed[i])) {
                         j = i * LLT_HASHTABLE_FACTOR;
                         orfail(llt_Hashtable__datumfn(j, tc->seed[i], &tmp));
                         orfail(hashtable_save_m(tc->test_table, tmp, false));
@@ -8485,7 +8737,7 @@ llt_Hashtable__Save_validate_success (llt_header *th)
 @#
         scanned = true;
         for (i = 0; scanned && i < LLT_HASHTABLE_SEED; i++) {
-                if (defined_p(tc->seed[i])) {
+                if (!void_p(tc->seed[i])) {
                         j = i * LLT_HASHTABLE_FACTOR;
                         if (failure_p(llt_Hashtable__datumfn(j, NIL, &hack)))
                                 return LLT_RUN_ABORT;
@@ -8509,8 +8761,8 @@ llt_Hashtable__Save_validate_failure (llt_header *th)
         cell found;
 
         tap_ok(th, "fails", tc->reason == tc->expect, NIL);
-        orfail(hashtable_search(tc->test_table, A(tc->test_datum)->sin,
-                &found));
+        hashtable_search(tc->test_table, A(tc->test_datum)->sin,
+                &found);
         tap_ok(th, "nothing is saved", found != tc->test_datum, found);
         return LLT_RUN_CONTINUE;
 }
@@ -8542,7 +8794,7 @@ llt_Hashtable__Save (llt_header  *suite,
                 tc->new_length = HASHTABLE_TINY - 1;
                 tc->test_replace = false;
                 for (j = 0; j < LLT_HASHTABLE_SEED; j++)
-                        tc->seed[j] = UNDEFINED;
+                        tc->seed[j] = VOID;
                 orfail(llt_Hashtable__datumfn(2 * LLT_HASHTABLE_FACTOR,
                         fix(-1), &tc->test_datum));
         }
@@ -8739,7 +8991,7 @@ llt_Evaluator__Immediate (llt_header  *suite,
         }
 
         tc[3].name = "evaluate symbol, missing";
-        tc[3].want = UNDEFINED;
+        tc[3].want = VOID;
         if (full)
                 orreturn(new_symbol_const(LLT_LOOKUP_MISSING,
                         &tc[3].expression));
