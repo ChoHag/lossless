@@ -13,7 +13,7 @@
 #       As well as being used within a subroutine, primarily to
 #       spill general-purpose registers so that it can use them,
 #       the stack is used between subroutines by pushing an address
-#       to return to (eg. obtained with the PEND operator) *after*
+#       to return to (eg. obtained with the LOAD operator) *after*
 #       any data it will need that won't be in other registers.
 #
 #       To evaluate an expression push the address to return the
@@ -101,11 +101,11 @@ Combine/Start
         CDR     tmp,expr
         PUSH!   clink,tmp       Extract and stack the remainder of the
 ;                               (uncombined) list.
-        PEND    tmp,@Combine/Dispatch
+        LOAD    tmp,@Combine/Dispatch
         PUSH!   clink,tmp       Continue from Combine/Dispatch after evaluation.
         CAR     expr,expr       The combiner which determines what to do with
 ;                               the arguments just saved.
-        PEND    ip,@!Evaluate   Recurse into the evaluator.
+        LOAD    ip,@!Evaluate   Recurse into the evaluator.
 
 #       When the evaluator has determined what the combiner is, control
 #       reaches Combine/Dispatch. This routine simply jumps to
@@ -227,15 +227,15 @@ Combine-Closure/signature/next
 #       (In) Arguments: Unscanned arguments
 #       (In) r1: Binding label
 
-1h      PEND    tmp,@Combine/Evaluate-Argument
+1h      LOAD    tmp,@Combine/Evaluate-Argument
         CONS    expr,tmp,expr
         CAR     tmp,args
         CONS    expr,tmp,expr
         CDR     args,args
-        PEND    tmp,@Combine/Append-Argument
+        LOAD    tmp,@Combine/Append-Argument
         CONS    expr,tmp,expr
         CONS    expr,r1,expr
-        PEND    ip,@Combine-Closure/signature/next
+        LOAD    ip,@Combine-Closure/signature/next
 
 #       If the argument strategy wasn't eval the next most familiar
 #       is eval-list, which is an instruction to evaluate all of
@@ -258,7 +258,7 @@ Combine-Closure/signature/eval-list?
         LOAD    tmp,'eval-list
         CMPIS?  tmp,acc,tmp
         JUMPNOT tmp,@Combine-Closure/signature/copy?
-        PEND    tmp,@Combine/Evaluate-List/Start
+        LOAD    tmp,@Combine/Evaluate-List/Start
         CONS    expr,tmp,expr
 
 #       Similar to the loop for the eval strategy this pushes each
@@ -274,14 +274,14 @@ Combine-Closure/signature/eval-list/next
         PAIR?   tmp,args
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand   Improper list
-1h      PEND    tmp,@Combine/Evaluate-Argument
+1h      LOAD    tmp,@Combine/Evaluate-Argument
         CONS    expr,tmp,expr
         CAR     tmp,args
         CONS    expr,tmp,expr
         CDR     args,args
-        PEND    tmp,@Combine/Evaluate-List/Append-Argument
+        LOAD    tmp,@Combine/Evaluate-List/Append-Argument
         CONS    expr,tmp,expr
-        PEND    ip,@Combine-Closure/signature/eval-list/next
+        LOAD    ip,@Combine-Closure/signature/eval-list/next
 
 #       When the eval-list strategy has finished scanning the source
 #       arguments the final directive which will ready the list for
@@ -291,10 +291,10 @@ Combine-Closure/signature/eval-list/next
 #       (In) r1: Binding label
 
 Combine-Closure/signature/eval-list/finish
-        PEND    tmp,@Combine/Evaluate-List/Finish
+        LOAD    tmp,@Combine/Evaluate-List/Finish
         CONS    expr,tmp,expr
         CONS    expr,r1,expr
-        PEND    ip,@Combine-Closure/signature/next
+        LOAD    ip,@Combine-Closure/signature/next
 
 #       The eval and eval-list strategies cover the closures that
 #       will be encountered most of the time so it'll be helpful
@@ -344,17 +344,17 @@ Combine-Closure/signature/finish
 1h      POP!    r1,clink        Restore spilled registers.
         POP!    r0,clink
         POP!    acc,clink       Restore the closure.
-        PEND    tmp,@Combine/Finish
+        LOAD    tmp,@Combine/Finish
         PUSH!   clink,tmp
         PUSH!   clink,acc
-        PEND    tmp,@Combine-Closure/Ready
+        LOAD    tmp,@Combine-Closure/Ready
         PUSH!   clink,tmp
 1h      CMPIS?  tmp,expr,()     Finished?
         JUMPIF  tmp,@1f
         CAR     tmp,expr        Move the next item from Expression.
         PUSH!   clink,tmp
         CDR     expr,expr
-        PEND    ip,@1b
+        LOAD    ip,@1b
 1h      POP!    ip,clink        Arguments is now ().
 
 #       In order to evaluate an argument it gets popped off the
@@ -367,7 +367,7 @@ Combine-Closure/signature/finish
 
 Combine/Evaluate-Argument
         POP!    expr,clink
-        PEND    ip,@!Evaluate
+        LOAD    ip,@!Evaluate
 
 #       When an argument has been evaluated its result is in the
 #       Accumulator and it's pushed onto Arguments along with the
@@ -435,7 +435,7 @@ Combine/Evaluate-List/Finish
         CAR     tmp,expr
         CONS    acc,tmp,acc
         CDR     expr,expr
-        PEND    ip,@1b
+        LOAD    ip,@1b
 1h      POP!    tmp,clink
         CONS    acc,tmp,acc
         CONS    args,acc,args
@@ -473,10 +473,10 @@ Combine-Closure/Ready
         CAR     tmp,args
         DEFINE! env,tmp
         CDR     args,args
-        PEND    ip,@1b
+        LOAD    ip,@1b
 1h      PUSH!   clink,r0        Prepare to enter !Primitive/do
         BODY    r0,expr         Closure body
-        PEND    ip,@!Primitive/do
+        LOAD    ip,@!Primitive/do
 
 #       Returning to the remaining closure signature strategies,
 #       the copy strategy copies the argument from the source
@@ -499,13 +499,13 @@ Combine-Closure/signature/copy?
         PAIR?   tmp,args
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
-1h      PEND    tmp,@Combine/Copy-Argument
+1h      LOAD    tmp,@Combine/Copy-Argument
         CONS    expr,tmp,expr
         CAR     tmp,args
         CONS    expr,tmp,expr
         CDR     args,args
         CONS    expr,r1,expr
-        PEND    ip,@Combine-Closure/signature/next
+        LOAD    ip,@Combine-Closure/signature/next
 
 #       The copy-list strategy directs the evaluator to bind the
 #       remaining source arguments without any further processing
@@ -522,12 +522,12 @@ Combine-Closure/signature/copy-list?
         LOAD    tmp,'copy-list
         CMPIS?  tmp,acc,tmp
         JUMPNOT tmp,@Combine-Closure/signature/environment?
-        PEND    tmp,@Combine/Copy-Argument
+        LOAD    tmp,@Combine/Copy-Argument
         CONS    expr,tmp,expr
         CONS    expr,args,expr
         CONS    expr,r1,expr
         LOAD    args,()
-        PEND    ip,@Combine-Closure/signature/next
+        LOAD    ip,@Combine-Closure/signature/next
 
 #       A closure's strategies describe the arguments which it
 #       requires. It may also dictate that additional evaluator
@@ -550,10 +550,10 @@ Combine-Closure/signature/environment?
         CMPIS?  tmp,args,()
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
-1h      PEND    tmp,@Combine/Copy-Environment
+1h      LOAD    tmp,@Combine/Copy-Environment
         CONS    expr,tmp,expr
         CONS    expr,r1,expr
-        PEND    ip,@Combine-Closure/signature/next
+        LOAD    ip,@Combine-Closure/signature/next
 
 #       Capturing the run-time environment is a simple matter of
 #       copying it into the Accumulator.
@@ -565,7 +565,7 @@ Combine-Closure/signature/environment?
 
 Combine/Copy-Environment
         LOAD    acc,env
-        PEND    ip,@Combine/Append-Argument
+        LOAD    ip,@Combine/Append-Argument
 
 #       The only strategy remaining strategy which Lossless supports
 #       is to capture the run-time continuation of the closure's
@@ -586,10 +586,10 @@ Combine-Closure/signature/continuation?
 1h      CMPIS?  tmp,args,()
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand   Too many arguments.
-1h      PEND    tmp,@Combine/Copy-Continuation
+1h      LOAD    tmp,@Combine/Copy-Continuation
         CONS    expr,tmp,expr
         CONS    expr,r1,expr
-        PEND    ip,@Combine-Closure/signature/next
+        LOAD    ip,@Combine-Closure/signature/next
 
 #       Capturing the run-time continuation is also not supported.
 
@@ -638,15 +638,15 @@ Combine-Primitive/signature/next
         PAIR?   tmp,args
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
-1h      PEND    tmp,@Combine/Evaluate-Argument
+1h      LOAD    tmp,@Combine/Evaluate-Argument
         CONS    expr,tmp,expr
         CAR     tmp,args
         CONS    expr,tmp,expr
         CDR     args,args
-        PEND    tmp,@Combine/Append-Argument
+        LOAD    tmp,@Combine/Append-Argument
         CONS    expr,tmp,expr
         CONS    expr,r1,expr
-        PEND    ip,@Combine-Primitive/signature/next
+        LOAD    ip,@Combine-Primitive/signature/next
 
 #       Also practically identical to Combine-Closure/signature/copy?.
 
@@ -662,13 +662,13 @@ Combine-Primitive/signature/copy?
         PAIR?   tmp,args
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand   Improper list
-1h      PEND    tmp,@Combine/Copy-Argument
+1h      LOAD    tmp,@Combine/Copy-Argument
         CONS    expr,tmp,expr
         CAR     tmp,args
         CONS    expr,tmp,expr
         CDR     args,args
         CONS    expr,r1,expr
-        PEND    ip,@Combine-Primitive/signature/next
+        LOAD    ip,@Combine-Primitive/signature/next
 
 #       (In) Accumulator: Strategy label
 #       (In) Arguments: Unscanned arguments
@@ -692,13 +692,13 @@ Combine-Primitive/signature/optional?
         JUMPIF  tmp,@2f
         TRAP    'incompatible-operand
 
-2h      PEND    tmp,@Combine/Copy-Argument
+2h      LOAD    tmp,@Combine/Copy-Argument
         CONS    expr,tmp,expr
         CONS    expr,args,expr
         CONS    expr,r1,expr
         LOAD    args,()
 
-        PEND    ip,@Combine-Primitive/signature/finish
+        LOAD    ip,@Combine-Primitive/signature/finish
 
 #       The only argument strategy remaining is copy-list which
 #       will also always be the last strategy.
@@ -711,7 +711,7 @@ Combine-Primitive/signature/optional?
 #       (Out) Arguments: ()
 
 Combine-Primitive/signature/copy-list?
-        PEND    tmp,@Combine/Copy-Argument
+        LOAD    tmp,@Combine/Copy-Argument
         CONS    expr,tmp,expr
         CONS    expr,args,expr
         CONS    expr,r1,expr
@@ -733,17 +733,17 @@ Combine-Primitive/signature/finish
         POP!    r1,clink
         POP!    r0,clink
         POP!    expr,clink
-        PEND    tmp,@Combine/Finish
+        LOAD    tmp,@Combine/Finish
         PUSH!   clink,tmp
         PUSH!   clink,expr
-        PEND    tmp,@Combine-Primitive/Ready
+        LOAD    tmp,@Combine-Primitive/Ready
         PUSH!   clink,tmp
 1h      CMPIS?  tmp,args,()
         JUMPIF  tmp,@1f
         CAR     tmp,args
         PUSH!   clink,tmp
         CDR     args,args
-        PEND    ip,@1b
+        LOAD    ip,@1b
 1h      POP!    ip,clink        Args is now ()
 
 #       The primitives are defined such that the last argument,
@@ -961,7 +961,7 @@ Primitive/lambda/validate-formals/next
 ;                               binding.
         CONS    r4,tmp,r4       Include the strategy in the signature.
         CDR     r0,r0           Next formal.
-        PEND    ip,@Primitive/lambda/validate-formals/next
+        LOAD    ip,@Primitive/lambda/validate-formals/next
 
 #       If the lambda formals was a single symbol, or an improper
 #       list with a symbol in the dotted tail position, the signature
@@ -982,7 +982,7 @@ Primitive/lambda/validate-formals/consume
         CONS    r2,r2,()
         CONS    tmp,r0,r2
         CONS    r4,tmp,r4
-        PEND    ip,@Primitive/lambda/validate-formals/finish
+        LOAD    ip,@Primitive/lambda/validate-formals/finish
 
 #       After validating the lambda formals a signature representing
 #       them has been constructed in r4 in reverse which is copied
@@ -1004,12 +1004,12 @@ Primitive/lambda/validate-formals/finish
         CAR     tmp,r4
         CONS    r0,tmp,r0
         CDR     r4,r4
-        PEND    ip,@1b
+        LOAD    ip,@1b
 1h      POP!    r4,clink
         POP!    r3,clink
         POP!    r2,clink
         POP!    r1,clink
-        PEND    ip,@Primitive/vov/validate-body
+        LOAD    ip,@Primitive/vov/validate-body
 
 #       A vov expression creates a closure with a richer possible
 #       signature than the strategies available to a lambda expression.
@@ -1049,7 +1049,7 @@ Primitive/lambda/validate-formals/finish
         PUSH!   clink,r4
         TABLE   r3,0            Collected formal labels
         TABLE   r4,0            Collected state requests
-        PEND    ip,@Primitive/vov/validate-formals/first
+        LOAD    ip,@Primitive/vov/validate-formals/first
 
 #       With a valid formals signature in r0 validating the body
 #       is simply a matter of ensuring it's a proper list.
@@ -1072,7 +1072,7 @@ Primitive/vov/validate-body
         JUMPNOT tmp,@1b
 3h      CLOSURE acc,r0,r1       Close over processed/validated formals &
 ;                               validated body.
-        PEND    ip,@!Restore/r1
+        LOAD    ip,@!Restore/r1
 
 #       After validating the formals the original list is restored
 #       along with the body now ready for its own validation.
@@ -1089,7 +1089,7 @@ Primitive/vov/validate-formals/finish
         POP!    r2,clink
         POP!    r1,clink
         POP!    r0,clink        Restore formals as passed
-        PEND    ip,@Primitive/vov/validate-body
+        LOAD    ip,@Primitive/vov/validate-body
 
 #       If scanning reaches the end of the formals list then it was
 #       valid otherwise control continues with the next.
@@ -1163,7 +1163,7 @@ Primitive/vov/validate-formals/continue
         TRAP    'incompatible-operand
 1h      CONS    tmp,r2,r2
         DEFINE! r4,tmp          ... it has now.
-        PEND    ip,@Primitive/vov/validate-formals/next%final
+        LOAD    ip,@Primitive/vov/validate-formals/next%final
 2h      LOAD    tmp,'continuation
         CMPIS?  tmp,r2,tmp
         JUMPNOT tmp,@2f
@@ -1172,7 +1172,7 @@ Primitive/vov/validate-formals/continue
 2h      TRAP    'incompatible-operand
 1h      CONS    tmp,r2,r2
         DEFINE! r4,tmp          Record this request.
-        PEND    ip,@Primitive/vov/validate-formals/next%final
+        LOAD    ip,@Primitive/vov/validate-formals/next%final
 
 #       This is a copy of Primitive/vov/validate-formals/next &
 #       Primitive/vov/validate-formals/continue for use when the
@@ -1225,7 +1225,7 @@ Primitive/vov/validate-formals/continue%final
         TRAP    'incompatible-operand
 1h      CONS    tmp,r2,r2
         DEFINE! r4,tmp          Record this request.
-        PEND    ip,@Primitive/vov/validate-formals/next%final
+        LOAD    ip,@Primitive/vov/validate-formals/next%final
 2h      LOAD    tmp,'continuation
         CMPIS?  tmp,r2,tmp
         JUMPNOT tmp,@2f
@@ -1234,14 +1234,14 @@ Primitive/vov/validate-formals/continue%final
 2h      TRAP    'incompatible-operand
 1h      CONS    tmp,r2,r2
         DEFINE! r4,tmp          Record this request.
-        PEND    ip,@Primitive/vov/validate-formals/next%final
+        LOAD    ip,@Primitive/vov/validate-formals/next%final
 
 !Primitive/do
-        PEND    acc,@Primitive/do/next
+        LOAD    acc,@Primitive/do/next
         CMPIS?  tmp,r0,()
         JUMPNOT tmp,@1f
         LOAD    acc,#VOID
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
         LOAD    args,()
 1h      PAIR?   tmp,r0
         JUMPIF  tmp,@2f
@@ -1252,7 +1252,7 @@ Primitive/vov/validate-formals/continue%final
         CAR     tmp,r0
         CONS    args,tmp,args
         CDR     r0,r0
-        PEND    ip,@1b
+        LOAD    ip,@1b
 #
 #       Finished processing the list, move & reverse it onto the stack.
 #
@@ -1268,7 +1268,7 @@ Primitive/vov/validate-formals/continue%final
         POP!    tmp,clink       Discard first branch directive.
 Primitive/do/next
         POP!    expr,clink
-        PEND    ip,@!Evaluate
+        LOAD    ip,@!Evaluate
 
 #       (In) Control-Link: r2 r1 r0 ...
 #       (In) r0: Environment
@@ -1276,11 +1276,11 @@ Primitive/do/next
 #       (In) r2: Value or body of lambda expression
 #
 !Primitive/set!
-        PEND    tmp,@Primitive/define!/set!
+        LOAD    tmp,@Primitive/define!/set!
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/define!/imp
+        LOAD    ip,@Primitive/define!/imp
 !Primitive/define!
-        PEND    tmp,@Primitive/define!/define!
+        LOAD    tmp,@Primitive/define!/define!
         PUSH!   clink,tmp
 Primitive/define!/imp
         ENVIRONMENT? tmp,r0
@@ -1296,9 +1296,9 @@ Primitive/define!/imp
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      CAR     expr,r2
-        PEND    tmp,@1f
+        LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@!Evaluate
+        LOAD    ip,@!Evaluate
 1h      ENVIRONMENT? tmp,r0
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
@@ -1306,10 +1306,10 @@ Primitive/define!/imp
         POP!    ip,clink
 Primitive/define!/define!
         DEFINE! r0,r1
-        PEND    ip,@!Restore/r2
+        LOAD    ip,@!Restore/r2
 Primitive/define!/set!
         REPLACE! r0,r1
-        PEND    ip,@!Restore/r2
+        LOAD    ip,@!Restore/r2
 
 #       (In) Control-Link: P/d r2 r1 r0 ...
 #       (In) r0: Environment
@@ -1317,14 +1317,14 @@ Primitive/define!/set!
 #       (In) r2: Value or body of lambda expression
 
 Primitive/define!/lambda
-        PEND    tmp,@Primitive/define!/lambda/continue
+        LOAD    tmp,@Primitive/define!/lambda/continue
         PUSH!   clink,tmp
         PUSH!   clink,r0        Save environment
         CAR     tmp,r1
         PUSH!   clink,tmp       Save label
         CDR     r0,r1           Formals
         LOAD    r1,r2           Body
-        PEND    ip,@!Primitive/lambda
+        LOAD    ip,@!Primitive/lambda
 
 Primitive/define!/lambda/continue
 1h      CONS    r1,r1,acc
@@ -1338,24 +1338,24 @@ Primitive/define!/lambda/continue
         CMPIS?  tmp,r1,()
         JUMPNOT tmp,@1f
         LOAD    expr,r0
-        PEND    tmp,@!Restore/r1
+        LOAD    tmp,@!Restore/r1
         PUSH!   clink,tmp
-        PEND    ip,@!Evaluate
+        LOAD    ip,@!Evaluate
 1h      CAR     expr,r1
-        PEND    tmp,@1f
+        LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@!Evaluate
+        LOAD    ip,@!Evaluate
 1h      ENVIRONMENT? tmp,acc
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      PUSH!   clink,env
         LOAD    env,acc
         LOAD    expr,r0
-        PEND    tmp,@1f
+        LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@!Evaluate
+        LOAD    ip,@!Evaluate
 1h      POP!    env,clink
-        PEND    ip,@!Restore/r1
+        LOAD    ip,@!Restore/r1
 
 #       (In) Control-Link: r1 r0 ...
 #       (In) r0: condition
@@ -1365,16 +1365,16 @@ Primitive/define!/lambda/continue
         CMPIS?  tmp,r2,()
         JUMPNOT tmp,@1f
         LOAD    r2,#VOID
-        PEND    ip,@2f
+        LOAD    ip,@2f
 1h      CAR     r2,r2
 2h      CMPIS?  tmp,r0,#f
         JUMPIF  tmp,@1f
         LOAD    expr,r1         Consequent
-        PEND    ip,@2f
+        LOAD    ip,@2f
 1h      LOAD    expr,r2         Alternate
-2h      PEND    tmp,@!Restore/r2
+2h      LOAD    tmp,@!Restore/r2
         PUSH!   clink,tmp
-        PEND    ip,@!Evaluate
+        LOAD    ip,@!Evaluate
 
 !Primitive/current-environment
         LOAD    acc,env
@@ -1386,25 +1386,25 @@ Primitive/define!/lambda/continue
 
 !Primitive/quote
         LOAD    acc,r0
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 
 ########
 
 !Primitive/record?
         RECORD? acc,r0,r0
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 
 !Primitive/record%instance?
         RECORD? acc,r0,()
         JUMPNOT acc,@1f
         LOAD    acc,#f
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 1h      RECORD? acc,r0,r0
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 
 !Primitive/record%template?
         RECORD? acc,r0,()
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 
 !Primitive/record/instance-of?
         RECORD? tmp,r0,r0
@@ -1414,7 +1414,7 @@ Primitive/define!/lambda/continue
         JUMPIF  tmp,@1f
         TEMPLATE r0,r0
 1h      RECORD? acc,r1,r0
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 
 #       (new-record <unique-label> ...)
 #
@@ -1447,7 +1447,7 @@ Primitive/new-record/next
         CMPIS?  tmp,r0,()
         JUMPNOT tmp,@Primitive/new-record/next
         RECORD  acc,r1
-        PEND    ip,@!Restore/r2
+        LOAD    ip,@!Restore/r2
 
 #       (new-instance <record>)
 #
@@ -1456,18 +1456,18 @@ Primitive/new-record/next
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      RECORD  acc,r0
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 
 !Primitive/record/length
         RECORD? tmp,r0,r0
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      LENGTH  acc,r0
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 
 #       (record/ref <record> <label>)
 !Primitive/record/ref
-        PEND    tmp,@!Restore/r1
+        LOAD    tmp,@!Restore/r1
         PUSH!   clink,tmp
 Primitive/record/ref/imp
         RECORD? tmp,r0,()       Template?
@@ -1499,11 +1499,11 @@ Primitive/record/ref/imp
         POP!    ip,clink
 
 !Primitive/record/set!
-        PEND    tmp,@1f
+        LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/record/ref/imp
+        LOAD    ip,@Primitive/record/ref/imp
 1h      SET!    r0,r1,r2
-        PEND    ip,@!Restore/r2
+        LOAD    ip,@!Restore/r2
 
 !Primitive/record/template
         RECORD? tmp,r0,()
@@ -1513,7 +1513,7 @@ Primitive/record/ref/imp
         TRAP    'incompatible-operand
 1h      TEMPLATE r0,r0
 2h      LOAD    acc,r0
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 
 ########
 
@@ -1521,50 +1521,50 @@ Primitive/record/ref/imp
         CMPIS?  acc,r0,#f
         JUMPIF  acc,@1f
         CMPIS?  acc,r0,#t
-1h      PEND    ip,@!Restore/r0
+1h      LOAD    ip,@!Restore/r0
 !Primitive/false?
         CMPIS?  acc,r0,#f
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 !Primitive/integer?
         INTEGER? acc,r0
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 !Primitive/null?
         CMPIS?  acc,r0,()
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 !Primitive/pair?
         PAIR?   acc,r0
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 !Primitive/segment?
         SEGMENT? acc,r0
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 !Primitive/symbol?
         SYMBOL? acc,r0
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 !Primitive/true?
         CMPIS?  acc,r0,#t
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 !Primitive/void?
         CMPIS?  acc,r0,#VOID
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 
 !Primitive/is?
         CMPIS?  acc,r0,r1
-        PEND    ip,@!Restore/r1
+        LOAD    ip,@!Restore/r1
 
 1h      TRAP    'incompatible-operand
 !Primitive/cons
         CONS    acc,r0,r1
-        PEND    ip,@!Restore/r1
+        LOAD    ip,@!Restore/r1
 !Primitive/car
         PAIR?   acc,r0
         JUMPNOT acc,@1b
         CAR     acc,r0
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 !Primitive/cdr
         PAIR?   acc,r0
         JUMPNOT acc,@1b
         CDR     acc,r0
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 
 1h      TRAP    'incompatible-operand
 !Primitive/symbol/key
@@ -1609,9 +1609,9 @@ Primitive/record/ref/imp
 2h      POP!    r3,clink
         TRAP    'incompatible-operand
 !Primitive/segment->symbol
-        PEND    tmp,@3f
+        LOAD    tmp,@3f
         PUSH!   clink,tmp
-        PEND    ip,@!Primitive/segment/length
+        LOAD    ip,@!Primitive/segment/length
 3h      PUSH!   clink,r3        Prepare to clobber r3
         LOAD    r3,acc          Segment length
         CMPGE?  tmp,r1,0
@@ -1633,7 +1633,7 @@ Primitive/record/ref/imp
 
 !Primitive/array?
         ARRAY?  acc,0
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 
 #       r0: length
 #       r1: filler
@@ -1645,7 +1645,7 @@ Primitive/record/ref/imp
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      ARRAY   acc,r0,r1
-        PEND    ip,@!Restore/r1
+        LOAD    ip,@!Restore/r1
 
 #       r0: array
 #       r1: new length
@@ -1661,19 +1661,19 @@ Primitive/record/ref/imp
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      RESIZE! r0,r1,r2
-        PEND    ip,@!Restore/r2
+        LOAD    ip,@!Restore/r2
 
 !Primitive/array/length
         ARRAY?  tmp,r0
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      LENGTH  acc,r0
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 
 #       r0: array
 #       r1: index
 !Primitive/array/ref
-        PEND    tmp,@Primitive/array/ref/imp
+        LOAD    tmp,@Primitive/array/ref/imp
         PUSH!   clink,tmp
 
 Primitive/array/ref/check
@@ -1697,21 +1697,21 @@ Primitive/array/ref/check
 
 Primitive/array/ref/imp
         REF     acc,r0,r1
-        PEND    ip,@!Restore/r1
+        LOAD    ip,@!Restore/r1
 
 !Primitive/array/set!
-        PEND    tmp,@Primitive/array/set!/imp
+        LOAD    tmp,@Primitive/array/set!/imp
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/array/ref/check
+        LOAD    ip,@Primitive/array/ref/check
 Primitive/array/set!/imp
         SET!    r0,r1,r2
-        PEND    ip,@!Restore/r1
+        LOAD    ip,@!Restore/r1
 
 ########
 
 !Primitive/hashtable?
         TABLE?  acc,r0
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 
 !Primitive/new-hashtable
         INTEGER? tmp,r0
@@ -1721,14 +1721,14 @@ Primitive/array/set!/imp
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      TABLE   acc,r0
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 
 !Primitive/hashtable/blocked
         TABLE?  tmp,r0
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      BLOCKED acc,r0
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 
 #       r0: hashtable
 #       r1: label
@@ -1743,7 +1743,7 @@ Primitive/array/set!/imp
         TRAP    'incompatible-operand
 1h      CONS    tmp,r1,r2
         DEFINE! r0,tmp
-        PEND    ip,@!Restore/r2
+        LOAD    ip,@!Restore/r2
 
 !Primitive/hashtable/erase!
         TABLE?  tmp,r0
@@ -1758,7 +1758,7 @@ Primitive/array/set!/imp
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      ERASE!  r0,r1,r2
-        PEND    ip,@!Restore/r2
+        LOAD    ip,@!Restore/r2
 
 #       r0: hashtable
 #       r1: label
@@ -1771,21 +1771,21 @@ Primitive/array/set!/imp
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      EXISTS? acc,r0,r1
-        PEND    ip,@!Restore/r2
+        LOAD    ip,@!Restore/r2
 
 !Primitive/hashtable/free
         TABLE?  tmp,r0
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      FREE    acc,r0
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 
 !Primitive/hashtable/length
         TABLE?  tmp,r0
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      LENGTH  acc,r0
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 
 !Primitive/hashtable/ref
         TABLE?  tmp,r0
@@ -1795,7 +1795,7 @@ Primitive/array/set!/imp
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      LOOKUP  acc,r0,r1
-        PEND    ip,@!Restore/r2
+        LOAD    ip,@!Restore/r2
 
 !Primitive/hashtable/set!
         TABLE?  tmp,r0
@@ -1806,7 +1806,7 @@ Primitive/array/set!/imp
         TRAP    'incompatible-operand
 1h      CONS    tmp,r1,r2
 1h      REPLACE! r0,tmp
-        PEND    ip,@!Restore/r2
+        LOAD    ip,@!Restore/r2
 
 !Primitive/hashtable/used
         TABLE?  tmp,r0
@@ -1817,19 +1817,19 @@ Primitive/array/set!/imp
         SUB     acc,acc,tmp
         BLOCKED tmp,r0
         SUB     acc,acc,tmp
-        PEND    ip,@!Restore/r0
+        LOAD    ip,@!Restore/r0
 
 ########
 
 !Primitive/+
         ADD     acc,r0,r1
-        PEND    ip,@!Restore/r1
+        LOAD    ip,@!Restore/r1
 !Primitive/-
         SUB     acc,r0,r1
-        PEND    ip,@!Restore/r1
+        LOAD    ip,@!Restore/r1
 !Primitive/*
         MUL     acc,r0,r1
-        PEND    ip,@!Restore/r1
+        LOAD    ip,@!Restore/r1
 
 
 
@@ -1937,9 +1937,9 @@ Primitive/read-expression/source-byte
         PUSH!   clink,r6
         PUSH!   clink,r7
         LOAD    r2,acc
-        PEND    tmp,@Primitive/read-expression/finished
+        LOAD    tmp,@Primitive/read-expression/finished
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/imp
+        LOAD    ip,@Primitive/read-expression/imp
 
 #       (In)    Accumulator: Expression
 #       (In)    r1: offset
@@ -1953,7 +1953,7 @@ Primitive/read-expression/finished
         LOAD    tmp,'object
         CMPIS?  tmp,r3,tmp
         JUMPNOT tmp,@1f
-        PEND    ip,@!Restore/r7-2
+        LOAD    ip,@!Restore/r7-2
 1h      LOAD    tmp,'close
         CMPIS?  tmp,r3,tmp
         JUMPNOT tmp,@1f
@@ -1974,24 +1974,24 @@ Primitive/read-expression/back-up
 Primitive/read-expression/next
         ADD     r1,r1,1
 Primitive/read-expression/imp
-        PEND    tmp,@1f
+        LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/source-byte
+        LOAD    ip,@Primitive/read-expression/source-byte
 1h      JUMPNOT acc,@1f
         LOAD    r3,'eof
         POP!    ip,clink
-1h      PEND    tmp,@1f
+1h      LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/space?
+        LOAD    ip,@Primitive/read-expression/space?
 1h      JUMPIF  acc,@Primitive/read-expression/next
-        PEND    tmp,@1f
+        LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/printable?
+        LOAD    ip,@Primitive/read-expression/printable?
 1h      JUMPIF  acc,@1f
         TRAP    'unprintable
-1h      PEND    tmp,@1f
+1h      LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/unimplemented-or-forbidden?
+        LOAD    ip,@Primitive/read-expression/unimplemented-or-forbidden?
 1h      JUMPNOT acc,@1f
         TRAP    'syntax-error
 #
@@ -2001,7 +2001,7 @@ Primitive/read-expression/imp
         JUMPIF  tmp,@Primitive/read-expression/begin-list
 1h      CMPIS?  tmp,r3,#x2e     .
         JUMPNOT tmp,@1f
-        PEND    ip,@Primitive/read-expression/dot
+        LOAD    ip,@Primitive/read-expression/dot
 1h      CMPIS?  tmp,r3,#x29     )
         JUMPNOT tmp,@1f
         LOAD    acc,()
@@ -2010,31 +2010,31 @@ Primitive/read-expression/imp
 1h      CMPIS?  tmp,r3,#x27     '
         JUMPNOT tmp,@1f
         LOAD    r3,'quote
-        PEND    ip,@Primitive/read-expression/quote
+        LOAD    ip,@Primitive/read-expression/quote
 1h      LOAD    tmp,#x60        `
         CMPIS?  tmp,r3,tmp
         JUMPNOT tmp,@1f
         LOAD    r3,'quasiquote
-        PEND    ip,@Primitive/read-expression/quote
+        LOAD    ip,@Primitive/read-expression/quote
 1h      CMPEQ?  tmp,r3,#x2c     ,
         JUMPNOT tmp,@1f
         LOAD    r3,'unquote
-        PEND    ip,@Primitive/read-expression/quote
+        LOAD    ip,@Primitive/read-expression/quote
 1h      CMPIS?  tmp,r3,#x23     #
         JUMPIF  tmp,@Primitive/read-expression/special
 1h      CMPIS?  tmp,r3,#x2d     -; offset is not incremented yet
         JUMPNOT tmp,@1f
         LOAD    r5,#t
-        PEND    ip,@Primitive/read-expression/possible-number
+        LOAD    ip,@Primitive/read-expression/possible-number
 1h      CMPIS?  tmp,r3,#x2b     +; offset is not incremented yet
         JUMPNOT tmp,@1f
         LOAD    r5,#f
-        PEND    ip,@Primitive/read-expression/possible-number
-1h      PEND    tmp,@1f
+        LOAD    ip,@Primitive/read-expression/possible-number
+1h      LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/digit?
+        LOAD    ip,@Primitive/read-expression/digit?
 1h      JUMPIF  acc,@Primitive/read-expression/number
-        PEND    ip,@Primitive/read-expression/symbol
+        LOAD    ip,@Primitive/read-expression/symbol
 
 #       dot followed by terminator: 'dot into r3, JUMP =clink
 #       dot followed by [^.], syntax error
@@ -2047,29 +2047,29 @@ Primitive/read-expression/imp
 Primitive/read-expression/dot
         LOAD    r4,r1
         ADD     r1,r1,1
-        PEND    tmp,@1f
+        LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/source-byte
+        LOAD    ip,@Primitive/read-expression/source-byte
 1h      JUMPNOT acc,@1f
 9h      LOAD    r3,'dot
         POP!    ip,clink
-1h      PEND    tmp,@1f
+1h      LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/terminator?
+        LOAD    ip,@Primitive/read-expression/terminator?
 1h      JUMPIF  acc,@9b
         CMPIS?  tmp,r3,#x2e     .
         JUMPIF  tmp,@1f
         TRAP    'syntax-error   "." followed by not "."
 
 1h      ADD     r1,r1,1         ".." so far
-        PEND    tmp,@1f
+        LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/source-byte
+        LOAD    ip,@Primitive/read-expression/source-byte
 1h      JUMPNOT acc,@1f
         TRAP    'syntax-error   ".." exactly, eof
-1h      PEND    tmp,@1f
+1h      LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/terminator?
+        LOAD    ip,@Primitive/read-expression/terminator?
 1h      JUMPNOT acc,@1f
         TRAP    'syntax-error   ".." exactly, terminated in-band
 1h      CMPIS?  tmp,r3,#x2e     .
@@ -2077,25 +2077,25 @@ Primitive/read-expression/dot
         TRAP    'syntax-error   ".." followed by not "."
 
 1h      ADD     r1,r1,1         "..." so far
-        PEND    tmp,@1f
+        LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/source-byte
+        LOAD    ip,@Primitive/read-expression/source-byte
 1h      JUMPNOT acc,@1f
-        PEND    ip,@Primitive/read-expression/symbol/finish
-1h      PEND    tmp,@1f
+        LOAD    ip,@Primitive/read-expression/symbol/finish
+1h      LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/terminator?
+        LOAD    ip,@Primitive/read-expression/terminator?
 1h      JUMPNOT acc,@1f         "..." exactly, terminated in-band
-        PEND    tmp,@Primitive/read-expression/back-up
+        LOAD    tmp,@Primitive/read-expression/back-up
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/symbol/finish
+        LOAD    ip,@Primitive/read-expression/symbol/finish
 1h      TRAP    'syntax-error   "..." unterminated
 
 Primitive/read-expression/quote
         PUSH!   clink,r3        Quoting method
-        PEND    tmp,@Primitive/read-expression/quote/continue
+        LOAD    tmp,@Primitive/read-expression/quote/continue
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/next
+        LOAD    ip,@Primitive/read-expression/next
 Primitive/read-expression/quote/continue
         POP!    tmp,clink
         SYNTAX  acc,tmp,acc
@@ -2106,9 +2106,9 @@ Primitive/read-expression/quote/continue
 #
 Primitive/read-expression/begin-list
         PUSH!   clink,()
-        PEND    tmp,@Primitive/read-expression/continue-list
+        LOAD    tmp,@Primitive/read-expression/continue-list
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/next
+        LOAD    ip,@Primitive/read-expression/next
 
 #       (In)    Accumulator: Expression
 #       (In)    r1: offset
@@ -2128,9 +2128,9 @@ Primitive/read-expression/continue-list
 1h      POP!    tmp,clink
         CONS    tmp,acc,tmp
         PUSH!   clink,tmp
-        PEND    tmp,@Primitive/read-expression/continue-list
+        LOAD    tmp,@Primitive/read-expression/continue-list
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/next
+        LOAD    ip,@Primitive/read-expression/next
 
 #       The close symbol has placed () in the accumulator, when
 #       reached from Primitive/read-expression/list-tail/finish
@@ -2143,7 +2143,7 @@ Primitive/read-expression/close-list
         CAR     tmp,r3
         CONS    acc,tmp,acc
         CDR     r3,r3
-        PEND    ip,@1b
+        LOAD    ip,@1b
 2h      LOAD    r3,'object
         POP!    ip,clink
 
@@ -2156,9 +2156,9 @@ Primitive/read-expression/list-tail
         CMPIS?  tmp,tmp,()
         JUMPNOT tmp,@1f
         TRAP    'non-list-tail
-1h      PEND    tmp,@Primitive/read-expression/list-tail/expression
+1h      LOAD    tmp,@Primitive/read-expression/list-tail/expression
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/next
+        LOAD    ip,@Primitive/read-expression/next
 
 Primitive/read-expression/list-tail/expression
         LOAD    tmp,'object
@@ -2174,9 +2174,9 @@ Primitive/read-expression/list-tail/expression
         TRAP    'unterminated-tail
 1h      TRAP    'unclosed-list  Is EOF.
 2h      PUSH!   clink,acc
-        PEND    tmp,@Primitive/read-expression/list-tail/finish
+        LOAD    tmp,@Primitive/read-expression/list-tail/finish
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/next
+        LOAD    ip,@Primitive/read-expression/next
 
 Primitive/read-expression/list-tail/finish
         LOAD    tmp,'close
@@ -2192,7 +2192,7 @@ Primitive/read-expression/list-tail/finish
         TRAP    'unclosed-list
 1h      TRAP    'tail-mid-list
 2h      POP!    acc,clink       Restore the dotted tail.
-        PEND    ip,@Primitive/read-expression/close-list
+        LOAD    ip,@Primitive/read-expression/close-list
 
 
 
@@ -2214,25 +2214,25 @@ Primitive/read-expression/symbol
         LOAD    r4,r1
 Primitive/read-expression/symbol/next
         ADD     r1,r1,1
-        PEND    tmp,@1f
+        LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/source-byte
+        LOAD    ip,@Primitive/read-expression/source-byte
 1h      JUMPIF  acc,@Primitive/read-expression/symbol/finish ... if #eof.
-        PEND    tmp,@1f
+        LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/terminator?
+        LOAD    ip,@Primitive/read-expression/terminator?
 1h      JUMPNOT acc,@1f
-        PEND    tmp,@Primitive/read-expression/back-up
+        LOAD    tmp,@Primitive/read-expression/back-up
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/symbol/finish
-1h      PEND    tmp,@1f
+        LOAD    ip,@Primitive/read-expression/symbol/finish
+1h      LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/printable?
+        LOAD    ip,@Primitive/read-expression/printable?
 1h      JUMPIF  acc,@2f
         TRAP    'unprintable
-2h      PEND    tmp,@1f
+2h      LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/forbidden?
+        LOAD    ip,@Primitive/read-expression/forbidden?
 1h      JUMPNOT acc,@Primitive/read-expression/symbol/next
         TRAP    'syntax-error
 
@@ -2259,21 +2259,21 @@ Primitive/read-expression/symbol/finish
 
 Primitive/read-expression/special
         ADD     r1,r1,1
-        PEND    tmp,@1f
+        LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/source-byte
+        LOAD    ip,@Primitive/read-expression/source-byte
 1h      JUMPNOT acc,@2f        if !#eof.
         TRAP    'syntax-error
-2h      PEND    tmp,@1f
+2h      LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/printable?
+        LOAD    ip,@Primitive/read-expression/printable?
 1h      JUMPIF  acc,@2f
         TRAP    'unprintable
 2h      LOAD    tmp,#x46        F
         CMPIS?  tmp,r3,tmp
         JUMPNOT tmp,@1f
 2h      LOAD    r4,#f
-        PEND    ip,@Primitive/read-expression/boolean
+        LOAD    ip,@Primitive/read-expression/boolean
 1h      LOAD    tmp,#x66        f
         CMPIS?  tmp,r3,tmp
         JUMPIF  tmp,@2b
@@ -2286,20 +2286,20 @@ Primitive/read-expression/special
         LOAD    tmp,#x5c        \
         CMPIS?  tmp,r3,tmp
         JUMPIF  tmp,@Primitive/read-expression/rune
-        PEND    ip,@Primitive/read-expression/special-number
+        LOAD    ip,@Primitive/read-expression/special-number
 
 Primitive/read-expression/boolean
 3h      ADD     r1,r1,1
-        PEND    tmp,@1f
+        LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/source-byte
+        LOAD    ip,@Primitive/read-expression/source-byte
 1h      JUMPIF  acc,@2f         if #eof.
-        PEND    tmp,@1f
+        LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/terminator?
+        LOAD    ip,@Primitive/read-expression/terminator?
 1h      JUMPNOT acc,@3f
         SUB     r1,r1,1
-        PEND    ip,@2f
+        LOAD    ip,@2f
 3h      TRAP    'syntax-error
 2h      LOAD    acc,r4
         LOAD    r3,'object
@@ -2311,28 +2311,28 @@ Primitive/read-expression/boolean
 Primitive/read-expression/possible-number
         LOAD    r4,r1           Save the sign byte offset.
         ADD     r1,r1,1
-        PEND    tmp,@1f
+        LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/source-byte
+        LOAD    ip,@Primitive/read-expression/source-byte
 1h      JUMPIF  acc,@Primitive/read-expression/symbol/finish ... if #eof.
-        PEND    tmp,@1f         Look for a digit starting a signed
+        LOAD    tmp,@1f         Look for a digit starting a signed
 ;                               base 10 number.
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/digit?
+        LOAD    ip,@Primitive/read-expression/digit?
 1h      JUMPIF  acc,@Primitive/read-expression/number
         CMPIS?  acc,r3,#x23     #
         JUMPNOT acc,@1f
         ADD     r1,r1,1         Found a signed number; move to the base
 ;                               indicator character.
-        PEND    tmp,@Primitive/read-expression/special-number/imp
+        LOAD    tmp,@Primitive/read-expression/special-number/imp
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/source-byte
+        LOAD    ip,@Primitive/read-expression/source-byte
 1h      LOAD    r1,r4           Move back to [-+].
-        PEND    ip,@Primitive/read-expression/symbol/next
+        LOAD    ip,@Primitive/read-expression/symbol/next
 
 Primitive/read-expression/special-number
         LOAD    r5,#f
-        PEND    ip,@1f
+        LOAD    ip,@1f
 Primitive/read-expression/special-number/imp
         JUMPNOT acc,@1f        COMEFROM @Primitive/read-expression/source-byte
         TRAP    'syntax-error   [-+]#
@@ -2366,17 +2366,17 @@ Primitive/read-expression/binary
         LOAD    r7,2
         LOAD    r6,0
         ADD     r4,r1,1
-        PEND    ip,@Primitive/read-expression/number/next
+        LOAD    ip,@Primitive/read-expression/number/next
 Primitive/read-expression/octal
         LOAD    r7,8
         LOAD    r6,0
         ADD     r4,r1,1
-        PEND    ip,@Primitive/read-expression/number/next
+        LOAD    ip,@Primitive/read-expression/number/next
 Primitive/read-expression/decimal
         LOAD    r7,10
         LOAD    r6,0
         ADD     r4,r1,1
-        PEND    ip,@Primitive/read-expression/number/next
+        LOAD    ip,@Primitive/read-expression/number/next
 
 Primitive/read-expression/number
         LOAD    r7,10
@@ -2385,22 +2385,22 @@ Primitive/read-expression/number
         LOAD    r4,r1
 Primitive/read-expression/number/next
         ADD     r1,r1,1
-        PEND    tmp,@1f
+        LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/source-byte
+        LOAD    ip,@Primitive/read-expression/source-byte
 1h      JUMPNOT acc,@1f        ... unless eof.
 2h      CMPEQ?  acc,r1,r4
         JUMPNOT acc,@Primitive/read-expression/number/finish
         TRAP    'syntax-error
-1h      PEND    tmp,@1f
+1h      LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/terminator?
+        LOAD    ip,@Primitive/read-expression/terminator?
 1h      JUMPIF  acc,@2b
         CMPGE?  tmp,r3,#x30     0
         JUMPIF  tmp,@3f         Possibly a digit.
-2h      PEND    tmp,@1f         Wrong, but how?
+2h      LOAD    tmp,@1f         Wrong, but how?
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/printable?
+        LOAD    ip,@Primitive/read-expression/printable?
 1h      JUMPIF  acc,@1f
         TRAP    'unprintable
 1h      TRAP    'syntax-error
@@ -2408,22 +2408,22 @@ Primitive/read-expression/number/next
         CMPLT?  tmp,r3,r7       Small enough?
         JUMPIF  tmp,@1f
         ADD     r3,r3,#x30
-        PEND    ip,@2b
+        LOAD    ip,@2b
 1h      MUL     r6,r6,r7
         ADD     r6,r6,r3
-        PEND    ip,@Primitive/read-expression/number/next
+        LOAD    ip,@Primitive/read-expression/number/next
 
 Primitive/read-expression/hex
         LOAD    r6,0
         ADD     r1,r1,1
-        PEND    tmp,@1f
+        LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/source-byte
+        LOAD    ip,@Primitive/read-expression/source-byte
 1h      JUMPNOT acc,@1f
         TRAP    'syntax-error
-        PEND    tmp,@1f
+        LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/terminator?
+        LOAD    ip,@Primitive/read-expression/terminator?
 1h      JUMPNOT acc,@1f
         TRAP    'syntax-error
 Primitive/read-expression/hex/digit
@@ -2435,7 +2435,7 @@ Primitive/read-expression/hex/digit
         CMPGE?  tmp,r3,acc
         JUMPNOT tmp,@1f
         SUB     r4,r3,acc
-        PEND    ip,@2f
+        LOAD    ip,@2f
 
 1h      LOAD    tmp,#x46        F
         CMPLE?  tmp,r3,tmp
@@ -2445,7 +2445,7 @@ Primitive/read-expression/hex/digit
         CMPGE?  tmp,r3,acc
         JUMPIF  tmp,@1f
         SUB     r4,r3,acc
-        PEND    ip,@2f
+        LOAD    ip,@2f
 
 1h      CMPLE?  tmp,r3,#x39     9
         JUMPIF  tmp,@1f
@@ -2458,22 +2458,22 @@ Primitive/read-expression/hex/digit
         SUB     r4,r3,acc
         ADD     r6,r6,r4
         ADD     r1,r1,1
-        PEND    tmp,@1f
+        LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/source-byte
+        LOAD    ip,@Primitive/read-expression/source-byte
 1h      JUMPIF  acc,@Primitive/read-expression/number/finish
-        PEND    tmp,@1f
+        LOAD    tmp,@1f
         PUSH!   clink,tmp
-        PEND    ip,@Primitive/read-expression/terminator?
+        LOAD    ip,@Primitive/read-expression/terminator?
 1h      JUMPIF  acc,@Primitive/read-expression/number/finish
-        PEND    ip,@Primitive/read-expression/hex/digit
+        LOAD    ip,@Primitive/read-expression/hex/digit
 
 Primitive/read-expression/number/finish
         JUMPNOT r5,@1f          Negate?
         SUB     r6,0,r6
 1h      LOAD    acc,r6          Number
         LOAD    r3,'object
-        PEND    ip,@Primitive/read-expression/back-up
+        LOAD    ip,@Primitive/read-expression/back-up
 
 Primitive/read-expression/rune
         TRAP    'unimplemented

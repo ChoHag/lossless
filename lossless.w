@@ -3557,7 +3557,6 @@ typedef enum {
         OP_PEEK2,
         OP_PEEK4,
         OP_PEEK8,
-        OP_PEND,
         OP_POKE2_M,
         OP_POKE4_M,
         OP_POKE8_M,
@@ -3652,10 +3651,9 @@ shared opcode_table Op[OPCODE_LENGTH] = {@|
         [OP_FREE]           = { NIL, AREG, ALOB, NARG },@|
         [OP_HALT]           = { NIL, NARG, NARG, NARG },@|
         [OP_JOIN]           = { NIL, AREG, ALOB, NARG },@|
-        [OP_LOAD]           = { NIL, AREG, ALOB, NARG },@|
+        [OP_LOAD]           = { NIL, AREG, AADD, NARG },@|
         [OP_OPEN]           = { NIL, AREG, ALOB, NARG },@|
         [OP_PEEK]           = { NIL, AREG, ALOT, ALOT },@|
-        [OP_PEND]           = { NIL, AREG, AADD, NARG },@|
         [OP_TRAP]           = { NIL, ARGH, NARG, NARG },@|
         [OP_ADD]            = { NIL, AREG, ALOT, ALOT },@|
         [OP_CAR]            = { NIL, AREG, ALOB, NARG },@|
@@ -3730,7 +3728,6 @@ shared char *Opcode_Label[OPCODE_LENGTH] = {@|
         [OP_LOAD]           = "VM:LOAD",@|
         [OP_OPEN]           = "VM:OPEN",@|
         [OP_PEEK]           = "VM:PEEK",@|
-        [OP_PEND]           = "VM:PEND",@|
         [OP_TRAP]           = "VM:TRAP",@|
         [OP_ADD]            = "VM:ADD",@|
         [OP_CAR]            = "VM:CAR",@|
@@ -4274,7 +4271,7 @@ nb. use of char * and array deref is the best kind of incorrect.
 @d LBC_OBJECT_REGISTER  0x00000000 /* Zero. */
 @d LBC_OBJECT_INTEGER   0x00800000
 @d LBC_OBJECT_TABLE     0x00400000
-@d LBC_OBJECT_RESERVED  0x00c00000 /* Unused */
+@d LBC_OBJECT_ADDRESS   0x00c00000
 @#
 @d LBC_FIRST_INTEGER    0x00800000
 @d LBC_FIRST_SPECIAL    0x00008000
@@ -4284,7 +4281,6 @@ nb. use of char * and array deref is the best kind of incorrect.
 
 @<Fun...@>=
 error_code interpret (void);
-error_code interpret_address16 (instruction, address *);
 error_code interpret_argument (instruction, int, cell *);
 error_code interpret_integer (instruction, int, cell *);
 error_code interpret_register (instruction, int, cell *);
@@ -4412,6 +4408,7 @@ error_code
 interpret_solo_argument (instruction  ins,
                          cell        *ret)
 {
+        address from, to;
         long index;
         int16_t value;
 
@@ -4430,79 +4427,13 @@ interpret_solo_argument (instruction  ins,
                         return LERR_OUT_OF_BOUNDS;
                 *ret = array_base(Program_ObjectDB)[index];
                 return LERR_NONE;
+        case LBC_OBJECT_ADDRESS:@;
+                from = Ip - sizeof (instruction);
+                to = SINT(ins) + from;
+                return new_pointer(to, ret);
         default:
                 return LERR_INTERNAL;
         }
-}
-
-@ @c
-error_code
-interpret_address16 (instruction  ins,
-                     address     *ret)
-{
-        address from, to, ivia;
-        cell rvia;
-        error_code reason;
-
-        from = Ip - sizeof (instruction);
-        switch (FLAGS(ins)) {
-        case LBC_ADDRESS_ABSOLUTE:@;
-                return LERR_UNIMPLEMENTED;
-        case LBC_ADDRESS_INDIRECT:@;
-                ivia = UINT(ins);
-                assert(ivia < (address) Program_ObjectDB_Free);
-                rvia = array_base(Program_ObjectDB)[ivia];
-                assert(pointer_p(rvia));
-                to = (address) pointer(rvia);
-                break;
-        case LBC_ADDRESS_REGISTER:@;
-                orreturn(interpret_register(ins, 1, &rvia));
-                if (!pointer_p(rvia))
-                        return LERR_INCOMPATIBLE;
-                to = (address) pointer(rvia);
-                break;
-        case LBC_ADDRESS_RELATIVE:@;
-                to = SINT(ins) + from;
-                break;
-        }
-        *ret = to;
-        return LERR_NONE;
-}
-
-@ The same as |interpret_address16| but using |ARGT| \AM\ |resign24|
-to obtain a 24-bit value.
-
-@c
-error_code
-interpret_address24 (instruction  ins,
-                     address     *ret)
-{
-        address from, to, ivia;
-        cell rvia;
-        error_code reason;
-
-        from = Ip - sizeof (instruction);
-        switch (FLAGS(ins)) {
-        case LBC_ADDRESS_ABSOLUTE:@;
-                return LERR_UNIMPLEMENTED;
-        case LBC_ADDRESS_INDIRECT:@;
-                ivia = UBIG(ins);
-                if (ivia >= (address) Program_Export_Free)
-                        return LERR_OUT_OF_BOUNDS;
-                to = Program_Export_Base[ivia];
-                break;
-        case LBC_ADDRESS_REGISTER:@;
-                orreturn(interpret_register(ins, 0, &rvia));
-                if (!pointer_p(rvia))
-                        return LERR_INCOMPATIBLE;
-                to = (address) pointer(rvia);
-                break;
-        case LBC_ADDRESS_RELATIVE:@;
-                to = SBIG(ins) + from;
-                break;
-        }
-        *ret = to;
-        return LERR_NONE;
 }
 
 @ @c
@@ -4567,13 +4498,20 @@ case OP_HALT:@;
 @ @<Carry out...@>=
 case OP_JUMPIF:@;
         ortrap(interpret_argument(ins, 0, &VM_Result));
-        if (true_p(VM_Result))
-                ortrap(interpret_address16(ins, &Ip));
+        if (true_p(VM_Result)) {
+                ortrap(interpret_solo_argument(ins, &Scrap));
+                assert(pointer_p(Scrap));
+                Ip = (address) pointer(Scrap);
+        }
+
         break;
 case OP_JUMPNOT:@;
         ortrap(interpret_argument(ins, 0, &VM_Result));
-        if (false_p(VM_Result))
-                ortrap(interpret_address16(ins, &Ip));
+        if (false_p(VM_Result)) {
+                ortrap(interpret_solo_argument(ins, &Scrap));
+                assert(pointer_p(Scrap));
+                Ip = (address) pointer(Scrap);
+        }
         break;
 
 @ @<Carry out...@>=
@@ -4587,11 +4525,6 @@ case OP_PUSH_M:@;
         break;
 case OP_LOAD:@;
         ortrap(interpret_solo_argument(ins, &VM_Result));
-        ortrap(interpret_save(ins, VM_Result));
-        break;
-case OP_PEND:@;
-        ortrap(interpret_address16(ins, &link));
-        orassert(new_pointer(link, &VM_Result));
         ortrap(interpret_save(ins, VM_Result));
         break;
 
@@ -5733,7 +5666,7 @@ pstas_argument_address (statement_parser *pstate,
         else if (pstas_source_byte(pstate, offset) == '@@')
                 return pstas_argument_address_first(pstate, offset + 1);
         else
-                return pstas_argument_register(pstate, offset);
+                return pstas_argument_object(pstate, true, offset);
 }
 
 @ @c
@@ -7078,7 +7011,7 @@ error_code
 assembly_install_m (cell  o,
                     cell *ret)
 {
-        address avalue, boffset, page, real;
+        address boffset, page, real;
         cell arg, blob, body, found, label, link, lins, objectdb, op, tmp;
         cell new_table, new_program, statement_halt;
         half i, ioffset, new_object;
@@ -7243,8 +7176,6 @@ statement_argument(lins, fix(0), &arg);
 if (null_p(arg))
         goto incompatible;
 switch (opb->arg0) {
-case AADD:
-        @<Encode a single address argument and |break|@>
 case ARGH:
         @<Encode an error identifier argument and |break|@>
 case ALOT:
@@ -7255,41 +7186,6 @@ default:
         reason = LERR_INTERNAL;
         goto Trap;
 }
-
-@ ie.~24 bits.
-
-@<Encode a single address ...@>=
-assert(opb->arg1 == NARG && opb->arg2 == NARG);
-statement_argument(lins, fix(1), &tmp);
-if (!null_p(tmp))
-        goto incompatible;
-switch (fixed_value(A(arg)->sin)) {
-case ARGUMENT_RELATIVE_ADDRESS:
-        if (!assembly_validate_integer(22, true, A(arg)->dex, &wvalue)
-                    || wvalue == 0 || wvalue < -i
-                    || wvalue > array_length_c(body) - i) {
-                reason = LERR_OUT_OF_BOUNDS;
-                goto Trap;
-        }
-        wvalue *= sizeof (instruction);
-        ins |= htobe32((wvalue & 0x3fffff) | LBC_ADDRESS_RELATIVE);
-        break;
-case ARGUMENT_FAR_ADDRESS:
-        ortrap(vm_locate_entry(A(arg)->dex, &wvalue, &avalue)); /* Table index */
-        assert(instruction_page(avalue) != page);
-        ins |= htobe32((wvalue & 0x3fffff) | LBC_ADDRESS_INDIRECT);
-        break;
-case ARGUMENT_REGISTER:
-        ortrap(assembly_encode_AREG(0, arg, &ivalue));
-        ins |= ivalue;
-        ins |= htobe32(LBC_ADDRESS_REGISTER); /* In fact this is 0. */
-        break;
-default:
-incompatible: /* This exit point is common; here is as good a place as any. */
-        reason = LERR_INCOMPATIBLE;
-        goto Trap;
-}
-break;
 
 @ These can be combined.
 
@@ -7323,17 +7219,15 @@ statement_argument(lins, fix(1), &arg);
 if (opb->arg1 == NARG) {
         if (null_p(arg))
                 goto finish_arguments;
-        else {
-                reason = LERR_INCOMPATIBLE;
-                goto Trap;
-        }
+        else
+                goto incompatible;
 } else if (null_p(arg)) {
+incompatible: /* This exit point is common; here is as good a place as any. */
         reason = LERR_INCOMPATIBLE;
         goto Trap;
 }
 switch (opb->arg1) {
 case AADD:
-        @<Encode a 16-bit address and |break|@>
 case ALOB:
         @<Encode a large object and |break|@>
 case ALOT:
@@ -7345,7 +7239,7 @@ default:
 
 @ 16-bit relative only. No 16 bit indirect jumps (yet?).
 
-@<Encode a 16-bit address ...@>=
+@<Encode a large object ...@>=
 assert(opb->arg2 == NARG);
 switch (fixed_value(A(arg)->sin)) {
 case ARGUMENT_RELATIVE_ADDRESS:
@@ -7356,23 +7250,8 @@ case ARGUMENT_RELATIVE_ADDRESS:
                 goto Trap;
         }
         wvalue *= sizeof (instruction);
-        ins |= htobe32((wvalue & 0xffff) | LBC_ADDRESS_RELATIVE);
+        ins |= htobe32((wvalue & 0xffff) | LBC_OBJECT_ADDRESS);
         break;
-case ARGUMENT_REGISTER:
-        ortrap(assembly_encode_AREG(1, arg, &ivalue));
-        ins |= ivalue;
-        ins |= htobe32(LBC_ADDRESS_REGISTER); /* In fact this is 0. */
-        break;
-default:
-        goto incompatible;
-}
-break;
-
-@ ALOB; anything: int, const, pair:reg/bool, pair:table/index
-
-@<Encode a large object ...@>=
-assert(opb->arg2 == NARG);
-switch (fixed_value(A(arg)->sin)) {
 case ARGUMENT_TABLE:
         assert(integer_p(A(arg)->dex)); // assembly table offset
         if (!assembly_validate_integer(16, false, A(arg)->dex, &wvalue))
