@@ -771,19 +771,19 @@ of a cell are set then the rest of the cell encodes as much of a
 signed integer as will fit.
 
 @d NIL            ((cell)  0) /* Nothing, the empty list, \.{()}. */
-@d LFALSE         ((cell)  1) /* Boolean false, \.{\#f} or \.{\#F}. */
-@d LTRUE          ((cell)  3) /* Boolean true, \.{\#t} or \.{\#T}. */
-@d VOID           ((cell)  5) /* Even less than nothing --- the ``no
+@d POINTER        ((cell)  1) /* 0001 */
+@d LFALSE         ((cell)  3) /* Boolean false, \.{\#f} or \.{\#F}. */
+@d INVALID0       ((cell)  5) /* 0101 */
+@d LTRUE          ((cell)  7) /* Boolean true, \.{\#t} or \.{\#T}. */
+@d INVALID1       ((cell)  9) /* 1001 */
+@d VOID           ((cell) 11) /* Even less than nothing --- the ``no
                                         explicit value'' value. */
-@d LEOF           ((cell)  7) /* Value obtained off the end of a file or
-                                        other stream. */
-@d INVALID0       ((cell)  9)
-@d INVALID1       ((cell) 11)
-@d INVALID2       ((cell) 13)
+@d INVALID2       ((cell) 13) /* 1101 */
 @d FIXED          ((cell) 15) /* A small fixed-width integer. */
 @#
 @d null_p(O)      ((O) == NIL) /* Might {\it not\/} be |NULL|. */
 @d special_p(O)   (null_p(O) || ((O)) & 1)
+@d pointer_p(O)   (((O) & 0x3) == POINTER)
 @d boolean_p(O)   ((O) == LFALSE || (O) == LTRUE)
 @d false_p(O)     ((O) == LFALSE)
 @d true_p(O)      ((O) == LTRUE)
@@ -880,10 +880,9 @@ typedef union {
 @d FORM_ASSEMBLY       (LTAG_PDEX | 0x01) /* (Partially) assembled bytecode. */
 @d FORM_CSTRUCT        (LTAG_PDEX | 0x02) /* A \CEE/ struct. */
 @d FORM_FILE_HANDLE    (LTAG_PDEX | 0x03) /* File descriptor or equivalent. */
-@d FORM_POINTER        (LTAG_PDEX | 0x04) /* An unknown or anonymous pointer. */
-@d FORM_INSTANCE       (LTAG_PDEX | 0x05) /* A user object instance. */
-@d FORM_TEMPLATE       (LTAG_PDEX | 0x06) /* A user object's template. */
-@d FORM_STATEMENT      (LTAG_PDEX | 0x07) /* A single assembled statement. */
+@d FORM_INSTANCE       (LTAG_PDEX | 0x04) /* A user object instance. */
+@d FORM_TEMPLATE       (LTAG_PDEX | 0x05) /* A user object's template. */
+@d FORM_STATEMENT      (LTAG_PDEX | 0x06) /* A single assembled statement. */
 @#
 @d FORM_PAIR           (LTAG_BOTH | 0x00) /* Two pointers (a ``cons cell''). */
 @d FORM_ARGUMENT       (LTAG_BOTH | 0x01) /* An assembly statement argument. */
@@ -913,7 +912,6 @@ implementation or are otherwise related.
 @d heap_p(O)           (form_p((O), HEAP))
 @d instance_p(O)       (form_p((O), INSTANCE))
 @d opcode_p(O)         (form_p((O), OPCODE))
-@d pointer_p(O)        (form_p((O), POINTER))
 @d register_p(O)       (form_p((O), REGISTER))
 @d rune_p(O)           (form_p((O), RUNE))
 @d statement_p(O)      (form_p((O), STATEMENT))
@@ -1392,10 +1390,8 @@ again:
 segment: an arbitrary-size memory allocation. Three objects are
 used internally to define segments:
 
-A {\it pointer\/} is anything with a \CEE/ pointer in its sinister
+A {\it segment\/} has a \CEE/ pointer to allocated space in its sinister
 half and an ignored cell in its dexter half.
-
-A {\it segment\/} is such a pointer which points to an allocation.
 
 An {\it interned segment\/} is an allocation that's small enough
 to fit within the atom that would otherwise be a pointer. This can
@@ -1408,13 +1404,12 @@ list via its \.{next} and \.{prev} pointers.
 Note that \.{NULL} (|NULL|) and |NIL| are different, although they
 will likely both have the numeric value zero.
 
-@d pointer(O)               (A(O)->yin)
-@d pointer_datum(O)         (A(O)->dex)
-@d pointer_set_m(O,V)       (A(O)->yin = (V))
-@d pointer_set_datum_m(O,V) (A(O)->dex = (V))
-@d null_pointer_p(O)        (pointer(O) == NULL)
+@d object(O)                 (A(O)->yin)
+@d object_spare(O)           (A(O)->dex) /* Only used by records */
+@d object_set_pointer_m(O,V) (A(O)->yin = (V))
+@d object_set_spare_m(O,V)   (A(O)->dex = (V))
 @#
-@d segment_object(O)   ((segment *) pointer(O))
+@d segment_object(O)   ((segment *) object(O))
 @d segment_base(O)     (intern_p(O) ? A(O)->buffer : segment_object(O)->base)
 @d segment_length_c(O) (intern_p(O) ? A(O)->length : segment_object(O)->length)
 @#
@@ -1443,7 +1438,6 @@ extern shared pthread_mutex_t Allocations_Lock;
 @ @<Fun...@>=
 error_code alloc_segment (half, intptr_t, segment  **);
 error_code claim_segment (segment *, cell, cell_tag);
-error_code new_pointer (address, cell *);
 error_code new_segment_imp (heap *, half, intptr_t, cell_tag,
         cell_tag, cell *);
 error_code segment_peek (cell, half, int, bool, cell *);
@@ -1452,17 +1446,6 @@ error_code segment_resize_m (cell, half);
 
 @ @<Initialise memory...@>=
 orabort(init_osthread_mutex(&Allocations_Lock, false, false));
-
-@ Before moving on, it is helpful to be able to create pointer
-objects which aren't pointing to segments.
-
-@c
-error_code
-new_pointer (address  o,
-             cell    *ret)
-{
-        return new_atom((cell) o, NIL, FORM_POINTER, ret);
-}
 
 @ The main stage of allocating a segment is to obtain the memory
 from the operating system and fill in the header absent links to
@@ -1630,10 +1613,10 @@ removed from the list while locked) for the duration of |alloc_mem|.
 @.TODO@>
 @<Resize an allocated segment@>=
 rlength = nlength + sizeof (segment);
-old = (byte *) pointer(o);
+old = (byte *) object(o);
 if (pthread_mutex_lock(&Allocations_Lock) != 0)
         return LERR_INTERNAL;
-reason = alloc_mem(pointer(o), rlength, 0, (void **) &embiggen);
+reason = alloc_mem(object(o), rlength, 0, (void **) &embiggen);
 if (failure_p(reason)) {
         pthread_mutex_unlock(&Allocations_Lock);
         return reason;
@@ -1642,7 +1625,7 @@ if (embiggen != (segment *) old) { /* The old address was reclaimed by malloc. *
         embiggen->next->prev = embiggen;
         embiggen->prev->next = embiggen;
 }
-pointer_set_m(o, embiggen);
+object_set_pointer_m(o, embiggen);
 pthread_mutex_unlock(&Allocations_Lock);
 embiggen->length = nlength;
 
@@ -1758,8 +1741,9 @@ directly related to integer objects.
 @d INT_LENGTH_MAX    (HALF_MAX / sizeof (cell))
 @d int_vcast(O)      ((word *) &A(O)->value)
 @d int_scast(O)      ((word *) segment_base(O))
-@d int_buffer_c(O)   (null_pointer_p(O) ? int_vcast(O) : int_scast(O))
-@d int_length_c(O)   (null_pointer_p(O) ? 1
+@d int_here_p(O)     (object(O) == NULL)
+@d int_buffer_c(O)   (int_here_p(O) ? int_vcast(O) : int_scast(O))
+@d int_length_c(O)   (int_here_p(O) ? 1
         : segment_length_c(O) / sizeof (word))
 @d int_negative_p(O) ((integer_heap_p(O) ? int_buffer_c(O)[0]
         : fixed_value(O)) < 0)
@@ -1866,7 +1850,7 @@ int_value (cell  o,
         assert(integer_p(o));
         if (fixed_p(o))
                 *ret = fixed_value(o);
-        else if (null_pointer_p(o))
+        else if (int_here_p(o))
                 *ret = A(o)->value;
         else
                 return LERR_LIMIT;
@@ -1884,7 +1868,7 @@ int_length (cell  o,
         assert(integer_p(o));
         if (fixed_p(o))
                 *ret = 0;
-        else if (null_pointer_p(o))
+        else if (int_here_p(o))
                 *ret = 1;
         else
                 return new_int_c(int_length_c(o), ret);
@@ -1949,7 +1933,7 @@ int_to_symbol (cell  o,
 small_integer:@;
                 return new_symbol_buffer((byte *) &value, sizeof (word),
                         NULL, ret);
-        } else if (null_pointer_p(o)) {
+        } else if (int_here_p(o)) {
                 value = A(o)->value;
                 goto small_integer;
         } else {
@@ -3175,7 +3159,7 @@ env_search (cell  o,
 @* Records.
 
 @d record_p(O)               (instance_p(O) || template_p(O))
-@d record_template(O)        (pointer_datum(O))
+@d record_template(O)        (object_spare(O))
 @d record_template_length(O) (hashtable_used_c(O))
 
 @c
@@ -3188,7 +3172,7 @@ new_record (cell  template,
         assert(hashtable_p(template)); /* Of int 0..n */
         orreturn(copy_hashtable(template, ret));
         TAG_SET_M(*ret, FORM_TEMPLATE);
-        pointer_set_datum_m(*ret, NIL);
+        object_set_spare_m(*ret, NIL);
         return LERR_NONE;
 }
 
@@ -3201,7 +3185,7 @@ new_instance (cell  o,
         assert(template_p(o));
         orreturn(new_array_imp(record_template_length(o), NIL,
                 FORM_INSTANCE, ret));
-        pointer_set_datum_m(*ret, o);
+        object_set_spare_m(*ret, o);
         return LERR_NONE;
 }
 
@@ -3261,6 +3245,21 @@ typedef uintptr_t address; /* |void *| would also be acceptable but for
                                 arithmetic. */
 @#
 typedef int32_t instruction;
+
+@ @d point(O) ((cell) ((O) | 0x1ull))
+@d pointer_address(O) ((address) ((O) & ~0x3ull))
+@c
+error_code
+new_pointer (address  o,
+                cell    *ret)
+{
+        assert(!(o & 0x3ull));
+        *ret = point(o);
+        return LERR_NONE;
+}
+
+@ @<Fun...@>=
+error_code new_pointer (address, cell *);
 
 @ @<Global...@>=
 shared cell Program_ObjectDB = NIL;
@@ -3347,7 +3346,7 @@ vm_locate_entry (cell     label,
         if (index != NULL)
                 *index = coffset;
         lpoint = array_base(Program_ObjectDB)[coffset];
-        *ret = (address) pointer(lpoint);
+        *ret = pointer_address(lpoint);
         return LERR_NONE;
 }
 
@@ -4263,11 +4262,6 @@ nb. use of char * and array deref is the best kind of incorrect.
 @d LBC_FLAGS            0x00c00000
 @d LBC_TARGET           0x003f0000
 @#
-@d LBC_ADDRESS_REGISTER 0x00000000 /* Zero. */
-@d LBC_ADDRESS_RELATIVE 0x00800000
-@d LBC_ADDRESS_INDIRECT 0x00400000
-@d LBC_ADDRESS_ABSOLUTE 0x00c00000 /* Unused */
-@#
 @d LBC_OBJECT_REGISTER  0x00000000 /* Zero. */
 @d LBC_OBJECT_INTEGER   0x00800000
 @d LBC_OBJECT_TABLE     0x00400000
@@ -4296,7 +4290,6 @@ error_code interpret_special (instruction, int, cell *);
 error_code
 interpret (void)
 {
-        address link;
         instruction ins; /* Register? A copy of the current instruction. */
         int width;
         error_code reason;
@@ -4364,16 +4357,10 @@ interpret_special (instruction  ins,
                    int          argc,
                    cell        *ret)
 {
-        static cell look[] = { NIL, LFALSE, LTRUE, VOID, LEOF, INVALID0,
-                INVALID1, INVALID2 };
-        cell value;
-
+        static cell look[] = { NIL, LFALSE, LTRUE, VOID };
         if (VAL(ins, argc) < 0 || VAL(ins, argc) > (int) sizeof (look))
                 return LERR_INCOMPATIBLE;
-        value = look[VAL(ins, argc)];
-        if (fixed_p(value) || !special_p(value) || !defined_p(value))
-                return LERR_INCOMPATIBLE;
-        *ret = value;
+        *ret = look[VAL(ins, argc)];
         return LERR_NONE;
 }
 
@@ -4451,7 +4438,7 @@ interpret_save (instruction ins,
         case LR_Ip:@;
                 if (!pointer_p(result))
                         return LERR_INCOMPATIBLE;
-                Ip = (address) pointer(result);
+                Ip = pointer_address(result);
                 return LERR_NONE;
         case LR_Control_Link:@;
                 assert(!"wrong");
@@ -4501,7 +4488,7 @@ case OP_JUMPIF:@;
         if (true_p(VM_Result)) {
                 ortrap(interpret_solo_argument(ins, &Scrap));
                 assert(pointer_p(Scrap));
-                Ip = (address) pointer(Scrap);
+                Ip = pointer_address(Scrap);
         }
 
         break;
@@ -4510,7 +4497,7 @@ case OP_JUMPNOT:@;
         if (false_p(VM_Result)) {
                 ortrap(interpret_solo_argument(ins, &Scrap));
                 assert(pointer_p(Scrap));
-                Ip = (address) pointer(Scrap);
+                Ip = pointer_address(Scrap);
         }
         break;
 
@@ -7353,6 +7340,15 @@ assembly_encode_ALOT (int          argc,
                       cell         argv,
                       instruction *ret)
 {
+        static int code[] = {
+                 0, -1, /* NUL, POINTER */
+                -1,  1, /* LFALSE */
+                -1, -1, /* INVALID0 */
+                -1,  2, /* LTRUE */
+                -1, -1, /* INVALID1 */
+                -1,  3, /* VOID */
+                -1, -1, /* INVALID2 */
+                -1 };
         static int mask[3] = { 0,
                 htobe32(LBC_FIRST_INTEGER),
                 htobe32(LBC_SECOND_INTEGER) }; // part of opcode
@@ -7374,7 +7370,10 @@ integer:
                 argv = argv & 0xff;
                 *ret = mask[argc];
         } else {
-                argv = (((A(argv)->dex + 1) / 2) & 0x7f) | 0x80;
+                assert(A(argv)->dex >= 0 && A(argv)->dex <= (long) sizeof (code));
+                argv = code[A(argv)->dex] | 0x80;
+                if (argv == -1)
+                        return LERR_INCOMPATIBLE;
                 *ret = 0;
         }
         *ret |= htobe32(argv << ((2 - argc) * 8));
@@ -8213,13 +8212,6 @@ llt_out_match_p (cell got,
                 return pair_p(got)
                         && llt_out_match_p(A(got)->sin, A(want)->sin)
                         && llt_out_match_p(A(got)->dex, A(want)->dex);
-        if (pointer_p(want)) {
-                if (!pointer_p(got))
-                        return false;
-                if (pointer(got) != pointer(want))
-                        return false;
-                return llt_out_match_p(pointer_datum(got), pointer_datum(want));
-        }
         if (closure_p(want)) {
                 if (!closure_p(got))
                         return false;
