@@ -1,0 +1,12 @@
+For the moment bugs or missing features I've noted as lossless has
+been developed are marked by @.TODO@> in lossless.w which includes
+them in the TODO section in the index. The associated section also
+includes a TODO marker somewhere describing what's the broken part.
+
+Lossless should build, even if it doesn't do much, on any complete
+computer, ie. a proper unix or one of the toys they call computers
+with the necessary build tools installed. README list the packages
+which need to be installed then make all or test should `just work'.
+
+If it doesn't, or if you find a bug or have an idea or even a diff
+file suggesting an improvement, please email it to chohag@jtan.com.

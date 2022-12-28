@@ -1,0 +1,112 @@
+Hacking on lossless guts:
+
+At heart lossless is a virtual machine interpreting bytecode.
+
+The VM is defined in lossless.w which compiles to lossless.c (et al).
+
+lossless.w also defines essential objects, memory management and
+an assembly parser/compiler.
+
+The file evaluate.la is written in that assembly language. It's
+compiled by the runtime defined in lossless.w into bytecode that
+the virtual machine interprets.
+
+evaluate.la includes routines for parsing a subset of
+lossless/s-expressions and a basic lisp evaluator.
+
+Also "primitives" which are lossless core routines declared in
+lossless.w and defined in evaluate.la.
+
+evaluate.la is misnamed as its scope has grown wildly.
+
+barbaroi.ll is written in lossless. It adds more routines to the
+root environment and will eventually build on the primitives to
+make a more civilised environment. It's interpreted by the evaluator
+defined in evaluate.la and is intended to be the last or penultimate
+step of bringing up a minimal lossless environment.
+
+Lossless is a lisp/scheme variant and in the process of being
+defined. Most of that is being done by barbaroi.ll.
+
+On the other hand the assembly language is simple and unlikely to
+change much (until it's ripped out). The focus has not been on a
+supremely efficient language/bytecode/interpreter but one which
+"properly" encapsulates lossless' core concepts without constraining
+(too much) future improvements.
+
+Or: it's shit but because it's simplistic enough to refactor easily.
+
+There are 32 registers. Common registers r0-r14 and special registers.
+
+Lines in a file which begin with a comment character are ignored: # ; '
+
+Any other character beginning a line is a label for that or the next line.
+
+After space the next token is an opcode.
+
+After more space the next token is the arguments.
+
+Arguments are separated by comma (,) and *not* space.
+
+After more space is comments.
+
+Comments are *not* ignored but saved along with the bytecode. They
+are not otherwise *interpreted*.
+
+Argument types are identified by a preceeding character. The opcode
+determines whether arguments are permitted (see below).
+
+        ' object; only symbols supported so far
+        # constant
+        @ address
+        * global object
+        [-+0-9] integer
+        () nil
+        anything else is interpreted as a register
+
+        Constants: #f #t #VOID
+
+Also integers in other bases, optionally preceeded by [-+] (or maybe
+I only did this in the lossless parser?), the [bodx] token is
+case-insensitive:
+
+        #b[01]+
+        #o[0-7]+
+        #d[0-9]+
+        #x[0-9a-fA-F]+
+
+These specials (except #VOID which only shows up literally in the
+assembly) are a subset of the tokens interpreted by lossless which
+begin with [-+]# but otherwise identical.
+
+Opcodes which take 2 arguments (destination and source) can accept
+any object type. Opcodes which take 3 can only take constants, tiny
+integers and registers.
+
+Interesting special registers (case insensitive):
+
+scrap/tmp       "temporary"; only guaranteed to keep its value
+                between one opcode ending and the next beginning
+
+accumulator/acc Accumulator; misc use; usually the return value
+
+argument-list/args
+expression/expr Used by the evaluator
+
+control-link/clink
+                The stack
+
+environment/env The current run-time environment
+
+root            The root environment
+
+ip              Instruction pointer
+
+The others are used but not interesting or are have plans.
+
+Most registers can store anything. The main exceptions are ip,
+root/env and the clink.
+
+Direct jumps are performed by writing to ip. Subroutines are called
+by PUSH!-ing to clink then jumping. Who decides what happens to
+registers when calling functions is all over the place.

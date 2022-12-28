@@ -1,19 +1,36 @@
-NOTE:   The Lossless interpreter has not yet integrated I/O.
+Note that is project is very much a work in progress in its early
+stages. Although the intent is to make something which can be
+approached by anyone, it isn't. It does work, however, for what it
+is and so if doing nothing more than
 
-        In order to see anything you will need to compile with
-        -DLDEBUG to enable stdio-based printing.
+        make test
 
-------------------------------------------------------------------------
+doesn't eventually say
 
-Building Lossless is a two stage process: the first stage, which
-can be bypassed, processes the CWEB sources (*.w) to produce the
-printer (*.tex) and C (*.c & *.h) sources. The second stage compiles
-the C sources or prints the literature.
+        All tests successful.
 
-The Makefile has been adapted to work on BSD and GNU make but this
-is probably an impossible pipe dream in the long term. Apart from
-the author's OpenBSD, Lossless has so far been known to build on
-Debian (et al) and FreeBSD.
+hopefully in a reassuring green colour then that's a major bug which
+I would very much like to know about. Please see the file BUGS for
+more information about known bugs and how to report any more that
+you find.
+
+On the other hand if you're prepared to roll your sleeves up you
+can see the file HACKING for a brief overview of the lossless source
+files and the run-time.
+
+The rest of this file is written as though it's a normal README
+written for a project which works and is complete.
+
+Building Lossless is on the insides a two stage process: the first
+stage, which can be bypassed, processes the CWEB sources (*.w) to
+produce the printer (*.tex) and C (*.c & *.h) sources. The second
+stage compiles the C sources to an executable, or the printer sources
+to a readable document.
+
+The Makefile has been carefully crafted to work with BSD and GNU
+make but this is probably an impossible pipe dream in the long term.
+Apart from the author's OpenBSD, Lossless has so far been known in
+the past to build on Debian (et al) and FreeBSD.
 
 TeX/CWEB:
 
@@ -37,20 +54,14 @@ TeX/CWEB:
 
 Quirks:
 
-        The hack which stands in for a real REPL requires perl to
-        build (see bin/lloader) and links against libedit at run-time
-        to read user input.
+        The REPL has been removed from this development version and
+        so there is no `all' or `lossless' make target. The main
+        way to hack on lossless is through writing test cases and/or
+        hacking on evaluate.la/barbaroi.ll --- see HACKING.
 
 To build on OpenBSD:
 
-        $ make DEBUG=-DLDEBUG
-
-        Set DEBUG in the environment for convenience:
-        $ export DEBUG='-DLDEBUG'
-        $ make
-
-        DEBUG comes via CFLAGS so be sure to include $(DEBUG) if
-        CFLAGS is customised.
+        $ make test
 
 Useful targets:
 
@@ -68,6 +79,12 @@ Useful targets:
 
 The available documentation can be read from within the development
 directory by updating MANPATH:
+
+        Note that there have been significant changes since this
+        documentation was first written which invalidates most of
+        it. The point was to define the documentations *structure*
+        though, and so it stays as-is for now. It's not like it's
+        going to pollute anyone's manpage namespace.
 
         $ MANPATH=:$PWD/man
         $ make man/mandoc.db      Rebuild the manual pages' index
