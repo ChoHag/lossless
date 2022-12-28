@@ -1440,8 +1440,8 @@ error_code alloc_segment (half, intptr_t, segment  **);
 error_code claim_segment (segment *, cell, cell_tag);
 error_code new_segment_imp (heap *, half, intptr_t, cell_tag,
         cell_tag, cell *);
-error_code segment_peek (cell, half, int, bool, cell *);
-error_code segment_poke (cell, half, int, bool, cell);
+error_code segment_peek (cell, half, int, cell *);
+error_code segment_poke (cell, half, int, cell);
 error_code segment_resize_m (cell, half);
 
 @ @<Initialise memory...@>=
@@ -1578,7 +1578,7 @@ up by the garbage collector. The contents are copied as far as they
 will fit.
 
 @<Intern a previously allocated segment@>=
-TAG_SET_M(o, FORM_SEGMENT_INTERN); /* Do this first to turn the atom opaque. */
+TAG_SET_M(o, T(o) + 1); /* Do this first to turn the atom opaque. */
 old = segment_object(o)->base;
 new = A(o)->buffer;
 for (i = 0; i < nlength; i++)
@@ -1597,7 +1597,7 @@ new = embiggen->base;
 for (i = 0; i < olength; i++)
         new[i] = old[i];
 pthread_mutex_lock(&Allocations_Lock);
-orreturn(claim_segment(embiggen, o, FORM_SEGMENT));
+orreturn(claim_segment(embiggen, o, T(o) - 1));
 pthread_mutex_unlock(&Allocations_Lock);
 
 @ Resizing a segment which was not and will not be interned is
@@ -1640,7 +1640,6 @@ error_code
 segment_peek (cell  o,
               half  index, /* Always byte address? */
               int   width, /* 1, 2, 4, 8 */
-              bool  lilliput,
               cell *ret)
 {
         byte *s;
@@ -1652,20 +1651,12 @@ segment_peek (cell  o,
         assert(index >= 0 && index < segment_length_c(o));
         assert(width == 1 || width == 2 || width == 4 || width == 8);
         s = segment_base(o);
-        if (lilliput)
-                switch (width) {
-                case 1: v = ((uint8_t *) s)[index];@+ break;
-                case 2: v = le16toh(*((uint16_t *) (s + index)));@+ break;
-                case 4: v = le32toh(*((uint32_t *) (s + index)));@+ break;
-                case 8: v = le64toh(*((uint64_t *) (s + index)));@+ break;
-                }
-        else
-                switch (width) {
-                case 1: v = ((uint8_t *) s)[index];@+ break;
-                case 2: v = be16toh(*((uint16_t *) (s + index)));@+ break;
-                case 4: v = be32toh(*((uint32_t *) (s + index)));@+ break;
-                case 8: v = be64toh(*((uint64_t *) (s + index)));@+ break;
-                }
+        switch (width) {
+        case 1: v = ((uint8_t *) s)[index];@+ break;
+        case 2: v = be16toh(*((uint16_t *) (s + index)));@+ break;
+        case 4: v = be32toh(*((uint32_t *) (s + index)));@+ break;
+        case 8: v = be64toh(*((uint64_t *) (s + index)));@+ break;
+        }
         if (v > WORD_MAX) {
                 orreturn(new_int(2, false, ret));
                 int_buffer_c(*ret)[1] = *(word *) &v;
@@ -1681,34 +1672,33 @@ error_code
 segment_poke_m (cell  o,
                 half  index, /* Always byte address? */
                 int   width, /* 1, 2, 4, 8 */
-                bool  lilliput,
                 cell  lvalue)
 {
         byte *s;
-        uintmax_t cvalue;
+        word wvalue;
+        uintmax_t cvalue, max_poke;
+        error_code reason;
 
         assert(!heap_other_p(ATOM_TO_HEAP(o)));
         assert(segment_p(o));
         assert(index >= 0 && index < segment_length_c(o));
         assert(width == 1 || width == 2 || width == 4 || width == 8);
-        assert(integer_p(lvalue));
-        assert(false);
-        cvalue = A(lvalue)->value & ((2 ^ (8 * width)) - 1);
+        max_poke = (1 << (8 * width)) - 1;
+        if (fixed_p(lvalue)) {
+                assert(fixed_value(lvalue) >= 0 && fixed_value(lvalue) <= (word) max_poke);
+                cvalue = fixed_value(lvalue);
+        } else {
+                orassert(int_value(lvalue, &wvalue));
+                assert(wvalue >= 0 && wvalue <= (word) max_poke);
+                cvalue = wvalue;
+        }
         s = segment_base(o);
-        if (lilliput)
-                switch (width) {
-                case 1: ((uint8_t *) s)[index] = cvalue;@+ break;
-                case 2: *((uint16_t *) (s + index)) = htole16(cvalue);@+ break;
-                case 4: *((uint32_t *) (s + index)) = htole32(cvalue);@+ break;
-                case 8: *((uint64_t *) (s + index)) = htole64(cvalue);@+ break;
-                }
-        else
-                switch (width) {
-                case 1: ((uint8_t *) s)[index] = cvalue;@+ break;
-                case 2: *((uint16_t *) (s + index)) = htobe16(cvalue);@+ break;
-                case 4: *((uint32_t *) (s + index)) = htobe32(cvalue);@+ break;
-                case 8: *((uint64_t *) (s + index)) = htobe64(cvalue);@+ break;
-                }
+        switch (width) {
+        case 1: ((uint8_t *) s)[index] = cvalue;@+ break;
+        case 2: *((uint16_t *) (s + index)) = htobe16(cvalue);@+ break;
+        case 4: *((uint32_t *) (s + index)) = htobe32(cvalue);@+ break;
+        case 8: *((uint64_t *) (s + index)) = htobe64(cvalue);@+ break;
+        }
         return LERR_NONE;
 }
 
@@ -2427,7 +2417,9 @@ array scan will not be expensive.
 @d hashtable_free_c(O)          (fixed_value(array_base(O)[array_length_c(O) - 1]))
 @d hashtable_free_p(O)          (hashtable_free_c(O) > 0)
 @d hashtable_unused_c(O)        (hashtable_free_c(O) + hashtable_blocked_c(O))
-@d hashtable_used_c(O)          (hashtable_length_c(O) - hashtable_unused_c(O))
+@d hashtable_used_c(O)          (hashtable_length_c(O) == 0 ? 0 : hashtable_used_c_imp(O))
+@d hashtable_used_c_imp(O)      ((signed) hashtable_default_free(hashtable_length_c(O))
+        - hashtable_unused_c(O))
 @#
 @d hashtable_set_blocked_m(O,V) (array_base(O)[array_length_c(O) - 2] = fix(V))
 @d hashtable_set_free_m(O,V)    (array_base(O)[array_length_c(O) - 1] = fix(V))
@@ -3161,8 +3153,11 @@ env_search (cell  o,
 @d record_p(O)               (instance_p(O) || template_p(O))
 @d record_template(O)        (object_spare(O))
 @d record_template_length(O) (hashtable_used_c(O))
+@<Fun...@>=
+error_code new_record (cell, cell *);
+error_code new_instance (cell, cell *);
 
-@c
+@ @c
 error_code
 new_record (cell  template,
             cell *ret)
@@ -3217,6 +3212,26 @@ half scow_length (cell);
 @ @<Initialise for...@>=
 orabort(alloc_mem(NULL, SCOW_Length * sizeof (scow), 0,
         (void **) &SCOW_Attributes));
+
+@* Ropes.
+
+@ Construct the \.{*rope\%leaf*} object for construction during
+parsing.
+
+@<Initialise miscellaneous objects@>=
+orreturn(new_hashtable(3, &nrec));
+orreturn(new_symbol_const("segment", &ltmp));
+orreturn(cons(ltmp, fix(0), &ltmp));
+orreturn(hashtable_save_m(nrec, ltmp, false));
+orreturn(new_symbol_const("offset", &ltmp));
+orreturn(cons(ltmp, fix(1), &ltmp));
+orreturn(hashtable_save_m(nrec, ltmp, false));
+orreturn(new_symbol_const("length", &ltmp));
+orreturn(cons(ltmp, fix(2), &ltmp));
+orreturn(hashtable_save_m(nrec, ltmp, false));
+orreturn(new_record(nrec, &nrec));
+orreturn(new_symbol_const("*rope%leaf*", &ltmp));
+orreturn(env_save_m(Root, ltmp, nrec, false));
 
 @** I/O. None.
 
@@ -3312,8 +3327,9 @@ init_vm (void)
 {
         address atmp, adefault;
         cell copy[3], eval[3], list[3], optional[3];
-        cell ltmp, jexit, sig_copy, sig_eval, sig_list, sig_optional;
+        cell jexit, sig_copy, sig_eval, sig_list, sig_optional;
         cell sig[SIGNATURE_LENGTH];
+        cell ltmp, nrec;
         char btmp[1024], *bptr; /* Way more space than necessary. */
         int i, j, k;
         error_code reason;
@@ -3322,6 +3338,7 @@ init_vm (void)
         @<Initialise error symbols@>@;
         @<Initialise assembler symbols@>@;
         @<Initialise \Ls/ primitives@>@;
+        @<Initialise miscellaneous objects@>@;
         @<Initialise evaluator and other bytecode@>@;
         @<Link \Ls/ primitives to installed bytecode@>@;
         @<Initialise \Ls/ procedures@>@;
@@ -3518,6 +3535,7 @@ typedef enum {
         OP_HALT, /* Instruction 0 for uninitialised memory. */
         OP_ADD,
         OP_ADDRESS,
+        OP_ALLOC,
         OP_ARRAY,
         OP_ARRAY_P,
         OP_BLOCKED,
@@ -3587,11 +3605,10 @@ typedef enum {
 
 @
 @d NARG 0 /* No argument. */
-@d AADD 1 /* An address. */
-@d ALOB 2 /* An \Ls/ object. */
-@d ALOT 3 /* A tiny \Ls/ object. */
-@d AREG 4 /* A register. */
-@d ARGH 5 /* A trap code (symbol, encoded as an 8-bit iny). */
+@d ALOB 1 /* A \Ls/ object or address. */
+@d ALOT 2 /* A tiny \Ls/ object. */
+@d AREG 3 /* A register. */
+@d ARGH 4 /* A trap code (symbol, encoded as an 8-bit iny). */
 @<Global...@>=
 shared opcode_table Op[OPCODE_LENGTH] = {@|
         [OP_ENVIRONMENT_P]  = { NIL, AREG, ALOB, NARG },@|
@@ -3621,14 +3638,14 @@ shared opcode_table Op[OPCODE_LENGTH] = {@|
         [OP_CMPLT_P]        = { NIL, AREG, ALOT, ALOT },@|
         [OP_DELIMIT]        = { NIL, AREG, NARG, NARG },@|
         [OP_ERASE_M]        = { NIL, AREG, ALOT, ALOT },@|
-        [OP_JUMPNOT]        = { NIL, AREG, AADD, NARG },@|
+        [OP_JUMPNOT]        = { NIL, AREG, ALOB, NARG },@|
         [OP_POKE2_M]        = { NIL, AREG, ALOT, ALOT },@|
         [OP_POKE4_M]        = { NIL, AREG, ALOT, ALOT },@|
         [OP_POKE8_M]        = { NIL, AREG, ALOT, ALOT },@|
         [OP_TABLE_P]        = { NIL, AREG, ALOB, NARG },@|
 
         [OP_EXTEND]         = { NIL, AREG, ALOB, NARG },@|
-        [OP_JUMPIF]         = { NIL, AREG, AADD, NARG },@|
+        [OP_JUMPIF]         = { NIL, AREG, ALOB, NARG },@|
         [OP_LENGTH]         = { NIL, AREG, ALOB, NARG },@|
         [OP_LOOKUP]         = { NIL, AREG, ALOT, ALOT },@|
         [OP_PAIR_P]         = { NIL, AREG, ALOB, NARG },@|
@@ -3637,20 +3654,21 @@ shared opcode_table Op[OPCODE_LENGTH] = {@|
         [OP_RECORD]         = { NIL, AREG, ALOB, NARG },@|
         [OP_SYMBOL]         = { NIL, AREG, ALOT, ALOT },@|
         [OP_SYNTAX]         = { NIL, AREG, ALOT, ALOT },@|
+        [OP_ALLOC]          = { NIL, AREG, ALOT, ALOT },@|
         [OP_ARRAY]          = { NIL, AREG, ALOT, ALOT },@|
         [OP_PEEK2]          = { NIL, AREG, ALOT, ALOT },@|
         [OP_PEEK4]          = { NIL, AREG, ALOT, ALOT },@|
         [OP_PEEK8]          = { NIL, AREG, ALOT, ALOT },@|
         [OP_POP_M]          = { NIL, AREG, ALOB, NARG },@|
         [OP_SET_M]          = { NIL, AREG, ALOT, ALOT },@|
-        [OP_SPORK]          = { NIL, AREG, AADD, NARG },@|
+        [OP_SPORK]          = { NIL, AREG, ALOB, NARG },@|
         [OP_TABLE]          = { NIL, AREG, ALOB, NARG },@|
         [OP_BODY]           = { NIL, AREG, ALOB, NARG },@|
         [OP_CONS]           = { NIL, AREG, ALOT, ALOT },@|
         [OP_FREE]           = { NIL, AREG, ALOB, NARG },@|
         [OP_HALT]           = { NIL, NARG, NARG, NARG },@|
         [OP_JOIN]           = { NIL, AREG, ALOB, NARG },@|
-        [OP_LOAD]           = { NIL, AREG, AADD, NARG },@|
+        [OP_LOAD]           = { NIL, AREG, ALOB, NARG },@|
         [OP_OPEN]           = { NIL, AREG, ALOB, NARG },@|
         [OP_PEEK]           = { NIL, AREG, ALOT, ALOT },@|
         [OP_TRAP]           = { NIL, ARGH, NARG, NARG },@|
@@ -3711,6 +3729,7 @@ shared char *Opcode_Label[OPCODE_LENGTH] = {@|
         [OP_SYMBOL]         = "VM:SYMBOL",@|
         [OP_SYNTAX]         = "VM:SYNTAX",@|
         [OP_PUSH_M]         = "VM:PUSH!",@|
+        [OP_ALLOC]          = "VM:ALLOC",@|
         [OP_ARRAY]          = "VM:ARRAY",@|
         [OP_PEEK2]          = "VM:PEEK2",@|
         [OP_PEEK4]          = "VM:PEEK4",@|
@@ -4669,14 +4688,20 @@ case OP_ARRAY:@;
         break;
 
 case OP_RESIZE_M:@;
-        ortrap(interpret_argument(ins, 0, &VM_Result)); /* Array */
+        ortrap(interpret_argument(ins, 0, &VM_Result)); /* Array or segment */
         ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* New length */
         ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Filler */
-        assert(fixed_p(VM_Arg1) && fixed_value(VM_Arg1) >= 0
-                && fixed_value(VM_Arg1) <= ARRAY_MAX);
-        assert(defined_p(VM_Arg2));
-        ortrap(array_resize_m(VM_Result, fixed_value(VM_Arg1), VM_Arg2));
-        ortrap(interpret_save(ins, VM_Result));
+        assert(fixed_p(VM_Arg1) && fixed_value(VM_Arg1) >= 0);
+        if (array_p(VM_Result)) {
+                assert(fixed_value(VM_Arg1) <= ARRAY_MAX);
+                assert(defined_p(VM_Arg2));
+                ortrap(array_resize_m(VM_Result, fixed_value(VM_Arg1), VM_Arg2));
+        } else {
+                assert(segment_p(VM_Result));
+                assert(fixed_value(VM_Arg1) <= SEGMENT_MAX);
+                assert(VM_Arg2 == fix(0));
+                ortrap(segment_resize_m(VM_Result, fixed_value(VM_Arg1)));
+        }
         break;
 
 @ Everything but numbers are \.{is?\/}-identical based on pointer
@@ -4880,14 +4905,27 @@ in the accumulator.
 
 @<Carry out...@>=
 case OP_SYMBOL:@;
-        ortrap(interpret_argument(ins, 0, &VM_Result));
-        ortrap(interpret_argument(ins, 1, &VM_Arg1));
-        ortrap(interpret_argument(ins, 2, &VM_Arg2));
+        ortrap(interpret_argument(ins, 0, &VM_Result)); /* Segment */
+        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Offset */
+        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Length */
         assert(fixed_p(VM_Arg1));
         assert(fixed_p(VM_Arg2));
         ortrap(new_symbol_segment(VM_Result, fixed_value(VM_Arg1),
                 fixed_value(VM_Arg2), &VM_Result));
         Accumulator = VM_Result;
+        break;
+
+@ Technically integer not fixed, but has to be fixed to be small enough.
+
+@<Carry out...@>=
+case OP_ALLOC:
+        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Length */
+        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Alignment or filler */
+        assert(fixed_p(VM_Arg1));
+        assert(fixed_p(VM_Arg2));
+        ortrap(new_segment(fixed_value(VM_Arg1),
+                fixed_value(VM_Arg2), &VM_Result));
+        ortrap(interpret_save(ins, VM_Result));
         break;
 
 @ @<Carry out...@>=
@@ -4905,7 +4943,7 @@ case OP_PEEK:
 PEEK:
         ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Segment */
         ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Offset */
-        ortrap(segment_peek(VM_Arg1, fixed_value(VM_Arg2), width, false,
+        ortrap(segment_peek(VM_Arg1, fixed_value(VM_Arg2), width,
                 &VM_Result));
         ortrap(interpret_save(ins, VM_Result));
         break;
@@ -4927,7 +4965,7 @@ POKE:
         ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Offset */
         ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Value */
         ortrap(segment_poke_m(VM_Result, fixed_value(VM_Arg1), width,
-                false, VM_Arg2));
+                VM_Arg2));
         break;
 
 @ @<Carry out...@>=
@@ -4953,9 +4991,10 @@ case OP_MUL:
         break;
 
 @
-RECORD? <target>,<object>,()
-RECORD? <target>,<object>,<object>
-RECORD? <target>,<object>,<record>
+RECORD? <target>,<object>,()       \# <O> record\%template?
+RECORD? <target>,<object>,<object> \# <O> record?
+RECORD? <target>,<object>,<record> \# <O> instance-of? <R>
+There is no direct record\%instance?
 @<Carry out...@>=
 case OP_RECORD_P:
         ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Object */
@@ -5019,7 +5058,8 @@ case OP_SET_M:
         if (array_p(VM_Arg1))
                 assert(fixed_value(VM_Arg2) < array_length_c(VM_Arg1));
         else
-                assert(fixed_value(VM_Arg2) < record_template_length(VM_Arg1));
+                assert(fixed_value(VM_Arg2)
+                        < record_template_length(record_template(VM_Arg1)));
         array_base(VM_Arg1)[fixed_value(VM_Arg2)] = VM_Result;
         break;
 
@@ -5095,8 +5135,8 @@ error_code pstas_argument_address_first (statement_parser *, half);
 error_code pstas_argument_encode_error (statement_parser *, half, half);
 error_code pstas_argument_encode_register (statement_parser *, byte *,
         half, half);
-error_code pstas_argument_encode_symbol (statement_parser *,
-        half, half);
+error_code pstas_argument_encode_global (statement_parser *, half, half);
+error_code pstas_argument_encode_symbol (statement_parser *, half, half);
 error_code pstas_argument_error (statement_parser *, half);
 error_code pstas_argument_far_address (statement_parser *, half);
 error_code pstas_argument_local_address (statement_parser *, half);
@@ -5634,8 +5674,7 @@ pstas_argument (statement_parser *pstate,
                 return pstas_invalid(pstate, offset);
         assert(*pstate->signature != NARG);
         switch (*pstate->signature) {
-        case AADD: return pstas_argument_address(pstate, offset);
-        case ALOB: return pstas_argument_object(pstate, true, offset);
+        case ALOB: return pstas_argument_address(pstate, offset);
         case AREG: return pstas_argument_register(pstate, offset);
         case ALOT: return pstas_argument_object(pstate, false, offset);
         case ARGH: return pstas_argument_error(pstate, offset);
@@ -5986,6 +6025,11 @@ pstas_argument_object (statement_parser *pstate,
                         return pstas_any_symbol(pstate, pstas_argument_encode_symbol, offset + 1);
                 else
                         return pstas_invalid(pstate, offset);
+        case '*':
+                if (full)
+                        return pstas_any_symbol(pstate, pstas_argument_encode_global, offset);
+                else
+                        return pstas_invalid(pstate, offset);
         default:
                 if (ascii_digit_p(pstas_source_byte(pstate, offset)))
                         return pstas_argument_signed_number(pstate, false, full, offset);
@@ -6005,6 +6049,23 @@ pstas_argument_encode_symbol (statement_parser *pstate,
 
         orreturn(new_symbol_segment(pstate->source, pstate->start + offset,
                 length_offset - offset, &sym));
+        orassert(statement_set_argument_m(pstate->partial,
+                pstate->argument, ARGUMENT_OBJECT, sym));
+        return pstas_pre_next_argument(pstate, length_offset);
+}
+
+@ @c
+error_code
+pstas_argument_encode_global (statement_parser *pstate,
+                              half length_offset,
+                              half offset)
+{
+        cell sym;
+        error_code reason;
+
+        orreturn(new_symbol_segment(pstate->source, pstate->start + offset,
+                length_offset - offset, &sym));
+        orreturn(env_search(Root, sym, &sym));
         orassert(statement_set_argument_m(pstate->partial,
                 pstate->argument, ARGUMENT_OBJECT, sym));
         return pstas_pre_next_argument(pstate, length_offset);
@@ -7214,7 +7275,6 @@ incompatible: /* This exit point is common; here is as good a place as any. */
         goto Trap;
 }
 switch (opb->arg1) {
-case AADD:
 case ALOB:
         @<Encode a large object and |break|@>
 case ALOT:

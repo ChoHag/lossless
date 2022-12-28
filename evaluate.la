@@ -1407,21 +1407,23 @@ Primitive/define!/lambda/continue
         LOAD    ip,@!Restore/r0
 
 !Primitive/record/instance-of?
-        RECORD? tmp,r0,r0
+        RECORD? tmp,r0,r0       r0 a record%template or record%instance?
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
-1h      RECORD? tmp,r0,()
+1h      RECORD? tmp,r0,()       r0 a record%template?
         JUMPIF  tmp,@1f
-        TEMPLATE r0,r0
-1h      RECORD? acc,r1,r0
-        LOAD    ip,@!Restore/r0
+        TEMPLATE r0,r0          r0 is a record%instance, load its template
+1h      RECORD? acc,r1,r0       Is r1 an instance of r0?
+        LOAD    ip,@!Restore/r1
 
 #       (new-record <unique-label> ...)
 #
 !Primitive/new-record
         CMPIS?  tmp,r0,()
         JUMPNOT tmp,@1f
-        TRAP    'incompatible-operand
+        TABLE   r0,0
+        RECORD  acc,r0
+        LOAD    ip,@!Restore/r0
 1h      PAIR?   tmp,r0
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
@@ -1436,8 +1438,8 @@ Primitive/new-record/next
 1h      CAR     acc,r0
         SYMBOL? tmp,acc
         JUMPIF  tmp,@1f
-1h      TRAP    'incompatible-operand
-        EXISTS? tmp,r1,acc
+        TRAP    'incompatible-operand
+1h      EXISTS? tmp,r1,acc
         JUMPNOT tmp,@1f
         TRAP    'incompatible-operand     conflicted-binding?
 1h      CONS    acc,acc,r2
@@ -1451,6 +1453,7 @@ Primitive/new-record/next
 
 #       (new-instance <record>)
 #
+#       r0 has template
 !Primitive/new-instance
         RECORD? tmp,r0,r0       Instance or template?
         JUMPIF  tmp,@1f
@@ -1467,8 +1470,7 @@ Primitive/new-record/next
 
 #       (record/ref <record> <label>)
 !Primitive/record/ref
-        LOAD    tmp,@!Restore/r1
-        PUSH!   clink,tmp
+        PUSH!   clink,@!Restore/r1
 Primitive/record/ref/imp
         RECORD? tmp,r0,()       Template?
         JUMPNOT tmp,@1f
@@ -1499,8 +1501,7 @@ Primitive/record/ref/imp
         POP!    ip,clink
 
 !Primitive/record/set!
-        LOAD    tmp,@1f
-        PUSH!   clink,tmp
+        PUSH!   clink,@1f
         LOAD    ip,@Primitive/record/ref/imp
 1h      SET!    r0,r1,r2
         LOAD    ip,@!Restore/r2
@@ -1512,7 +1513,7 @@ Primitive/record/ref/imp
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      TEMPLATE r0,r0
-2h      LOAD    acc,r0
+2h      LOAD    acc,r0          nb. this hashtable should be copied or read-only so the record template cannot be changed
         LOAD    ip,@!Restore/r0
 
 ########
@@ -1879,8 +1880,6 @@ Primitive/read-expression/unimplemented-or-forbidden?
         JUMPIF  acc,@1f
         CMPEQ?  acc,r3,#x24     $
         JUMPIF  acc,@1f
-        CMPEQ?  acc,r3,#x22     "
-        JUMPIF  acc,@1f
         CMPEQ?  acc,r3,#x3b     ;
         JUMPIF  acc,@1f
         LOAD    tmp,#x7c        |
@@ -1914,9 +1913,9 @@ Primitive/read-expression/source-byte
 #
 #       -: r2: segment length
 #       -: r3: byte, result type
-#       -: r4: base offset, object
-#       -: r5: negative?
-#       -: r6: numeric sum
+#       -: r4: base/string offset, object
+#       -: r5: negative?, string buffer max length
+#       -: r6: numeric sum, accumulated string
 #       -: r7: numeric multiplier
 #
 !Primitive/read-expression
@@ -2030,7 +2029,9 @@ Primitive/read-expression/imp
         JUMPNOT tmp,@1f
         LOAD    r5,#f
         LOAD    ip,@Primitive/read-expression/possible-number
-1h      LOAD    tmp,@1f
+1h      CMPEQ?  tmp,r3,#x22     "
+        JUMPIF  tmp,@Primitive/read-expression/escaped-string
+        LOAD    tmp,@1f
         PUSH!   clink,tmp
         LOAD    ip,@Primitive/read-expression/digit?
 1h      JUMPIF  acc,@Primitive/read-expression/number
@@ -2474,6 +2475,62 @@ Primitive/read-expression/number/finish
 1h      LOAD    acc,r6          Number
         LOAD    r3,'object
         LOAD    ip,@Primitive/read-expression/back-up
+
+#       (In)    r0: segment
+#       (In)    r1: byte offset of "
+#
+Primitive/read-expression/escaped-string
+        LOAD    r4,0
+        LOAD    r5,64
+        ALLOC   r6,r5,0
+Primitive/read-expression/escaped-string/next
+        ADD     r1,r1,1
+        PUSH!   clink,@1f
+        LOAD    ip,@Primitive/read-expression/source-byte
+1h      JUMPNOT acc,@1f         ... if (not) #eof
+        TRAP    'syntax-error   No closing "
+1h      CMPEQ?  tmp,r3,#x22     "
+        JUMPIF  tmp,@Primitive/read-expression/escaped-string/finish
+        CMPEQ?  tmp,r3,#x23     #
+        JUMPNOT tmp,@Primitive/read-expression/escaped-string/copy
+        ADD     r1,r1,1
+        PUSH!   clink,@1f
+        LOAD    ip,@Primitive/read-expression/source-byte
+1h      JUMPNOT acc,@1f         ... if (not) #eof
+        TRAP    'syntax-error   No escapee _or_ closing "
+1h      CMPEQ?  tmp,r3,#x22     "
+        JUMPIF  tmp,@Primitive/read-expression/escaped-string/copy
+        CMPEQ?  tmp,r3,#x2e     .
+        JUMPNOT tmp,@1f
+        LOAD    r3,#x23         #
+        LOAD    ip,@Primitive/read-expression/escaped-string/copy
+1h      TRAP    'syntax-error
+
+#       byte in r3, write offset in r4, segment length in r5, segment in r6
+Primitive/read-expression/escaped-string/copy
+        CMPEQ?  tmp,r4,r5
+        JUMPNOT tmp,@1f
+        PUSH!   clink,@1f
+        LOAD    ip,@Primitive/read-expression/any-string/grow
+1h      POKE!   r6,r4,r3
+        ADD     r4,r4,1
+        LOAD    ip,@Primitive/read-expression/escaped-string/next
+
+Primitive/read-expression/any-string/grow
+        MUL     r5,r5,2
+        RESIZE! r6,r5,0
+        POP!    ip,clink
+
+#       Record order is segment=0 offset=1 length=2
+#
+Primitive/read-expression/escaped-string/finish
+        RESIZE! r6,r4,0
+        RECORD  acc,*rope%leaf*
+        SET!    acc,0,r6        segment
+        SET!    acc,1,0         offset
+        SET!    acc,2,r4        length
+        LOAD    r3,'object
+        POP!    ip,clink
 
 Primitive/read-expression/rune
         TRAP    'unimplemented
