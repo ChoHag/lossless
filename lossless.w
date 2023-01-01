@@ -307,6 +307,8 @@ code).
 #include <stdlib.h>
 #include <string.h> /* Bulk memory transfers, and |strlen|. */
 #include "lossless.h"
+#include <dlfcn.h>
+#include <dyncall.h>
 #ifdef LLTEST
 #include <stdarg.h>
 #include "testless.h"
@@ -323,6 +325,7 @@ growth.
 #include <string.h>
 #include <stdio.h> /* To be removed when \Ls/ I/O is usable. */
 #include "lossless.h"
+#include <dlfcn.h>
 @<Data for initialisation@>@;
 
 @ This is the first of the warts which don't have a sensible place
@@ -753,6 +756,11 @@ typedef int16_t half;
 #define HALF_MAX   INT8_MAX
 typedef int8_t half;
 
+@ etc. @<Initialise misc...@>=
+new_global_int("*limit/min-c-int*", INT_MIN);
+new_global_int("*limit/max-c-int*", INT_MAX);
+new_global_int("*limit/max-c-unsigned-int*", UINT_MAX);
+
 @* Atoms. \Ls/ objects are referred to by pointers called {\it
 cells\/}, which point directly to an atom in its heap. Because each
 atom is exactly 4, 8 or 16 bytes wide (depending on machine size)
@@ -858,31 +866,35 @@ typedef union {
                 word  value;
         };
         struct {
-                int8_t length; /* Only 4 bits needed */
-                byte   buffer[INTERN_MAX];
+                byte    buffer[INTERN_MAX];
+                uint8_t length:4; /* Never more than 15 */
+                uint8_t mutable:2;
         };
 } atom;
 
 @ All of the atom formats that \Ls/ recognises.
 
 @d FORM_NONE           (LTAG_NONE | 0x00) /* Unallocated. */
-@d FORM_COLLECTED      (LTAG_NONE | 0x01) /* Garbage collector tombstone. */
-@d FORM_HASHTABLE      (LTAG_NONE | 0x02) /* Key:value (or just key) store. */
-@d FORM_HEAP           (LTAG_NONE | 0x03) /* Preallocated storage for atoms. */
-@d FORM_INTEGER        (LTAG_NONE | 0x04) /* Large integer. */
-@d FORM_RUNE           (LTAG_NONE | 0x05) /* Unicode code point. */
-@d FORM_SEGMENT        (LTAG_NONE | 0x06) /* Large memory allocation. */
-@d FORM_SEGMENT_INTERN (LTAG_NONE | 0x07) /* Tiny memory allocation. */
-@d FORM_SYMBOL         (LTAG_NONE | 0x08) /* Symbol. */
-@d FORM_SYMBOL_INTERN  (LTAG_NONE | 0x09) /* Tiny symbol. */
+@d FORM_CLOP           (LTAG_NONE | 0x01) /* \CEE/\Ls/ bridge function */
+@d FORM_COLLECTED      (LTAG_NONE | 0x02) /* Garbage collector tombstone. */
+@d FORM_HASHTABLE      (LTAG_NONE | 0x03) /* Key:value (or just key) store. */
+@d FORM_HEAP           (LTAG_NONE | 0x04) /* Preallocated storage for atoms. */
+@d FORM_INTEGER        (LTAG_NONE | 0x05) /* Large integer. */
+@d FORM_LIBRARY        (LTAG_NONE | 0x06)
+@d FORM_RUNE           (LTAG_NONE | 0x07) /* Unicode code point. */
+@d FORM_SEGMENT        (LTAG_NONE | 0x08) /* Large memory allocation. */
+@d FORM_SEGMENT_INTERN (LTAG_NONE | 0x09) /* Tiny memory allocation. */
+@d FORM_SYMBOL         (LTAG_NONE | 0x0a) /* Symbol. */
+@d FORM_SYMBOL_INTERN  (LTAG_NONE | 0x0b) /* Tiny symbol. */
 @#
 @d FORM_ARRAY          (LTAG_PDEX | 0x00) /* Zero or more sequential cells. */
 @d FORM_ASSEMBLY       (LTAG_PDEX | 0x01) /* (Partially) assembled bytecode. */
 @d FORM_CSTRUCT        (LTAG_PDEX | 0x02) /* A \CEE/ struct. */
-@d FORM_FILE_HANDLE    (LTAG_PDEX | 0x03) /* File descriptor or equivalent. */
-@d FORM_INSTANCE       (LTAG_PDEX | 0x04) /* A user object instance. */
-@d FORM_TEMPLATE       (LTAG_PDEX | 0x05) /* A user object's template. */
-@d FORM_STATEMENT      (LTAG_PDEX | 0x06) /* A single assembled statement. */
+@d FORM_CSYMBOL        (LTAG_PDEX | 0x03)
+@d FORM_FILE_HANDLE    (LTAG_PDEX | 0x04) /* File descriptor or equivalent. */
+@d FORM_INSTANCE       (LTAG_PDEX | 0x05) /* A user object instance. */
+@d FORM_TEMPLATE       (LTAG_PDEX | 0x06) /* A user object's template. */
+@d FORM_STATEMENT      (LTAG_PDEX | 0x07) /* A single assembled statement. */
 @#
 @d FORM_PAIR           (LTAG_BOTH | 0x00) /* Two pointers (a ``cons cell''). */
 @d FORM_ARGUMENT       (LTAG_BOTH | 0x01) /* An assembly statement argument. */
@@ -903,14 +915,17 @@ implementation or are otherwise related.
 @d argument_p(O)       (form_p((O), ARGUMENT))
 @d array_p(O)          (form_p((O), ARRAY))
 @d assembly_p(O)       (form_p((O), ASSEMBLY))
+@d clop_p(O)           (form_p((O), CLOP))
 @d collected_p(O)      (form_p((O), COLLECTED))
 @d cstruct_p(O)        (form_p((O), CSTRUCT))
+@d csymbol_p(O)        (form_p((O), CSYMBOL))
 @d environment_p(O)    (form_p((O), ENVIRONMENT))
 @d error_p(O)          (form_p((O), ERROR))
 @d file_handle_p(O)    (form_p((O), FILE_HANDLE))
 @d hashtable_p(O)      (form_p((O), HASHTABLE))
 @d heap_p(O)           (form_p((O), HEAP))
 @d instance_p(O)       (form_p((O), INSTANCE))
+@d library_p(O)        (form_p((O), LIBRARY))
 @d opcode_p(O)         (form_p((O), OPCODE))
 @d register_p(O)       (form_p((O), REGISTER))
 @d rune_p(O)           (form_p((O), RUNE))
@@ -957,6 +972,7 @@ new_atom_imp (heap     *where,
         error_code reason;
 
         assert(heap_mine_p(where) || heap_shared_p(where));
+        assert(HEAP_TO_SEGMENT(where)->flags & SEGMENT_FLAG_MUTABLE);
         orreturn(heap_root(where)->fun->alloc(where, ret));
         TAG_SET_M(*ret, ntag);
         A(*ret)->sin = nsin;
@@ -1333,6 +1349,7 @@ heap_alloc_freelist (heap *where,
         error_code reason;
 
         assert(heap_mine_p(where) || heap_shared_p(where));
+        assert(HEAP_TO_SEGMENT(where)->flags & SEGMENT_FLAG_MUTABLE);
         tried = false;
 again:
         next = where;
@@ -1368,6 +1385,7 @@ heap_alloc_pointer (heap *where,
         error_code reason;
 
         assert(heap_mine_p(where) || heap_shared_p(where));
+        assert(HEAP_TO_SEGMENT(where)->flags & SEGMENT_FLAG_MUTABLE);
         tried = false;
 again:
         next = where;
@@ -1409,15 +1427,22 @@ will likely both have the numeric value zero.
 @d object_set_pointer_m(O,V) (A(O)->yin = (V))
 @d object_set_spare_m(O,V)   (A(O)->dex = (V))
 @#
-@d segment_object(O)   ((segment *) object(O))
-@d segment_base(O)     (intern_p(O) ? A(O)->buffer : segment_object(O)->base)
-@d segment_length_c(O) (intern_p(O) ? A(O)->length : segment_object(O)->length)
+@d segment_object(O)       ((segment *) object(O))
+@d segment_base(O)         (intern_p(O) ? A(O)->buffer  : segment_object(O)->base)
+@d segment_length_c(O)     (intern_p(O) ? A(O)->length  : segment_object(O)->length)
+@d segment_flag_c(O)       (intern_p(O) ? A(O)->mutable : segment_object(O)->flags)
+@d segment_mutable_p(O)    (segment_flag_mutable(O) != 0)
+@d segment_flag_mutable(O) ((segment_flag_c(O)) & SEGMENT_FLAG_MUTABLE)
 @#
+@d SEGMENT_FLAG_MUTABLE 0x03
+@d SEGMENT_READONLY 0x00
+@d SEGMENT_WRITABLE 0x03
 @d SEGMENT_MAX HALF_MAX
 @<Type def...@>=
 struct segment {
  struct segment *next, *prev;
         cell owner;
+        int  flags;
         half length, scan;
         byte base[];
 };
@@ -1438,11 +1463,13 @@ extern shared pthread_mutex_t Allocations_Lock;
 @ @<Fun...@>=
 error_code alloc_segment (half, intptr_t, segment  **);
 error_code claim_segment (segment *, cell, cell_tag);
+error_code clop_segment_resize_m (cell *);
 error_code new_segment_imp (heap *, half, intptr_t, cell_tag,
         cell_tag, cell *);
 error_code segment_peek (cell, half, int, cell *);
 error_code segment_poke (cell, half, int, cell);
 error_code segment_resize_m (cell, half);
+error_code segment_set_mutable_m (cell, int);
 
 @ @<Initialise memory...@>=
 orabort(init_osthread_mutex(&Allocations_Lock, false, false));
@@ -1493,6 +1520,7 @@ claim_segment (segment *area,
         Allocations->prev->next = area;
         Allocations->prev = area;
         area->owner = owner;
+        area->flags = SEGMENT_FLAG_MUTABLE;
         A(owner)->yin = area;
         A(owner)->dex = NIL;
         TAG_SET_M(owner, ntag); /* Do this last so the atom remains opaque
@@ -1554,7 +1582,8 @@ segment_resize_m (cell o,
         segment *embiggen;
         error_code reason;
 
-        assert((segment_p(o) || arraylike_p(o)));
+        assert(segment_p(o) || arraylike_p(o));
+        assert(segment_mutable_p(o));
         olength = segment_length_c(o);
         if (nlength == olength)
                 return LERR_NONE; /* Not an error. */
@@ -1629,6 +1658,25 @@ object_set_pointer_m(o, embiggen);
 pthread_mutex_unlock(&Allocations_Lock);
 embiggen->length = nlength;
 
+@ TODO: |mprotect| where possible.
+
+@.TODO@>
+@c
+error_code
+segment_set_mutable_m (cell  o,
+                       int   mute)
+{
+        assert(segment_p(o) || symbol_p(o) || arraylike_p(o));
+        assert(mute == (mute & SEGMENT_FLAG_MUTABLE));
+        if (intern_p(o))
+                A(o)->mutable = mute;
+        else {
+                segment_object(o)->flags &= ~SEGMENT_FLAG_MUTABLE;
+                segment_object(o)->flags |= mute;
+        }
+        return LERR_NONE;
+}
+
 @ Data within a segment is read in words of 1, 2, 4 or 8 bytes. The
 address to read from need not be aligned to a multiple of the size
 of word being read, which may cause a bus fault on some architectures.
@@ -1681,6 +1729,7 @@ segment_poke_m (cell  o,
 
         assert(!heap_other_p(ATOM_TO_HEAP(o)));
         assert(segment_p(o));
+        assert(segment_mutable_p(o));
         assert(index >= 0 && index < segment_length_c(o));
         assert(width == 1 || width == 2 || width == 4 || width == 8);
         max_poke = (1 << (8 * width)) - 1;
@@ -1699,6 +1748,41 @@ segment_poke_m (cell  o,
         case 4: *((uint32_t *) (s + index)) = htobe32(cvalue);@+ break;
         case 8: *((uint64_t *) (s + index)) = htobe64(cvalue);@+ break;
         }
+        return LERR_NONE;
+}
+
+@ @d new_global_act(L,A) do {
+        A /* No semicolon! */
+        orreturn(new_symbol_const((L), &ltmp));
+        orreturn(env_save_m(Root, ltmp, ntmp, false));
+} while (0)
+@d new_global_clop(L,P) do {
+        new_global_act((L), {
+                orreturn(new_atom(NIL, NIL, FORM_CLOP, &ntmp));
+                clop_set_address_m(ntmp, (P));
+        });
+} while (0)
+@d new_global_int(L,V) do {
+        orreturn(new_int_c((V), &ntmp));
+        orreturn(new_symbol_const((L), &ltmp));
+        orreturn(env_save_m(Root, ltmp, ntmp, false));
+} while (0)
+@<Initialise misc...@>=
+new_global_int("*limit/max-segment-length*", SEGMENT_MAX);
+new_global_clop("*imp/segment/resize!*", clop_segment_resize_m);
+
+@ @c
+error_code
+clop_segment_resize_m (cell *ret)
+{
+        word nlength;
+        error_code reason;
+        assert(segment_p(General[LR_r0]));
+        assert(fixed_p(General[LR_r1]) && fixed_value(General[LR_r1]) >= 0
+                && fixed_value(General[LR_r1]) <= SEGMENT_MAX);
+        nlength = fixed_value(General[LR_r1]);
+        orreturn(segment_resize_m(General[LR_r0], nlength));
+        *ret = General[LR_r0];
         return LERR_NONE;
 }
 
@@ -2285,9 +2369,12 @@ zero)\footnote{$^1$}{I don't anticipate this feature finding much
 use but the space is there.}. Nothing in \Ls/' core uses this feature
 except to expose the value for calculation with at a higher level.
 
-@d ARRAY_MAX HALF_MAX
-@d array_base(O) ((cell *) segment_base(O))
-@d array_length_c(O) (segment_length_c(O) / (half) sizeof (cell))
+@d ARRAY_MAX (SEGMENT_MAX / sizeof (cell))
+@#
+@d array_base(O)            ((cell *) segment_base(O))
+@d array_length_c(O)        (segment_length_c(O) / (half) sizeof (cell))
+@d array_mutable_p(O)       (segment_mutable_p(O))
+@d array_set_mutable_m(O,L) (segment_set_mutable_m((O), (L)))
 @<Fun...@>=
 error_code new_array_imp (half, cell, cell_tag, cell *);
 error_code array_resize_m (cell, half, cell);
@@ -2309,7 +2396,7 @@ new_array_imp (half      length,
 {
         error_code reason;
 
-        assert(length >= 0 && length <= ARRAY_MAX);
+        assert(length >= 0 && length <= (half) ARRAY_MAX);
         orreturn(new_segment_imp(Heap_Thread, length * sizeof (cell),
                 sizeof (cell), form, FORM_NONE, ret));
         if (!void_p(fill))
@@ -2333,7 +2420,8 @@ array_resize_m (cell o,
         error_code reason;
 
         assert(arraylike_p(o));
-        assert(nlength >= 0 && nlength <= ARRAY_MAX);
+        assert(array_mutable_p(o));
+        assert(nlength >= 0 && nlength <= (half) ARRAY_MAX);
         olength = array_length_c(o);
         orreturn(segment_resize_m(o, nlength * sizeof (cell)));
         if (!void_p(fill))
@@ -2402,8 +2490,13 @@ with prejudice not benchmarks, that at such a small size a full
 array scan will not be expensive.
 
 @d HASHTABLE_TINY     16
-@d HASHTABLE_MAX      ((HALF_MAX >> 1) + 1)
+@d HASHTABLE_MAX      ((ARRAY_MAX >> 1) + 1)
 @d HASHTABLE_MAX_FREE (hashtable_default_free(HASHTABLE_MAX))
+@#
+@d HASHTABLE_READ    0
+@d HASHTABLE_INSERT  1
+@d HASHTABLE_WRITE   2
+@d HASHTABLE_FULL    3
 @#
 @d hashtable_default_free(L) (((L) == HASHTABLE_TINY)@|
         ? (HASHTABLE_TINY - 1) /* Guarantee at least one |NIL|. */@t\iII@>
@@ -2423,6 +2516,8 @@ array scan will not be expensive.
 @#
 @d hashtable_set_blocked_m(O,V) (array_base(O)[array_length_c(O) - 2] = fix(V))
 @d hashtable_set_free_m(O,V)    (array_base(O)[array_length_c(O) - 1] = fix(V))
+@d hashtable_mutability_c(O)    (segment_flag_mutable(O))
+@d hashtable_set_mutable_m(O,L) (array_set_mutable_m((O), (L)))
 @<Fun...@>=
 hash hash_cstr (byte *, half *);
 hash hash_buffer (byte *, half);
@@ -2478,7 +2573,7 @@ new_hashtable (half  slots,
                                 rlength <<= 1;
                                 nfree = hashtable_default_free(rlength);
                         }
-                        if (rlength > HASHTABLE_MAX)
+                        if (rlength > (half) HASHTABLE_MAX)
                                 return LERR_LIMIT;
                 }
                 assert(nfree >= slots && nfree < rlength);
@@ -2592,11 +2687,12 @@ hashtable_enlarge_m (cell o)
         error_code reason;
 
         assert(hashtable_p(o));
+        assert(hashtable_mutability_c(o) > HASHTABLE_READ);
         if (hashtable_length_c(o) == 0)
                 nlength = HASHTABLE_TINY;
         else
                 nlength = hashtable_length_c(o) * 2;
-        if (nlength > HASHTABLE_MAX)
+        if (nlength > (half) HASHTABLE_MAX)
                 return LERR_LIMIT;
         nfree = hashtable_default_free(nlength);
         new_hashtable_imp(nlength, nfree, &new);
@@ -2604,6 +2700,7 @@ hashtable_enlarge_m (cell o)
         tmp = *A(new); /* No need to swap the tag. */
         *A(new) = *A(o);
         *A(o) = tmp;
+        segment_object(new)->flags = segment_object(o)->flags;
         segment_object(new)->owner = new;
         segment_object(o)->owner = o;
         return LERR_NONE;
@@ -2626,6 +2723,7 @@ hashtable_reduce_m (cell o)
         error_code reason;
 
         assert(hashtable_p(o));
+        assert(hashtable_mutability_c(o) > HASHTABLE_READ);
         olength = hashtable_length_c(o);
         assert(olength > 0);
         if (hashtable_used_c(o) == 0)
@@ -2644,6 +2742,7 @@ hashtable_reduce_m (cell o)
         tmp = *A(new); /* No need to swap the tag. */
         *A(new) = *A(o);
         *A(o) = tmp;
+        segment_object(new)->flags = segment_object(o)->flags;
         segment_object(new)->owner = new;
         segment_object(o)->owner = o;
         return LERR_NONE;
@@ -2813,6 +2912,10 @@ hashtable_save_m (cell o,
         error_code reason;
 
         assert(hashtable_p(o));
+        if (replace)
+                assert(hashtable_mutability_c(o) >= HASHTABLE_WRITE);
+        else
+                assert(hashtable_mutability_c(o) >= HASHTABLE_INSERT);
         if (o == Symbol_Table) {
                 assert(symbol_p(datum));
                 hval = symbol_hash_c(datum);
@@ -2858,6 +2961,7 @@ hashtable_erase_m (cell o,
         error_code reason;
 
         assert(hashtable_p(o));
+        assert(hashtable_mutability_c(o) == HASHTABLE_FULL);
         assert(symbol_p(label));
         reason = hashtable_scan(o, symbol_hash_c(label), (void *) label, &idx);
         if (reason == LERR_MISSING)
@@ -2916,7 +3020,7 @@ and then the symbol table is searched to see if that symbol has
 already been created, which is returned instead of creating a new
 one.
 
-@d SYMBOL_MAX (HALF_MAX - sizeof (symbol))
+@d SYMBOL_MAX (SEGMENT_MAX - sizeof (symbol))
 @d symbol_object(O) ((symbol *) segment_base(O))
 @d symbol_buffer_c(O) (symbol_intern_p(O)
         ? A(O)->buffer
@@ -3026,6 +3130,7 @@ new_symbol_imp (hash  hval,
                 A(sym)->length = length;
         }
         memmove(symbol_buffer_c(sym), buf, length);
+        segment_set_mutable_m(sym, SEGMENT_READONLY);
         orreturn(hashtable_save_m(Symbol_Table, sym, false));
         *ret = sym;
         return LERR_NONE;
@@ -3051,6 +3156,9 @@ referred to as {\it the\/} root environment and saved in |Root|.
 @d env_layer(O)    (A(O)->dex)
 @d env_previous(O) (A(O)->sin)
 @d env_root_p(O)   (environment_p(O) && null_p(env_previous(O)))
+@#
+@d env_mutability_c(O)    (segment_flag_mutable(O))
+@d env_set_mutable_m(O,L) (hashtable_set_mutable_m((O), env_layer(L)))
 @<Global...@>=
 shared cell Root = NIL;
 unique cell Environment= NIL;
@@ -3099,7 +3207,8 @@ env_get_root (cell o)
         return o;
 }
 
-@ Inserting or replacing a binding in an environment.
+@ Inserting or replacing a binding in an environment. [Im]mutability
+is asserted by the hashtable implementation.
 
 @d env_save_m_imp(E,D,R) /* Environment, Datum, Replace? */
         hashtable_save_m(env_layer(E), (D), (R))
@@ -3152,7 +3261,10 @@ env_search (cell  o,
 
 @d record_p(O)               (instance_p(O) || template_p(O))
 @d record_template(O)        (object_spare(O))
-@d record_template_length(O) (hashtable_used_c(O))
+@d record_template_table(O)  (A(O)->sin)
+@d record_template_length(O) (hashtable_used_c(record_template_table(O)))
+@#
+@d record_set_mutable_m(O,L) (array_set_mutable_m((O), (L)))
 @<Fun...@>=
 error_code new_record (cell, cell *);
 error_code new_instance (cell, cell *);
@@ -3162,13 +3274,13 @@ error_code
 new_record (cell  template,
             cell *ret)
 {
+        cell new;
         error_code reason;
 
         assert(hashtable_p(template)); /* Of int 0..n */
-        orreturn(copy_hashtable(template, ret));
-        TAG_SET_M(*ret, FORM_TEMPLATE);
-        object_set_spare_m(*ret, NIL);
-        return LERR_NONE;
+        orreturn(copy_hashtable(template, &new));
+        hashtable_set_mutable_m(new, HASHTABLE_READ);
+        return new_atom(new, NIL, FORM_TEMPLATE, ret);
 }
 
 @ @c
@@ -3219,19 +3331,19 @@ orabort(alloc_mem(NULL, SCOW_Length * sizeof (scow), 0,
 parsing.
 
 @<Initialise miscellaneous objects@>=
-orreturn(new_hashtable(3, &nrec));
+orreturn(new_hashtable(3, &ntmp));
 orreturn(new_symbol_const("segment", &ltmp));
 orreturn(cons(ltmp, fix(0), &ltmp));
-orreturn(hashtable_save_m(nrec, ltmp, false));
+orreturn(hashtable_save_m(ntmp, ltmp, false));
 orreturn(new_symbol_const("offset", &ltmp));
 orreturn(cons(ltmp, fix(1), &ltmp));
-orreturn(hashtable_save_m(nrec, ltmp, false));
+orreturn(hashtable_save_m(ntmp, ltmp, false));
 orreturn(new_symbol_const("length", &ltmp));
 orreturn(cons(ltmp, fix(2), &ltmp));
-orreturn(hashtable_save_m(nrec, ltmp, false));
-orreturn(new_record(nrec, &nrec));
+orreturn(hashtable_save_m(ntmp, ltmp, false));
+orreturn(new_record(ntmp, &ntmp));
 orreturn(new_symbol_const("*rope%leaf*", &ltmp));
-orreturn(env_save_m(Root, ltmp, nrec, false));
+orreturn(env_save_m(Root, ltmp, ntmp, false));
 
 @** I/O. None.
 
@@ -3329,7 +3441,7 @@ init_vm (void)
         cell copy[3], eval[3], list[3], optional[3];
         cell jexit, sig_copy, sig_eval, sig_list, sig_optional;
         cell sig[SIGNATURE_LENGTH];
-        cell ltmp, nrec;
+        cell ltmp, ntmp;
         char btmp[1024], *bptr; /* Way more space than necessary. */
         int i, j, k;
         error_code reason;
@@ -3542,6 +3654,7 @@ typedef enum {
         OP_BODY,
         OP_CAR,
         OP_CDR,
+        OP_CLOP,
         OP_CLOSURE,
         OP_CLOSURE_P,
         OP_CMP,
@@ -3664,6 +3777,7 @@ shared opcode_table Op[OPCODE_LENGTH] = {@|
         [OP_SPORK]          = { NIL, AREG, ALOB, NARG },@|
         [OP_TABLE]          = { NIL, AREG, ALOB, NARG },@|
         [OP_BODY]           = { NIL, AREG, ALOB, NARG },@|
+        [OP_CLOP]           = { NIL, AREG, ALOB, NARG },@|
         [OP_CONS]           = { NIL, AREG, ALOT, ALOT },@|
         [OP_FREE]           = { NIL, AREG, ALOB, NARG },@|
         [OP_HALT]           = { NIL, NARG, NARG, NARG },@|
@@ -3739,6 +3853,7 @@ shared char *Opcode_Label[OPCODE_LENGTH] = {@|
         [OP_SPORK]          = "VM:SPORK",@|
         [OP_TABLE]          = "VM:TABLE",@|
         [OP_BODY]           = "VM:BODY",@|
+        [OP_CLOP]           = "VM:CLOP",@|
         [OP_CONS]           = "VM:CONS",@|
         [OP_FREE]           = "VM:FREE",@|
         [OP_HALT]           = "VM:HALT",@|
@@ -4082,6 +4197,9 @@ for (i = 0; i < PRIMITIVE_LENGTH; i++) {
 }
 orreturn(new_symbol_const(PRIMITIVE_INTERPRET, &ltmp));
 orreturn(vm_locate_entry(ltmp, NULL, &Interpret_Closure));
+
+@ @d clop_set_address_m(O, F) (object_set_pointer_m((O), (void *) (F)))
+@d clop_function(O) ((error_code (*)(cell *)) object(O))
 
 @* Stack. Based on list or array.
 
@@ -4680,7 +4798,7 @@ case OP_ARRAY:@;
         ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Length */
         ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Filler */
         assert(fixed_p(VM_Arg1) && fixed_value(VM_Arg1) >= 0
-                && fixed_value(VM_Arg1) <= ARRAY_MAX);
+                && fixed_value(VM_Arg1) <= (half) ARRAY_MAX);
         assert(defined_p(VM_Arg2));
         ortrap(new_array_imp(fixed_value(VM_Arg1), VM_Arg2, FORM_ARRAY,
                 &VM_Result));
@@ -4693,12 +4811,12 @@ case OP_RESIZE_M:@;
         ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Filler */
         assert(fixed_p(VM_Arg1) && fixed_value(VM_Arg1) >= 0);
         if (array_p(VM_Result)) {
-                assert(fixed_value(VM_Arg1) <= ARRAY_MAX);
+                assert(fixed_value(VM_Arg1) <= (half) ARRAY_MAX);
                 assert(defined_p(VM_Arg2));
                 ortrap(array_resize_m(VM_Result, fixed_value(VM_Arg1), VM_Arg2));
         } else {
                 assert(segment_p(VM_Result));
-                assert(fixed_value(VM_Arg1) <= SEGMENT_MAX);
+                assert(fixed_value(VM_Arg1) <= (half) SEGMENT_MAX);
                 assert(VM_Arg2 == fix(0));
                 ortrap(segment_resize_m(VM_Result, fixed_value(VM_Arg1)));
         }
@@ -4920,7 +5038,7 @@ case OP_SYMBOL:@;
 @<Carry out...@>=
 case OP_ALLOC:
         ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Length */
-        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Alignment or filler */
+        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Alignment */
         assert(fixed_p(VM_Arg1));
         assert(fixed_p(VM_Arg2));
         ortrap(new_segment(fixed_value(VM_Arg1),
@@ -5001,19 +5119,18 @@ case OP_RECORD_P:
         ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* NIL Arg1 Template */
         if (null_p(VM_Arg2))
                 VM_Result = predicate(template_p(VM_Arg1));
-        else if (template_p(VM_Arg2)) {
+        else if (VM_Arg1 == VM_Arg2)
+                VM_Result = predicate(record_p(VM_Arg1));
+        else {
                 assert(template_p(VM_Arg2));
                 VM_Result = predicate(record_template(VM_Arg1) == VM_Arg2);
-        } else {
-                assert(VM_Arg1 == VM_Arg2);
-                VM_Result = predicate(record_p(VM_Arg1));
         }
         ortrap(interpret_save(ins, VM_Result));
         break;
 
 @
 RECORD <target>,<hashtable>
-RECORD <target>,<record>
+RECORD <target>,<record%*>
 @<Carry out...@>=
 case OP_RECORD:
         ortrap(interpret_solo_argument(ins, &VM_Arg1)); /* Hashtable/Record */
@@ -5053,6 +5170,7 @@ case OP_SET_M:
         ortrap(interpret_argument(ins, 1, &VM_Arg2)); /* Index */
         ortrap(interpret_argument(ins, 2, &VM_Result)); /* Value */
         assert(array_p(VM_Arg1) || instance_p(VM_Arg1));
+        assert(array_mutable_p(VM_Arg1));
         assert(fixed_p(VM_Arg2));
         assert(fixed_value(VM_Arg2) >= 0);
         if (array_p(VM_Arg1))
@@ -7230,6 +7348,8 @@ case ALOT:
         @<Encode the first object argument and |break|@>
 case AREG:
         @<Encode the first register argument and |break|@>
+case ALOB:
+        goto ALONE;
 default:
         reason = LERR_INTERNAL;
         goto Trap;
@@ -7276,6 +7396,7 @@ incompatible: /* This exit point is common; here is as good a place as any. */
 }
 switch (opb->arg1) {
 case ALOB:
+ALONE:
         @<Encode a large object and |break|@>
 case ALOT:
         @<Encode the middle ALOT and |break|@>

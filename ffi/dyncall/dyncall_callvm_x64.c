@@ -506,9 +506,14 @@ static void dc_callvm_mode_x64(DCCallVM* in_self, DCint mode)
 }
 
 /* Public API. */
-DCCallVM* dcNewCallVM(DCsize size)
+DCCallVM* dcNewCallVM(void *base, size_t length)
 {
-  DCCallVM_x64* p = (DCCallVM_x64*)dcAllocMem(sizeof(DCCallVM_x64)+size);
+  DCCallVM_x64* p = (DCCallVM_x64*) base;
+  DCsize size;
+
+  if (length < sizeof (DCCallVM_x64))
+    return NULL;
+  size = length - sizeof (DCCallVM_x64);
 
   dc_callvm_mode_x64((DCCallVM*)p, DC_CALL_C_DEFAULT);
 

@@ -1581,54 +1581,158 @@ Primitive/record/ref/imp
 
 #       r0: length
 #       r1: alignment
-1h      TRAP    'incompatible-operand
+#
 !Primitive/new-segment
-        CMPLE?  tmp,r0,0
-        JUMPIF  tmp,@1b
-        CMPLE?  tmp,r1,0
-        JUMPIF  tmp,@1b
-#       SLO     acc,'new-segment
-        POP!    ip,clink
+        INTEGER? tmp,r0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CMPGE?  tmp,r0,0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      LOAD    tmp,*limit/max-segment-length*
+        CMPLE?  tmp,r0,tmp
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      INTEGER? tmp,r1
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CMPIS?  tmp,r1,0        TODO!
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      ALLOC   acc,r0,r1
+        LOAD    ip,@!Restore/r1
 
-1h      TRAP    'incompatible-operand
+#       r0: segment
+#       r1: new length
+#
 !Primitive/segment/resize!
         SEGMENT? tmp,r0
-        JUMPNOT tmp,@1b
-        CMPLE?  tmp,r1,0
-        JUMPIF  tmp,@1b
-#       SLO     acc,'segment/resize!
-        POP!    ip,clink
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      INTEGER? tmp,r1
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CMPGE?  tmp,r1,0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      LOAD    tmp,*limit/max-segment-length*
+        CMPLE?  tmp,r1,tmp
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CLOP    acc,*imp/segment/resize!*
+        LOAD    ip,@!Restore/r1
 
-1h      TRAP    'incompatible-operand
+#       r0: segment
+#
 !Primitive/segment/length
         SEGMENT? tmp,r0
-        JUMPNOT tmp,@1b
-#       SLO     acc,'segment/length
-        POP!    ip,clink
-
-1h      POP!    r4,clink
-2h      POP!    r3,clink
+        JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
-!Primitive/segment->symbol
-        LOAD    tmp,@3f
-        PUSH!   clink,tmp
-        LOAD    ip,@!Primitive/segment/length
-3h      PUSH!   clink,r3        Prepare to clobber r3
-        LOAD    r3,acc          Segment length
-        CMPGE?  tmp,r1,0
-        JUMPNOT tmp,@2b         !(off >= 0)?
-        CMPGE?  tmp,r1,r3
-        JUMPIF  tmp,@2b         off >= max?
-        CMPGE?  tmp,r2,0
-        JUMPNOT tmp,@2b         !(length >= 0)?
-        PUSH!   clink,r4        Prepare to clobber r4
-        ADD     r4,r1,r2
-        CMPLE?  tmp,r4,r3
-        JUMPIF  tmp,@1b         (off + length >= max)?
-        POP!    r4,clink        Restore clobbered registers.
-        POP!    r3,clink
-#       SLO     acc,'segment->symbol
-        POP!    ip,clink
+1h      LENGTH  acc,r0
+        LOAD    ip,@!Restore/r0
+
+#       r0: segment
+#       r1: offset
+#       r2: width
+#
+!Primitive/segment/peek
+        SEGMENT? tmp,r0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      INTEGER? tmp,r1
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CMPGE?  tmp,r1,0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      LENGTH  tmp,r0
+        CMPLT?  tmp,r1,tmp
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      INTEGER? tmp,r2
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CMPIS?  tmp,r2,1
+        JUMPNOT tmp,@1f
+        PEEK    acc,r0,r1
+        LOAD    ip,@!Restore/r2
+1h      CMPIS?  tmp,r2,2
+        JUMPNOT tmp,@1f
+        PEEK2   acc,r0,r1
+        LOAD    ip,@!Restore/r2
+1h      CMPIS?  tmp,r2,4
+        JUMPNOT tmp,@1f
+        PEEK4   acc,r0,r1
+        LOAD    ip,@!Restore/r2
+1h      CMPIS?  tmp,r2,8
+        JUMPNOT tmp,@1f
+        PEEK8   acc,r0,r1
+        LOAD    ip,@!Restore/r2
+1h      TRAP    'incompatible-operand
+
+#       r0: segment
+#       r1: offset
+#       r2: width
+#       r3: value
+#
+#       TODO: needs bignums in the assembly parser
+#
+!Primitive/segment/poke!
+        SEGMENT? tmp,r0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      INTEGER? tmp,r1
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CMPGE?  tmp,r1,0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      LENGTH  tmp,r0
+        CMPLT?  tmp,r1,tmp
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      INTEGER? tmp,r3
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CMPGE?  tmp,r3,0
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      INTEGER? tmp,r2
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CMPIS?  tmp,r2,1
+        JUMPNOT tmp,@1f
+        LOAD    tmp,#xff
+        CMPLE?  tmp,r3,tmp
+        JUMPIF  tmp,@2f
+        TRAP    'incompatible-operand
+2h      POKE!   r0,r1,r2
+        LOAD    ip,@!Restore/r3
+1h      CMPIS?  tmp,r2,2
+        JUMPNOT tmp,@1f
+#       LOAD    tmp,#xffff
+        CMPLE?  tmp,r3,tmp
+        JUMPIF  tmp,@2f
+        TRAP    'incompatible-operand
+2h      POKE2!  r0,r1,r2
+        LOAD    ip,@!Restore/r3
+1h      CMPIS?  tmp,r2,4
+        JUMPNOT tmp,@1f
+#       LOAD    tmp,#xffffffff
+        CMPLE?  tmp,r3,tmp
+        JUMPIF  tmp,@2f
+        TRAP    'incompatible-operand
+2h      POKE4!  r0,r1,r2
+        LOAD    ip,@!Restore/r3
+1h      CMPIS?  tmp,r2,8
+        JUMPNOT tmp,@1f
+#       LOAD    tmp,#xffffffffffffffff
+        CMPLE?  tmp,r3,tmp
+        JUMPIF  tmp,@2f
+        TRAP    'incompatible-operand
+2h      POKE8!  r0,r1,r2
+        LOAD    ip,@!Restore/r3
+1h      TRAP    'incompatible-operand
 
 ########
 

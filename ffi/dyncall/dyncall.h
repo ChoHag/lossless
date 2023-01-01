@@ -89,7 +89,7 @@ typedef struct DCaggr_      DCaggr;
 #define DC_ERROR_NONE                0
 #define DC_ERROR_UNSUPPORTED_MODE   -1
 
-DC_API DCCallVM*  dcNewCallVM     (DCsize size);
+DC_API DCCallVM*  dcNewCallVM     (void *, size_t);
 DC_API void       dcFree          (DCCallVM* vm);
 DC_API void       dcReset         (DCCallVM* vm);
 
