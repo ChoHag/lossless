@@ -95,6 +95,9 @@
 #       (In) Control-Link: ...
 
 Combine/Start
+        REF     acc,clink,0     stack pointer
+        PUSH!   clink,fp        Frame header
+        LOAD    fp,acc
         PUSH!   clink,args      Stack any arguments which are currently
 ;                               being evaluated in a previous stack frame.
         PUSH!   clink,env       Also stack the current run-time environment.
@@ -124,8 +127,6 @@ Combine/Dispatch
         JUMPIF        tmp,@Combine-Primitive
         CLOSURE?      tmp,expr
         JUMPIF        tmp,@Combine-Closure
-        RESUMPTION?   tmp,expr
-        JUMPIF        tmp,@Combine-Primitive
         TRAP          'uncombinable
 
 #       After combination is finally complete and the result is in
@@ -142,7 +143,11 @@ Combine/Dispatch
 Combine/Finish
         POP!    env,clink
         POP!    args,clink
-        POP!    ip,clink
+        POP!    fp,clink        Restore frame header pointer
+        DELIMITER? tmp,fp
+        JUMPNOT tmp,@1f
+        CDR     fp,fp
+1h      POP!    ip,clink
 
 #       Lossless understands two types of combiner, primitives and
 #       closure which are described here. The defining aspect of a
@@ -546,8 +551,9 @@ Combine-Closure/signature/copy-list?
 Combine-Closure/signature/environment?
         LOAD    tmp,'environment
         CMPIS?  tmp,acc,tmp
-        JUMPNOT tmp,@Combine-Closure/signature/continuation?
-        CMPIS?  tmp,args,()
+        JUMPIF  tmp,@1f
+        TRAP    'unimplemented
+1h      CMPIS?  tmp,args,()
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      LOAD    tmp,@Combine/Copy-Environment
@@ -566,35 +572,6 @@ Combine-Closure/signature/environment?
 Combine/Copy-Environment
         LOAD    acc,env
         LOAD    ip,@Combine/Append-Argument
-
-#       The only strategy remaining strategy which Lossless supports
-#       is to capture the run-time continuation of the closure's
-#       caller although there is scope to implement other strategies
-#       by handling the unimplemented feature trap.
-
-#       (In) Accumulator: Strategy label
-#       (In) Arguments: Should be ()
-#       (In) Expression: Evaluation queue
-#       (In) r1: Binding label
-
-#       The only argument strategy remaining is a continuation.
-Combine-Closure/signature/continuation?
-        LOAD    tmp,'environment
-        CMPIS?  tmp,acc,tmp
-        JUMPNOT tmp,@1f
-        TRAP    'unimplemented
-1h      CMPIS?  tmp,args,()
-        JUMPIF  tmp,@1f
-        TRAP    'incompatible-operand   Too many arguments.
-1h      LOAD    tmp,@Combine/Copy-Continuation
-        CONS    expr,tmp,expr
-        CONS    expr,r1,expr
-        LOAD    ip,@Combine-Closure/signature/next
-
-#       Capturing the run-time continuation is also not supported.
-
-Combine/Copy-Continuation
-        TRAP    'unimplemented
 
 #       A primitive works similarly to a closure in most respects
 #       except two:
@@ -1164,11 +1141,6 @@ Primitive/vov/validate-formals/continue
 1h      CONS    tmp,r2,r2
         DEFINE! r4,tmp          ... it has now.
         LOAD    ip,@Primitive/vov/validate-formals/next%final
-2h      LOAD    tmp,'continuation
-        CMPIS?  tmp,r2,tmp
-        JUMPNOT tmp,@2f
-        EXISTS? tmp,r4,r2       Requested continuation already?
-        JUMPNOT tmp,@1f
 2h      TRAP    'incompatible-operand
 1h      CONS    tmp,r2,r2
         DEFINE! r4,tmp          Record this request.
@@ -1226,23 +1198,21 @@ Primitive/vov/validate-formals/continue%final
 1h      CONS    tmp,r2,r2
         DEFINE! r4,tmp          Record this request.
         LOAD    ip,@Primitive/vov/validate-formals/next%final
-2h      LOAD    tmp,'continuation
-        CMPIS?  tmp,r2,tmp
-        JUMPNOT tmp,@2f
-        EXISTS? tmp,r4,r2
-        JUMPNOT tmp,@1f
 2h      TRAP    'incompatible-operand
 1h      CONS    tmp,r2,r2
         DEFINE! r4,tmp          Record this request.
         LOAD    ip,@Primitive/vov/validate-formals/next%final
 
+#       clink: r0 /Finish <Frame>
+#       r0: body
+#
 !Primitive/do
         LOAD    acc,@Primitive/do/next
         CMPIS?  tmp,r0,()
         JUMPNOT tmp,@1f
         LOAD    acc,#VOID
         LOAD    ip,@!Restore/r0
-        LOAD    args,()
+1h      LOAD    args,()
 1h      PAIR?   tmp,r0
         JUMPIF  tmp,@2f
         CMPIS?  tmp,r0,()
@@ -1269,6 +1239,182 @@ Primitive/vov/validate-formals/continue%final
 Primitive/do/next
         POP!    expr,clink
         LOAD    ip,@!Evaluate
+
+#       clink: r0 /Finish <Frame>
+#       r0: body
+#
+!Primitive/reset
+        REF     tmp,clink,fp
+        DELIMIT tmp,fp,tmp
+        SET!    clink,fp,tmp    Replace saved fp with the delimited version
+        LOAD    ip,@!Primitive/do
+
+#       after clearing off the stack binds the continuation to label
+#       and enters body rather than returning to the delimiting reset.
+#
+#       r0: label
+#       r1: body
+#       clink: r1 r0 /Finish ... <Delimited-Frame>
+#       args,expr available
+#
+!Primitive/shift
+        LOAD    args,fp
+1h      LOAD    expr,args
+        REF     args,clink,expr
+        DELIMITER? tmp,args
+        JUMPIF  tmp,@2f
+        CMPIS?  tmp,args,-1     Top of stack?
+        JUMPNOT tmp,@1b
+        DELIMIT args,expr,expr  Iffy
+        SET!    clink,expr,args
+2h      REF     acc,clink,0     Stack pointer to save up to
+        SUB     acc,acc,2       Minus r1 & r0 saved to enter this primitive
+        PUSH!   clink,r2
+        PUSH!   clink,r3
+        PUSH!   clink,r4
+        PUSH!   clink,r5
+        PUSH!   clink,r6
+        CAR     r2,args         dfp = low == delimiting fp
+        LOAD    r3,acc          sp = high
+        SUB     r4,r3,r2        length = sp - dfp
+        ADD     acc,r4,2        extra space for list of fixup frame headers & environment
+        ARRAY   acc,acc,#VOID
+        LOAD    r5,fp           next frame header
+        LOAD    r6,()           list of frame headers
+
+        LOAD    r2,r4           Start copying from here (+1)
+Primitive/shift/next
+        SUB     r2,r2,1         Next destination index
+        SUB     r3,r3,1         Next source index
+        REF     tmp,clink,r3    Copy
+        SET!    acc,r2,tmp
+        CMPIS?  tmp,r2,0        Finished?
+        JUMPIF  tmp,@Primitive/shift/finish
+        CMPIS?  tmp,r3,r5       Found a frame pointer?
+        JUMPNOT tmp,@Primitive/shift/next
+        CONS    r6,r2,r6        Remember it
+        REF     r5,clink,r3     Look for the next frame pointer
+        LOAD    ip,@Primitive/shift/next
+
+Primitive/shift/finish
+        SET!    acc,r4,r6       Save frame pointers to be fixed on resume
+        ADD     r4,r4,1
+        SET!    acc,r4,env
+        POP!    r6,clink
+        POP!    r5,clink
+        POP!    r4,clink
+        POP!    r3,clink
+        POP!    r2,clink
+
+        LOAD    tmp,'copy-list
+        CONS    tmp,tmp,()      (copy-list)
+        CONS    tmp,(),tmp      (() copy-list) --- Will not be bound like normal
+        CONS    tmp,tmp,()
+        CLOSURE acc,tmp,acc     two args: sig & array
+
+        CONS    acc,r0,acc
+        EXISTS? tmp,env,r0
+        JUMPIF  tmp,@1f
+        DEFINE! env,acc
+        LOAD    ip,@2f
+1h      REPLACE! env,acc
+2h      LOAD    r0,r1
+        POP!    r1,clink
+
+        POP!    expr,clink      spilled r0 (has body)
+        CAR     tmp,args
+        SET!    clink,0,tmp
+        CDR     fp,args
+        PUSH!   clink,expr
+        LOAD    ip,@!Primitive/do
+
+#       (In) Arguments: ((() . (arg-list)))
+#       (In) Environment: Caller's run-time environment
+#       (In) Expression: Closure
+#       (In) Control-Link: <Frame>
+#
+#       Stack to append is in closure body
+#
+!Resume-Continuation
+        LOAD    acc,#VOID
+        CAR     args,args       (() . arg-list)
+        CDR     args,args       arg-list; Discard nil binding
+        CMPIS?  tmp,args,()     No argument?
+        JUMPIF  tmp,@2f
+        CDR     expr,args
+        CMPIS?  tmp,args,()
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      CAR     expr,args
+        PUSH!   clink,expr      Closure from yield!
+        LOAD    args,()
+        PUSH!   clink,@1f
+        LOAD    ip,@!Evaluate   Evaluate the argument
+1h      POP!    expr,clink      Restore closure
+2h      BODY    expr,expr       Stack to append
+
+#       delimit fp, skip fp/args/env in saved stack, append and fixup frame pointers
+
+        ARRAY   args,7,#VOID
+        SET!    args,0,r0
+        SET!    args,1,r1
+        SET!    args,2,r2
+        SET!    args,3,r3
+        SET!    args,4,r4
+        SET!    args,5,r5
+        SET!    args,6,r6
+
+        REF     r0,expr,0       previous dfp
+        REF     r1,clink,0      sp
+        DELIMIT tmp,r1,fp       new delimiter
+        PUSH!   clink,tmp
+        CAR     r0,r0           old fp
+        SUB     r0,r1,r0        delta
+
+        LOAD    r1,0            read index, skip delimiter, will +1
+        LENGTH  r2,expr         new stack length
+        SUB     r2,r2,1
+        REF     r3,expr,r2      saved env
+        SUB     r2,r2,1
+        REF     r4,expr,r2      frame pointers to fix
+        PAIR?   tmp,r4
+        JUMPIF  tmp,@1f
+        LOAD    r5,()           next frame pointer
+        LOAD    ip,@Resume-Continuation/next
+1h      CAR     r5,r4
+Resume-Continuation/next
+        ADD     r1,r1,1
+        CMPIS?  tmp,r1,r2       End of array?
+        JUMPIF  tmp,@Resume-Continuation/finish
+        REF     r6,expr,r1
+        CMPIS?  tmp,r1,r5       At the next frame pointer?
+        JUMPNOT tmp,@3f
+        ADD     r6,r6,r0        Fix pointer to new stack
+        LOAD    fp,r6
+        PAIR?   tmp,r4
+        JUMPNOT tmp,@2f
+        CDR     r4,r4
+        PAIR?   tmp,r4
+        JUMPNOT tmp,@2f
+        CAR     r5,r4
+        LOAD    ip,@3f
+2h      LOAD    r5,()           No more frame pointers
+3h      PUSH!   clink,r6
+        LOAD    ip,@Resume-Continuation/next
+
+Resume-Continuation/finish
+        LOAD    env,r3
+        REF     r0,args,0
+        REF     r1,args,1
+        REF     r2,args,2
+        REF     r3,args,3
+        REF     r4,args,4
+        REF     r5,args,5
+        REF     r6,args,6
+        LOAD    args,()
+        POP!    ip,clink
+
+########
 
 #       (In) Control-Link: r2 r1 r0 ...
 #       (In) r0: Environment
@@ -1547,6 +1693,15 @@ Primitive/record/ref/imp
 !Primitive/void?
         CMPIS?  acc,r0,#VOID
         LOAD    ip,@!Restore/r0
+
+!Primitive/clop-predicate?
+        CLOP    acc,*imp/clop?*
+        JUMPIF  acc,@1f
+        TRAP    'incompatible-operand
+1h      LOAD    acc,r0
+        LOAD    r0,r1
+        CLOP    acc,acc
+        LOAD    ip,@!Restore/r1
 
 !Primitive/is?
         CMPIS?  acc,r0,r1
@@ -2256,8 +2411,8 @@ Primitive/read-expression/close-list
 #       followed by close.
 #
 Primitive/read-expression/list-tail
-        REF     tmp,clink,0
-        REF     tmp,clink,tmp
+        REF     tmp,clink,0    stack pointer
+        REF     tmp,clink,tmp  stack deref, ie. peek
         CMPIS?  tmp,tmp,()
         JUMPNOT tmp,@1f
         TRAP    'non-list-tail

@@ -875,7 +875,7 @@ typedef union {
 @ All of the atom formats that \Ls/ recognises.
 
 @d FORM_NONE           (LTAG_NONE | 0x00) /* Unallocated. */
-@d FORM_CLOP           (LTAG_NONE | 0x01) /* \CEE/\Ls/ bridge function */
+@d FORM_CLOP           (LTAG_NONE | 0x01) /* \CEE//\Ls/ bridge function */
 @d FORM_COLLECTED      (LTAG_NONE | 0x02) /* Garbage collector tombstone. */
 @d FORM_HASHTABLE      (LTAG_NONE | 0x03) /* Key:value (or just key) store. */
 @d FORM_HEAP           (LTAG_NONE | 0x04) /* Preallocated storage for atoms. */
@@ -899,12 +899,13 @@ typedef union {
 @d FORM_PAIR           (LTAG_BOTH | 0x00) /* Two pointers (a ``cons cell''). */
 @d FORM_ARGUMENT       (LTAG_BOTH | 0x01) /* An assembly statement argument. */
 @d FORM_CLOSURE        (LTAG_BOTH | 0x02) /* Applicative or operative closure. */
-@d FORM_ENVIRONMENT    (LTAG_BOTH | 0x03) /* Run-time environment. */
-@d FORM_ERROR          (LTAG_BOTH | 0x04) /* An error (above). */
-@d FORM_OPCODE         (LTAG_BOTH | 0x05) /* A virtual machine's operator. */
-@d FORM_PRIMITIVE      (LTAG_BOTH | 0x06) /* A \Ls/ operator. */
-@d FORM_REGISTER       (LTAG_BOTH | 0x07) /* A virtual machine register. */
-@d FORM_SYNTAX         (LTAG_BOTH | 0x08) /* A syntactic element (\.{`';,}). */
+@d FORM_DELIMITER      (LTAG_BOTH | 0x03) /* Delimiter for a continuation. */
+@d FORM_ENVIRONMENT    (LTAG_BOTH | 0x04) /* Run-time environment. */
+@d FORM_ERROR          (LTAG_BOTH | 0x05) /* An error (above). */
+@d FORM_OPCODE         (LTAG_BOTH | 0x06) /* A virtual machine's operator. */
+@d FORM_PRIMITIVE      (LTAG_BOTH | 0x07) /* A \Ls/ operator. */
+@d FORM_REGISTER       (LTAG_BOTH | 0x08) /* A virtual machine register. */
+@d FORM_SYNTAX         (LTAG_BOTH | 0x09) /* A syntactic element (\.{`';,}). */
 
 @ Each format has a corresponding test. Some also share
 implementation or are otherwise related.
@@ -919,6 +920,7 @@ implementation or are otherwise related.
 @d collected_p(O)      (form_p((O), COLLECTED))
 @d cstruct_p(O)        (form_p((O), CSTRUCT))
 @d csymbol_p(O)        (form_p((O), CSYMBOL))
+@d delimiter_p(O)      (form_p((O), DELIMITER))
 @d environment_p(O)    (form_p((O), ENVIRONMENT))
 @d error_p(O)          (form_p((O), ERROR))
 @d file_handle_p(O)    (form_p((O), FILE_HANDLE))
@@ -1783,6 +1785,30 @@ clop_segment_resize_m (cell *ret)
         nlength = fixed_value(General[LR_r1]);
         orreturn(segment_resize_m(General[LR_r0], nlength));
         *ret = General[LR_r0];
+        return LERR_NONE;
+}
+
+@ @<Fun...@>=
+error_code clop_environment_p (cell *);
+error_code clop_clop_p (cell *);
+
+@ @<Initialise misc...@>=
+new_global_clop("*imp/environment?*", clop_environment_p);
+new_global_clop("*imp/clop?*", clop_clop_p);
+
+@ @c
+error_code
+clop_environment_p (cell *ret)
+{
+        *ret = predicate(environment_p(General[LR_r0]));
+        return LERR_NONE;
+}
+
+@ @c
+error_code
+clop_clop_p (cell *ret)
+{
+        *ret = predicate(clop_p(General[LR_r0]));
         return LERR_NONE;
 }
 
@@ -3499,18 +3525,18 @@ run-time state associated with them except a name.
 @d LR_r11           11
 @d LR_r12           12
 @d LR_r13           13
-@d LR_r14           14
-@d LR_GENERAL       15
+@d LR_GENERAL       13
 
 @ Some global state isn't represented by a register, perhaps these
 should be: |Root|, |SCOW_Attributes|, |Threads|. More?
 
-@d LR_Scrap         15
-@d LR_Accumulator   16
-@d LR_Argument_List 17
-@d LR_Control_Link  18 /* Special: push/pop */
-@d LR_Environment   19 /* Typed: environment? */
-@d LR_Expression    20
+@d LR_Scrap         14
+@d LR_Accumulator   15
+@d LR_Argument_List 16
+@d LR_Control_Link  17 /* Special: push/pop */
+@d LR_Environment   18 /* Typed: environment? */
+@d LR_Expression    19
+@d LR_Frame_Pointer 20
 @d LR_Root          21
 @d LR_Arg1          22
 @d LR_Arg2          23
@@ -3535,6 +3561,7 @@ unique cell Accumulator = NIL;
 unique cell Argument_List = NIL;
 unique cell Control_Link = NIL;
 unique cell Expression = NIL;
+unique cell Frame_Pointer = NIL;
 unique cell Trap_Arg1 = NIL;
 unique cell Trap_Arg2 = NIL;
 unique cell Trap_Result = NIL;
@@ -3546,8 +3573,8 @@ unique cell General[LR_GENERAL + 1] = {NIL};
 @ @<Extern...@>=
 extern shared cell Register_Table[];
 extern unique cell General[], *Register[];
-extern unique cell Accumulator, Argument_List, Control_Link,
-        Expression, Scrap, Trap_Arg1, Trap_Arg2, Trap_Result, VM_Arg1,
+extern unique cell Accumulator, Argument_List, Control_Link, Expression,
+        Frame_Pointer, Scrap, Trap_Arg1, Trap_Arg2, Trap_Result, VM_Arg1,
         VM_Arg2, VM_Result;
 
 @ @<(Re-)Initialise thread register pointers@>=
@@ -3557,6 +3584,7 @@ Register[LR_Argument_List] = &Argument_List;
 Register[LR_Environment] = &Environment;
 Register[LR_Root] = &Root;
 Register[LR_Expression] = &Expression;
+Register[LR_Frame_Pointer] = &Frame_Pointer;
 Register[LR_Control_Link] = &Control_Link;
 Register[LR_Arg1] = &VM_Arg1;
 Register[LR_Arg2] = &VM_Arg2;
@@ -3576,6 +3604,7 @@ shared char *Register_Label[LR_LENGTH] = {
         [LR_Environment]  = "VM:Environment",@|
         [LR_Root]         = "VM:Root",@|
         [LR_Expression]   = "VM:Expression",@|
+        [LR_Frame_Pointer]= "VM:Frame-Pointer",@|
         [LR_Trap_Arg1]    = "VM:Trap-Arg1",@|
         [LR_Trap_Arg2]    = "VM:Trap-Arg2",@|
         [LR_Trap_Result]  = "VM:Trap-Result",@|
@@ -3601,7 +3630,6 @@ shared char *Register_Label[LR_LENGTH] = {
         [LR_r11]          = "VM:R11",@|
         [LR_r12]          = "VM:R12",@|
         [LR_r13]          = "VM:R13",@|
-        [LR_r14]          = "VM:R14",@|
 };
 
 @ @<Initialise ass...@>=
@@ -3625,6 +3653,8 @@ orabort(new_symbol_const("VM:Env", &ltmp));
 orabort(env_save_m(Root, ltmp, Register_Table[LR_Environment], false));
 orabort(new_symbol_const("VM:Expr", &ltmp));
 orabort(env_save_m(Root, ltmp, Register_Table[LR_Expression], false));
+orabort(new_symbol_const("VM:Fp", &ltmp));
+orabort(env_save_m(Root, ltmp, Register_Table[LR_Frame_Pointer], false));
 orabort(new_symbol_const("VM:Tmp", &ltmp));
 orabort(env_save_m(Root, ltmp, Register_Table[LR_Scrap], false));
 
@@ -3667,6 +3697,7 @@ typedef enum {
         OP_CONS,
         OP_DEFINE_M,
         OP_DELIMIT,
+        OP_DELIMITER_P,
         OP_ENVIRONMENT_P,
         OP_ERASE_M,
         OP_EXISTS_P,
@@ -3699,7 +3730,6 @@ typedef enum {
         OP_REF,
         OP_REPLACE_M,
         OP_RESIZE_M,
-        OP_RESUMPTION_P,
         OP_SEGMENT_P,
         OP_SET_M,
         OP_SIGNATURE,
@@ -3725,7 +3755,7 @@ typedef enum {
 @<Global...@>=
 shared opcode_table Op[OPCODE_LENGTH] = {@|
         [OP_ENVIRONMENT_P]  = { NIL, AREG, ALOB, NARG },@|
-        [OP_RESUMPTION_P]   = { NIL, AREG, ALOB, NARG },@|
+        [OP_DELIMITER_P]    = { NIL, AREG, ALOB, NARG },@|
         [OP_PRIMITIVE_P]    = { NIL, AREG, ALOB, NARG },@|
         [OP_CLOSURE_P]      = { NIL, AREG, ALOB, NARG },@|
         [OP_INTEGER_P]      = { NIL, AREG, ALOB, NARG },@|
@@ -3749,7 +3779,7 @@ shared opcode_table Op[OPCODE_LENGTH] = {@|
         [OP_CMPIS_P]        = { NIL, AREG, ALOT, ALOT },@|
         [OP_CMPLE_P]        = { NIL, AREG, ALOT, ALOT },@|
         [OP_CMPLT_P]        = { NIL, AREG, ALOT, ALOT },@|
-        [OP_DELIMIT]        = { NIL, AREG, NARG, NARG },@|
+        [OP_DELIMIT]        = { NIL, AREG, ALOT, ALOT },@|
         [OP_ERASE_M]        = { NIL, AREG, ALOT, ALOT },@|
         [OP_JUMPNOT]        = { NIL, AREG, ALOB, NARG },@|
         [OP_POKE2_M]        = { NIL, AREG, ALOT, ALOT },@|
@@ -3801,7 +3831,7 @@ extern shared opcode_table Op[];
 @ @<Data...@>=
 shared char *Opcode_Label[OPCODE_LENGTH] = {@|
         [OP_ENVIRONMENT_P]  = "VM:ENVIRONMENT?",@|
-        [OP_RESUMPTION_P]   = "VM:RESUMPTION?",@|
+        [OP_DELIMITER_P]    = "VM:DELIMITER?",@|
         [OP_PRIMITIVE_P]    = "VM:PRIMITIVE?",@|
         [OP_CLOSURE_P]      = "VM:CLOSURE?",@|
         [OP_INTEGER_P]      = "VM:INTEGER?",@|
@@ -3904,6 +3934,7 @@ typedef enum {
         PRIMITIVE_BOOLEAN_P,
         PRIMITIVE_CAR,
         PRIMITIVE_CDR,
+        PRIMITIVE_CLOP_PREDICATE_P,
         PRIMITIVE_CONS,
         PRIMITIVE_CURRENT_ENVIRONMENT,
         PRIMITIVE_DEFINE_M,
@@ -3942,11 +3973,13 @@ typedef enum {
         PRIMITIVE_RECORD_SET_M,
         PRIMITIVE_RECORD_TEMPLATE,
         PRIMITIVE_RECORD_TEMPLATE_P,
+        PRIMITIVE_RESET,
         PRIMITIVE_ROOT_ENVIRONMENT,
         PRIMITIVE_SEGMENT_LENGTH,
         PRIMITIVE_SEGMENT_P,
         PRIMITIVE_SEGMENT_RESIZE_M,
         PRIMITIVE_SET_M,
+        PRIMITIVE_SHIFT,
         PRIMITIVE_SUB,
         PRIMITIVE_SYMBOL_KEY,
         PRIMITIVE_SYMBOL_P,
@@ -3984,6 +4017,7 @@ shared primitive Primitive[PRIMITIVE_LENGTH] = {
         PO(PRIMITIVE_BOOLEAN_P,            SIGNATURE_1,   NULL),@/
         PO(PRIMITIVE_CAR,                  SIGNATURE_1,   NULL),@/
         PO(PRIMITIVE_CDR,                  SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_CLOP_PREDICATE_P,     SIGNATURE_2,   NULL),@/
         PO(PRIMITIVE_CONS,                 SIGNATURE_2,   NULL),@/
         PO(PRIMITIVE_CURRENT_ENVIRONMENT,  SIGNATURE_0,   NULL),@/
         PO(PRIMITIVE_DEFINE_M,             SIGNATURE_ECL, NULL),@/
@@ -4022,11 +4056,13 @@ shared primitive Primitive[PRIMITIVE_LENGTH] = {
         PO(PRIMITIVE_RECORD_SET_M,         SIGNATURE_3,   NULL),@/
         PO(PRIMITIVE_RECORD_TEMPLATE,      SIGNATURE_1,   NULL),@/
         PO(PRIMITIVE_RECORD_TEMPLATE_P,    SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_RESET,                SIGNATURE_L,   NULL),@/
         PO(PRIMITIVE_ROOT_ENVIRONMENT,     SIGNATURE_0,   NULL),@/
         PO(PRIMITIVE_SEGMENT_LENGTH,       SIGNATURE_1,   NULL),@/
         PO(PRIMITIVE_SEGMENT_P,            SIGNATURE_1,   NULL),@/
         PO(PRIMITIVE_SEGMENT_RESIZE_M,     SIGNATURE_2,   NULL),@/
         PO(PRIMITIVE_SET_M,                SIGNATURE_ECL, NULL),@/
+        PO(PRIMITIVE_SHIFT,                SIGNATURE_CL,  NULL),@/
         PO(PRIMITIVE_SUB,                  SIGNATURE_2,   NULL),@/
         PO(PRIMITIVE_SYMBOL_KEY,           SIGNATURE_1,   NULL),@/
         PO(PRIMITIVE_SYMBOL_P,             SIGNATURE_1,   NULL),@/
@@ -4050,6 +4086,7 @@ shared char *Primitive_Label[PRIMITIVE_LENGTH] = {
         [PRIMITIVE_BOOLEAN_P]            = "boolean?",
         [PRIMITIVE_CAR]                  = "car",
         [PRIMITIVE_CDR]                  = "cdr",
+        [PRIMITIVE_CLOP_PREDICATE_P]     = "clop-predicate?",
         [PRIMITIVE_CONS]                 = "cons",
         [PRIMITIVE_CURRENT_ENVIRONMENT]  = "current-environment",
         [PRIMITIVE_DEFINE_M]             = "define!",
@@ -4088,11 +4125,13 @@ shared char *Primitive_Label[PRIMITIVE_LENGTH] = {
         [PRIMITIVE_RECORD_SET_M]         = "record/set!",
         [PRIMITIVE_RECORD_TEMPLATE]      = "record/template",
         [PRIMITIVE_RECORD_TEMPLATE_P]    = "record%template?",
+        [PRIMITIVE_RESET]                = "reset",
         [PRIMITIVE_ROOT_ENVIRONMENT]     = "root-environment",
         [PRIMITIVE_SEGMENT_LENGTH]       = "segment/length",
         [PRIMITIVE_SEGMENT_P]            = "segment?",
         [PRIMITIVE_SEGMENT_RESIZE_M]     = "segment/resize!",
         [PRIMITIVE_SET_M]                = "set!",
+        [PRIMITIVE_SHIFT]                = "shift",
         [PRIMITIVE_SUB]                  = "-",
         [PRIMITIVE_SYMBOL_KEY]           = "symbol/key",
         [PRIMITIVE_SYMBOL_P]             = "symbol?",
@@ -4104,9 +4143,10 @@ shared char *Primitive_Label[PRIMITIVE_LENGTH] = {
 
 @ @<Global...@>=
 shared address Interpret_Closure = ADDRESS_INVALID;
+shared address Interpret_Resume = ADDRESS_INVALID;
 
 @ @<Extern...@>=
-extern shared address Interpret_Closure;
+extern shared address Interpret_Closure, Interpret_Resume;
 
 @ @<Initialise \Ls/ primitives@>=
 orreturn(new_symbol_const("eval", &sig_eval));
@@ -4174,6 +4214,7 @@ for (i = 0; i < PRIMITIVE_LENGTH; i++) {
 @ @d PRIMITIVE_PREFIX "!Primitive/"
 @d PRIMITIVE_DEFAULT "!Primitive.Default"
 @d PRIMITIVE_INTERPRET "!Interpret-Closure"
+@d PRIMITIVE_RESUME "!Resume-Continuation"
 @<Link \Ls/...@>=
 k = 11 + 7; /* |strlen(PRIMITIVE_WRAPPER)| */
 memmove(btmp, PRIMITIVE_DEFAULT, k);
@@ -4197,9 +4238,19 @@ for (i = 0; i < PRIMITIVE_LENGTH; i++) {
 }
 orreturn(new_symbol_const(PRIMITIVE_INTERPRET, &ltmp));
 orreturn(vm_locate_entry(ltmp, NULL, &Interpret_Closure));
+orreturn(new_symbol_const(PRIMITIVE_RESUME, &ltmp));
+orreturn(vm_locate_entry(ltmp, NULL, &Interpret_Resume));
 
 @ @d clop_set_address_m(O, F) (object_set_pointer_m((O), (void *) (F)))
 @d clop_function(O) ((error_code (*)(cell *)) object(O))
+
+@ @<Carry out...@>=
+case OP_CLOP:
+        ortrap(interpret_solo_argument(ins, &VM_Arg1)); /* CLOP pointer */
+        assert(clop_p(VM_Arg1));
+        ortrap(clop_function(VM_Arg1)(&VM_Result));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
 
 @* Stack. Based on list or array.
 
@@ -4216,6 +4267,7 @@ error_code stack_list_push (cell *, cell);
 
 @ @<Initialise run-time ...@>=
 orreturn(init_stack_array(&Control_Link));
+Frame_Pointer = fix(-1);
 
 @ @c
 error_code
@@ -4259,7 +4311,7 @@ error_code
 init_stack_array (cell *ret)
 {
         error_code reason;
-        orreturn(new_array(1 + (64 * CELL_BYTES), ret));
+        orreturn(new_array(1 + (128 * CELL_BYTES), ret));
         array_base(*ret)[0] = fix(1);
         return LERR_NONE;
 }
@@ -4380,20 +4432,21 @@ Some ops have no destination, eg. HALT, TRAP, JUMP.
 
 nb. use of char * and array deref is the best kind of incorrect.
 
-@d IB(I,B)   ((int32_t) (((unsigned char *) &(I))[B]))
-@d IINT(I)   ((int32_t) ((IB((I), 2) << 8) | IB((I), 3)))
-@d OP(I)     (IB((I), 0))
+@d SB(I,B)   ((int32_t) (((signed char *) &(I))[B]))
+@d UB(I,B)   ((int32_t) (((unsigned char *) &(I))[B]))
+@d IINT(I)   ((int32_t) ((UB((I), 2) << 8) | UB((I), 3)))
+@d OP(I)     (UB((I), 0))
 @#
 @d FLAGS(I)  (betoh32((I) & htobe32(LBC_FLAGS)))
-@d INTP(I,B) (IB((I), 1) & (1 << (9 - (B))))
+@d INTP(I,B) (UB((I), 1) & (1 << (9 - (B))))
 @d SINT(I)   ((int16_t) (betoh32(I) & 0xffff))
 @d UINT(I)   ((uint16_t) (betoh32(I) & 0xffff))
 @d SBIG(I)   ((int32_t) (UBIG(I) | SIGN(I)))
 @d SIGN(I)   ((0xffc00000 * ((betoh32(I) & 0x00200000) >> 21)))
 @d UBIG(I)   ((uint32_t) (betoh32(I) & 0x003fffff))
-@d REGP(I,B) ((B) == 0 || !(IB((I), (B) + 1) & 0x80))
-@d REG(I,B)  (IB((I), (B) + 1) & 0x1f)
-@d VAL(I,B)  ((int) (IB((I), (B) + 1) & 0x7f))
+@d REGP(I,B) ((B) == 0 || !(UB((I), (B) + 1) & 0x80))
+@d REG(I,B)  (UB((I), (B) + 1) & 0x1f)
+@d VAL(I,B)  ((int) (UB((I), (B) + 1) & 0x7f))
 
 @d LBC_OPCODE           0xff000000
 @d LBC_FLAGS            0x00c00000
@@ -4485,7 +4538,7 @@ interpret_integer (instruction  ins,
                    int          argc,
                    cell        *ret)
 {
-        return new_int_c(IB(ins, argc + 1), ret);
+        return new_int_c(SB(ins, argc + 1), ret);
 }
 
 @ @c
@@ -4663,6 +4716,11 @@ case OP_CLOSURE_P:
         VM_Result = predicate(closure_p(VM_Arg1));
         ortrap(interpret_save(ins, VM_Result));
         break;
+case OP_DELIMITER_P:
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        VM_Result = predicate(delimiter_p(VM_Arg1));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
 case OP_ENVIRONMENT_P:
         ortrap(interpret_solo_argument(ins, &VM_Arg1));
         VM_Result = predicate(environment_p(VM_Arg1));
@@ -4686,11 +4744,6 @@ case OP_PAIR_P:
 case OP_PRIMITIVE_P:
         ortrap(interpret_solo_argument(ins, &VM_Arg1));
         VM_Result = predicate(primitive_p(VM_Arg1));
-        ortrap(interpret_save(ins, VM_Result));
-        break;
-case OP_RESUMPTION_P:
-        ortrap(interpret_solo_argument(ins, &VM_Arg1));
-        VM_Result = LFALSE;
         ortrap(interpret_save(ins, VM_Result));
         break;
 case OP_SEGMENT_P:
@@ -4897,8 +4950,12 @@ new_closure (cell  sign,
         error_code reason;
 
         assert(null_p(sign) || pair_p(sign));
-        assert(null_p(body) || pair_p(body));
-        orreturn(new_pointer(Interpret_Closure, &start));
+        assert(null_p(body) || pair_p(body) || array_p(body));
+        if (array_p(body)) {
+                orreturn(new_pointer(Interpret_Resume, &start));
+        } else {
+                orreturn(new_pointer(Interpret_Closure, &start));
+        }
         orreturn(new_array_imp(CLOSURE_LENGTH, NIL, FORM_CLOSURE, ret));
         array_base(*ret)[CLOSURE_ADDRESS] = start;
         array_base(*ret)[CLOSURE_BODY] = body;
@@ -5218,7 +5275,21 @@ case OP_BLOCKED:
         ortrap(interpret_save(ins, VM_Result));
         break;
 
+@ fp is the only argument to this op and should  always be at a
+fixed offset from sp when this is reached.
 
+Create (directly or after more instruction) a closure with signature
+(copy copy-list), no body and start address Primitive!yield instead
+of !Interpret-Closure.
+
+@<Carry out...@>=
+case OP_DELIMIT:
+        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Frame pointer */
+        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Stack location */
+        assert(fixed_p(VM_Arg1));
+        ortrap(new_atom(VM_Arg1, VM_Arg2, FORM_DELIMITER, &VM_Result));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
 
 @* Assembly Statement Parser.
 
