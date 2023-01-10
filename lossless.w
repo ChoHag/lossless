@@ -383,6 +383,7 @@ typedef enum {
         LERR_NONE,@/
         LERR_ADDRESS,        /* An invalid value is used as an address. */
         LERR_AMBIGUOUS,      /* An expression's ending is unclear. */
+        LERR_BARRIER,        /* Attempt to capture a continuation barrier. */
         LERR_BUSY,           /* A resource is busy. */
         LERR_DOUBLE_TAIL,    /* Two \.. elements in a list. */
         LERR_EMPTY_TAIL,     /* A \.. without a tail expression. */
@@ -430,6 +431,7 @@ shared char *Error_Label[LERR_LENGTH] = {@|
         [LERR_FINISHED]       = "already-finished",@|
         [LERR_AMBIGUOUS]      = "ambiguous-syntax",@|
         [LERR_THREAD]         = "bad-join",@|
+        [LERR_BARRIER]        = "captured-barrier",@|
         [LERR_EXISTS]         = "conflicted-binding",@|
         [LERR_DOUBLE_TAIL]    = "double-tail",@|
         [LERR_EOF]            = "end-of-file",@|
@@ -881,11 +883,12 @@ typedef union {
 @d FORM_HEAP           (LTAG_NONE | 0x04) /* Preallocated storage for atoms. */
 @d FORM_INTEGER        (LTAG_NONE | 0x05) /* Large integer. */
 @d FORM_LIBRARY        (LTAG_NONE | 0x06)
-@d FORM_RUNE           (LTAG_NONE | 0x07) /* Unicode code point. */
-@d FORM_SEGMENT        (LTAG_NONE | 0x08) /* Large memory allocation. */
-@d FORM_SEGMENT_INTERN (LTAG_NONE | 0x09) /* Tiny memory allocation. */
-@d FORM_SYMBOL         (LTAG_NONE | 0x0a) /* Symbol. */
-@d FORM_SYMBOL_INTERN  (LTAG_NONE | 0x0b) /* Tiny symbol. */
+@d FORM_PROMPT         (LTAG_NONE | 0x07)
+@d FORM_RUNE           (LTAG_NONE | 0x08) /* Unicode code point. */
+@d FORM_SEGMENT        (LTAG_NONE | 0x09) /* Large memory allocation. */
+@d FORM_SEGMENT_INTERN (LTAG_NONE | 0x0a) /* Tiny memory allocation. */
+@d FORM_SYMBOL         (LTAG_NONE | 0x0b) /* Symbol. */
+@d FORM_SYMBOL_INTERN  (LTAG_NONE | 0x0c) /* Tiny symbol. */
 @#
 @d FORM_ARRAY          (LTAG_PDEX | 0x00) /* Zero or more sequential cells. */
 @d FORM_ASSEMBLY       (LTAG_PDEX | 0x01) /* (Partially) assembled bytecode. */
@@ -929,6 +932,7 @@ implementation or are otherwise related.
 @d instance_p(O)       (form_p((O), INSTANCE))
 @d library_p(O)        (form_p((O), LIBRARY))
 @d opcode_p(O)         (form_p((O), OPCODE))
+@d prompt_p(O)         (form_p((O), PROMPT))
 @d register_p(O)       (form_p((O), REGISTER))
 @d rune_p(O)           (form_p((O), RUNE))
 @d statement_p(O)      (form_p((O), STATEMENT))
@@ -3724,6 +3728,7 @@ typedef enum {
         OP_POKE_M,
         OP_POP_M,
         OP_PRIMITIVE_P,
+        OP_PROMPT_P,
         OP_PUSH_M,
         OP_RECORD,
         OP_RECORD_P,
@@ -3764,6 +3769,7 @@ shared opcode_table Op[OPCODE_LENGTH] = {@|
         [OP_SIGNATURE]      = { NIL, AREG, ALOB, NARG },@|
         [OP_DEFINE_M]       = { NIL, AREG, ALOB, NARG },@|
         [OP_EXISTS_P]       = { NIL, AREG, ALOT, ALOT },@|
+        [OP_PROMPT_P]       = { NIL, AREG, ALOB, NARG },@|
         [OP_RECORD_P]       = { NIL, AREG, ALOT, ALOT },@|
         [OP_RESIZE_M]       = { NIL, AREG, ALOT, ALOT },@|
         [OP_SYMBOL_P]       = { NIL, AREG, ALOB, NARG },@|
@@ -3840,6 +3846,7 @@ shared char *Opcode_Label[OPCODE_LENGTH] = {@|
         [OP_SIGNATURE]      = "VM:SIGNATURE",@|
         [OP_DEFINE_M]       = "VM:DEFINE!",@|
         [OP_EXISTS_P]       = "VM:EXISTS?",@|
+        [OP_PROMPT_P]       = "VM:PROMPT?",@|
         [OP_RECORD_P]       = "VM:RECORD?",@|
         [OP_RESIZE_M]       = "VM:RESIZE!",@|
         [OP_SYMBOL_P]       = "VM:SYMBOL?",@|
@@ -3932,10 +3939,13 @@ typedef enum {
         PRIMITIVE_ARRAY_RESIZE_M,
         PRIMITIVE_ARRAY_SET_M,
         PRIMITIVE_BOOLEAN_P,
+        PRIMITIVE_BREAK,
         PRIMITIVE_CAR,
         PRIMITIVE_CDR,
         PRIMITIVE_CLOP_PREDICATE_P,
+        PRIMITIVE_CLOSURE_P,
         PRIMITIVE_CONS,
+        PRIMITIVE_CONTINUATION_P,
         PRIMITIVE_CURRENT_ENVIRONMENT,
         PRIMITIVE_DEFINE_M,
         PRIMITIVE_DO,
@@ -3964,6 +3974,9 @@ typedef enum {
         PRIMITIVE_NEW_SYMBOL_SEGMENT,
         PRIMITIVE_NULL_P,
         PRIMITIVE_PAIR_P,
+        PRIMITIVE_PRIMITIVE_P,
+        PRIMITIVE_PROMPT,
+        PRIMITIVE_PROMPT_P,
         PRIMITIVE_QUOTE,
         PRIMITIVE_RECORD_INSTANCE_OF_P,
         PRIMITIVE_RECORD_INSTANCE_P,
@@ -3973,13 +3986,12 @@ typedef enum {
         PRIMITIVE_RECORD_SET_M,
         PRIMITIVE_RECORD_TEMPLATE,
         PRIMITIVE_RECORD_TEMPLATE_P,
-        PRIMITIVE_RESET,
+        PRIMITIVE_RESTRICT,
         PRIMITIVE_ROOT_ENVIRONMENT,
         PRIMITIVE_SEGMENT_LENGTH,
         PRIMITIVE_SEGMENT_P,
         PRIMITIVE_SEGMENT_RESIZE_M,
         PRIMITIVE_SET_M,
-        PRIMITIVE_SHIFT,
         PRIMITIVE_SUB,
         PRIMITIVE_SYMBOL_KEY,
         PRIMITIVE_SYMBOL_P,
@@ -4015,10 +4027,13 @@ shared primitive Primitive[PRIMITIVE_LENGTH] = {
         PO(PRIMITIVE_ARRAY_RESIZE_M,       SIGNATURE_2,   NULL),@/
         PO(PRIMITIVE_ARRAY_SET_M,          SIGNATURE_3,   NULL),@/
         PO(PRIMITIVE_BOOLEAN_P,            SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_BREAK,                SIGNATURE_ECL, NULL),@/
         PO(PRIMITIVE_CAR,                  SIGNATURE_1,   NULL),@/
         PO(PRIMITIVE_CDR,                  SIGNATURE_1,   NULL),@/
         PO(PRIMITIVE_CLOP_PREDICATE_P,     SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_CLOSURE_P,            SIGNATURE_1,   NULL),@/
         PO(PRIMITIVE_CONS,                 SIGNATURE_2,   NULL),@/
+        PO(PRIMITIVE_CONTINUATION_P,       SIGNATURE_1,   NULL),@/
         PO(PRIMITIVE_CURRENT_ENVIRONMENT,  SIGNATURE_0,   NULL),@/
         PO(PRIMITIVE_DEFINE_M,             SIGNATURE_ECL, NULL),@/
         PO(PRIMITIVE_DO,                   SIGNATURE_L,   NULL),@/
@@ -4047,6 +4062,9 @@ shared primitive Primitive[PRIMITIVE_LENGTH] = {
         PO(PRIMITIVE_NEW_SYMBOL_SEGMENT,   SIGNATURE_3,   NULL),@/
         PO(PRIMITIVE_NULL_P,               SIGNATURE_1,   NULL),@/
         PO(PRIMITIVE_PAIR_P,               SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_PRIMITIVE_P,          SIGNATURE_1,   NULL),@/
+        PO(PRIMITIVE_PROMPT,               SIGNATURE_CL,  NULL),@/
+        PO(PRIMITIVE_PROMPT_P,             SIGNATURE_1,   NULL),@/
         PO(PRIMITIVE_QUOTE,                SIGNATURE_C,   NULL),@/
         PO(PRIMITIVE_RECORD_INSTANCE_OF_P, SIGNATURE_2,   NULL),@/
         PO(PRIMITIVE_RECORD_INSTANCE_P,    SIGNATURE_1,   NULL),@/
@@ -4056,13 +4074,12 @@ shared primitive Primitive[PRIMITIVE_LENGTH] = {
         PO(PRIMITIVE_RECORD_SET_M,         SIGNATURE_3,   NULL),@/
         PO(PRIMITIVE_RECORD_TEMPLATE,      SIGNATURE_1,   NULL),@/
         PO(PRIMITIVE_RECORD_TEMPLATE_P,    SIGNATURE_1,   NULL),@/
-        PO(PRIMITIVE_RESET,                SIGNATURE_L,   NULL),@/
+        PO(PRIMITIVE_RESTRICT,             SIGNATURE_L,   NULL),@/
         PO(PRIMITIVE_ROOT_ENVIRONMENT,     SIGNATURE_0,   NULL),@/
         PO(PRIMITIVE_SEGMENT_LENGTH,       SIGNATURE_1,   NULL),@/
         PO(PRIMITIVE_SEGMENT_P,            SIGNATURE_1,   NULL),@/
         PO(PRIMITIVE_SEGMENT_RESIZE_M,     SIGNATURE_2,   NULL),@/
         PO(PRIMITIVE_SET_M,                SIGNATURE_ECL, NULL),@/
-        PO(PRIMITIVE_SHIFT,                SIGNATURE_CL,  NULL),@/
         PO(PRIMITIVE_SUB,                  SIGNATURE_2,   NULL),@/
         PO(PRIMITIVE_SYMBOL_KEY,           SIGNATURE_1,   NULL),@/
         PO(PRIMITIVE_SYMBOL_P,             SIGNATURE_1,   NULL),@/
@@ -4084,10 +4101,13 @@ shared char *Primitive_Label[PRIMITIVE_LENGTH] = {
         [PRIMITIVE_ARRAY_RESIZE_M]       = "array/resize!",
         [PRIMITIVE_ARRAY_SET_M]          = "array/set!",
         [PRIMITIVE_BOOLEAN_P]            = "boolean?",
+        [PRIMITIVE_BREAK]                = "break",
         [PRIMITIVE_CAR]                  = "car",
         [PRIMITIVE_CDR]                  = "cdr",
         [PRIMITIVE_CLOP_PREDICATE_P]     = "clop-predicate?",
+        [PRIMITIVE_CLOSURE_P]            = "closure?",
         [PRIMITIVE_CONS]                 = "cons",
+        [PRIMITIVE_CONTINUATION_P]       = "continuation?",
         [PRIMITIVE_CURRENT_ENVIRONMENT]  = "current-environment",
         [PRIMITIVE_DEFINE_M]             = "define!",
         [PRIMITIVE_DO]                   = "do",
@@ -4116,6 +4136,9 @@ shared char *Primitive_Label[PRIMITIVE_LENGTH] = {
         [PRIMITIVE_NEW_SYMBOL_SEGMENT]   = "segment->symbol",
         [PRIMITIVE_NULL_P]               = "null?",
         [PRIMITIVE_PAIR_P]               = "pair?",
+        [PRIMITIVE_PRIMITIVE_P]          = "primitive?",
+        [PRIMITIVE_PROMPT]               = "prompt",
+        [PRIMITIVE_PROMPT_P]             = "prompt?",
         [PRIMITIVE_QUOTE]                = "quote",
         [PRIMITIVE_RECORD_INSTANCE_OF_P] = "record/instance-of?",
         [PRIMITIVE_RECORD_INSTANCE_P]    = "record%instance?",
@@ -4125,13 +4148,12 @@ shared char *Primitive_Label[PRIMITIVE_LENGTH] = {
         [PRIMITIVE_RECORD_SET_M]         = "record/set!",
         [PRIMITIVE_RECORD_TEMPLATE]      = "record/template",
         [PRIMITIVE_RECORD_TEMPLATE_P]    = "record%template?",
-        [PRIMITIVE_RESET]                = "reset",
+        [PRIMITIVE_RESTRICT]             = "restrict",
         [PRIMITIVE_ROOT_ENVIRONMENT]     = "root-environment",
         [PRIMITIVE_SEGMENT_LENGTH]       = "segment/length",
         [PRIMITIVE_SEGMENT_P]            = "segment?",
         [PRIMITIVE_SEGMENT_RESIZE_M]     = "segment/resize!",
         [PRIMITIVE_SET_M]                = "set!",
-        [PRIMITIVE_SHIFT]                = "shift",
         [PRIMITIVE_SUB]                  = "-",
         [PRIMITIVE_SYMBOL_KEY]           = "symbol/key",
         [PRIMITIVE_SYMBOL_P]             = "symbol?",
@@ -4708,7 +4730,7 @@ case OP_LOAD:@;
 @ @<Carry out...@>=
 case OP_ARRAY_P:
         ortrap(interpret_solo_argument(ins, &VM_Arg1));
-        VM_Result = predicate(segment_p(VM_Arg1));
+        VM_Result = predicate(array_p(VM_Arg1));
         ortrap(interpret_save(ins, VM_Result));
         break;
 case OP_CLOSURE_P:
@@ -4746,6 +4768,11 @@ case OP_PRIMITIVE_P:
         VM_Result = predicate(primitive_p(VM_Arg1));
         ortrap(interpret_save(ins, VM_Result));
         break;
+case OP_PROMPT_P:
+        ortrap(interpret_solo_argument(ins, &VM_Arg1));
+        VM_Result = predicate(prompt_p(VM_Arg1));
+        ortrap(interpret_save(ins, VM_Result));
+        break;
 case OP_SEGMENT_P:
         ortrap(interpret_solo_argument(ins, &VM_Arg1));
         VM_Result = predicate(segment_p(VM_Arg1));
@@ -4776,7 +4803,7 @@ case OP_LOOKUP:@;
                 reason = env_search(VM_Arg1, VM_Arg2, &VM_Result);
         else {
                 if (instance_p(VM_Arg1))
-                        VM_Arg1 = record_template(VM_Arg1);
+                        VM_Arg1 = record_template_table(record_template(VM_Arg1));
                 else
                         assert(hashtable_p(VM_Arg1) || template_p(VM_Arg1));
                 reason = hashtable_search(VM_Arg1, VM_Arg2, &VM_Result);
@@ -4788,6 +4815,8 @@ case OP_LOOKUP:@;
                         VM_Result = predicate(reason == LERR_NONE);
         } else if (failure_p(reason))
                 goto Trap;
+        else if (!environment_p(VM_Arg1))
+                VM_Result = A(VM_Result)->dex;
         ortrap(interpret_save(ins, VM_Result));
         break;
 case OP_EXTEND:@;
@@ -4827,13 +4856,13 @@ case OP_CONS:@;
         break;
 case OP_CAR:@;
         ortrap(interpret_solo_argument(ins, &VM_Arg1));
-        assert(ATOM_SIN_DATUM_P(VM_Arg1));
+        assert(!special_p(VM_Arg1) && ATOM_SIN_DATUM_P(VM_Arg1));
         VM_Result = A(VM_Arg1)->sin;
         ortrap(interpret_save(ins, VM_Result));
         break;
 case OP_CDR:@;
         ortrap(interpret_solo_argument(ins, &VM_Arg1));
-        assert(ATOM_DEX_DATUM_P(VM_Arg1));
+        assert(!special_p(VM_Arg1) && ATOM_DEX_DATUM_P(VM_Arg1));
         VM_Result = A(VM_Arg1)->dex;
         ortrap(interpret_save(ins, VM_Result));
         break;
@@ -5180,7 +5209,8 @@ case OP_RECORD_P:
                 VM_Result = predicate(record_p(VM_Arg1));
         else {
                 assert(template_p(VM_Arg2));
-                VM_Result = predicate(record_template(VM_Arg1) == VM_Arg2);
+                VM_Result = predicate(instance_p(VM_Arg1)
+                        && record_template(VM_Arg1) == VM_Arg2);
         }
         ortrap(interpret_save(ins, VM_Result));
         break;
@@ -5213,7 +5243,7 @@ case OP_REF:
         if (array_p(VM_Arg1))
                 assert(fixed_value(VM_Arg2) < array_length_c(VM_Arg1));
         else
-                assert(fixed_value(VM_Arg2) < record_template_length(VM_Arg1));
+                assert(fixed_value(VM_Arg2) < record_template_length(record_template(VM_Arg1)));
         VM_Result = array_base(VM_Arg1)[fixed_value(VM_Arg2)];
         ortrap(interpret_save(ins, VM_Result));
         break;
@@ -5284,9 +5314,13 @@ of !Interpret-Closure.
 
 @<Carry out...@>=
 case OP_DELIMIT:
-        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Frame pointer */
-        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Stack location */
+        ortrap(interpret_argument(ins, 1, &VM_Arg1)); /* Previous frame */
+        ortrap(interpret_argument(ins, 2, &VM_Arg2)); /* Boolean or prompt */
         assert(fixed_p(VM_Arg1));
+        if (true_p(VM_Arg2))
+                ortrap(new_atom(NIL, NIL, FORM_PROMPT, &VM_Arg2));
+        else if (!false_p(VM_Arg2))
+                assert(prompt_p(VM_Arg2));
         ortrap(new_atom(VM_Arg1, VM_Arg2, FORM_DELIMITER, &VM_Result));
         ortrap(interpret_save(ins, VM_Result));
         break;

@@ -146,7 +146,7 @@ Combine/Finish
         POP!    fp,clink        Restore frame header pointer
         DELIMITER? tmp,fp
         JUMPNOT tmp,@1f
-        CDR     fp,fp
+        CAR     fp,fp
 1h      POP!    ip,clink
 
 #       Lossless understands two types of combiner, primitives and
@@ -1240,92 +1240,176 @@ Primitive/do/next
         POP!    expr,clink
         LOAD    ip,@!Evaluate
 
+#       clink: r1 r0 /Finish <Frame>
+#       r0: label
+#       r1: body
+#
+#       nb. due to relying on (do) this creates the prompt before
+#       validating the body.
+#
+!Primitive/prompt
+        SYMBOL? tmp,r0
+        JUMPIF  tmp,@1f
+        CMPIS?  tmp,r0,()
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      REF     acc,clink,fp    Frame header
+        DELIMITER? tmp,acc      Impossible
+        JUMPNOT tmp,@2f
+        TRAP    'lossless-error
+2h      DELIMIT acc,acc,#t
+        SET!    clink,fp,acc
+        CMPIS?  tmp,r0,()
+        JUMPIF  tmp,@4f
+        CDR     acc,acc         Prompt
+        CONS    acc,r0,acc
+        EXISTS? tmp,env,r0
+        JUMPIF  tmp,@3f
+        DEFINE! env,acc
+        LOAD    ip,@4f
+3h      REPLACE! env,acc
+4h      LOAD    r0,r1
+        POP!    r1,clink
+        LOAD    ip,@!Primitive/do
+
 #       clink: r0 /Finish <Frame>
 #       r0: body
 #
-!Primitive/reset
-        REF     tmp,clink,fp
-        DELIMIT tmp,fp,tmp
-        SET!    clink,fp,tmp    Replace saved fp with the delimited version
+!Primitive/restrict
+        REF     acc,clink,fp    Frame header
+        DELIMITER? tmp,acc      Impossible
+        JUMPNOT tmp,@1f
+        TRAP    'lossless-error
+1h      DELIMIT acc,acc,#f
+        SET!    clink,fp,acc
+        CDR     acc,acc         Prompt
         LOAD    ip,@!Primitive/do
 
-#       after clearing off the stack binds the continuation to label
-#       and enters body rather than returning to the delimiting reset.
+#       r0: prompt
+#       r1: label
+#       r2: body
+#       clink: r2 r1 r0 /Finish ... <Delimited-Frame>
 #
-#       r0: label
-#       r1: body
-#       clink: r1 r0 /Finish ... <Delimited-Frame>
-#       args,expr available
-#
-!Primitive/shift
-        LOAD    args,fp
-1h      LOAD    expr,args
-        REF     args,clink,expr
-        DELIMITER? tmp,args
+!Primitive/break
+        PROMPT? tmp,r0
+        JUMPIF  tmp,@1f
+        CMPIS?  tmp,r0,()
+        JUMPIF  tmp,@1f
+        TRAP    'incompatible-operand
+1h      SYMBOL? tmp,r1
         JUMPIF  tmp,@2f
-        CMPIS?  tmp,args,-1     Top of stack?
-        JUMPNOT tmp,@1b
-        DELIMIT args,expr,expr  Iffy
-        SET!    clink,expr,args
-2h      REF     acc,clink,0     Stack pointer to save up to
-        SUB     acc,acc,2       Minus r1 & r0 saved to enter this primitive
-        PUSH!   clink,r2
-        PUSH!   clink,r3
+        TRAP    'incompatible-operand
+2h      PUSH!   clink,r3
         PUSH!   clink,r4
         PUSH!   clink,r5
         PUSH!   clink,r6
-        CAR     r2,args         dfp = low == delimiting fp
-        LOAD    r3,acc          sp = high
-        SUB     r4,r3,r2        length = sp - dfp
-        ADD     acc,r4,2        extra space for list of fixup frame headers & environment
-        ARRAY   acc,acc,#VOID
-        LOAD    r5,fp           next frame header
-        LOAD    r6,()           list of frame headers
+        PUSH!   clink,r7
+#
+        PUSH!   clink,r2
+        PUSH!   clink,r1
 
-        LOAD    r2,r4           Start copying from here (+1)
-Primitive/shift/next
-        SUB     r2,r2,1         Next destination index
-        SUB     r3,r3,1         Next source index
-        REF     tmp,clink,r3    Copy
-        SET!    acc,r2,tmp
-        CMPIS?  tmp,r2,0        Finished?
-        JUMPIF  tmp,@Primitive/shift/finish
-        CMPIS?  tmp,r3,r5       Found a frame pointer?
-        JUMPNOT tmp,@Primitive/shift/next
-        CONS    r6,r2,r6        Remember it
-        REF     r5,clink,r3     Look for the next frame pointer
-        LOAD    ip,@Primitive/shift/next
+        LOAD    r4,fp
+Primitive/break/next-frame
+        LOAD    r3,r4           Prepare to look here
+        REF     r4,clink,r3     Frame header
+        DELIMITER? tmp,r4       Delimited?
+        JUMPIF  tmp,@1f
+        CMPIS?  tmp,r4,-1       First frame (undelimited)?
+        JUMPNOT tmp,@Primitive/break/next-frame
+        TRAP    'missing
+1h      CDR     r5,r4           Delimiter's prompt
+        CMPIS?  tmp,r5,#f       Barrier?
+        JUMPNOT tmp,@2f
+        TRAP    'captured-barrier
+2h      CMPIS?  tmp,r0,()       Any will do?
+        JUMPIF  tmp,@Primitive/break/found
+        CAR     r4,r4           Delimiter's prior frame
+        CMPIS?  tmp,r5,r0       The prompt we're looking for?
+        JUMPIF  tmp,@Primitive/break/found
+        CMPIS?  tmp,r4,-1       First frame (delimited)?
+        JUMPNOT tmp,@Primitive/break/next-frame
+        TRAP    'missing
 
-Primitive/shift/finish
-        SET!    acc,r4,r6       Save frame pointers to be fixed on resume
-        ADD     r4,r4,1
-        SET!    acc,r4,env
-        POP!    r6,clink
-        POP!    r5,clink
-        POP!    r4,clink
-        POP!    r3,clink
-        POP!    r2,clink
+#       Found it
+#       r3: stack location of delimiter
+#       r4: prior frame, from delimiter
+#       r5: prompt (= r0)
+#
+#       Copy from r3+4 until acc (has sp) (backwards), with prompt & fp list
+#
+#       r4: lowest spidx to copy
+#       r5: spindex from (decrements)
+#       r6: next frame pointer
+#       r7: frame pointer list
+#
+#       r3: write index
+#       r2: holding area
+#       r1: preservable stack top
+#       r0: working area
+#       acc: dest array
+Primitive/break/found
+        ADD     r4,r3,4         Copy until r5=r4
+        ADD     r5,fp,4         Stack pointer to copy to (+1; non-incl.)
+        LOAD    r1,r4
+        SUB     r6,r5,r4        Length to copy
+        ADD     r6,r6,2         Space for prompt & frame headers list
+        ARRAY   acc,r6,#f       #VOID
+        SET!    acc,1,r0        Save prompt
+        LOAD    r3,r6           Destination index
+        LOAD    r6,fp           Next frame header
+        LOAD    r7,()           List of frame headers (will save @0 later)
 
-        LOAD    tmp,'copy-list
-        CONS    tmp,tmp,()      (copy-list)
-        CONS    tmp,(),tmp      (() copy-list) --- Will not be bound like normal
+Primitive/break/next-stack-object
+        CMPIS?  tmp,r5,r4
+        JUMPIF  tmp,@Primitive/break/finish
+        SUB     r5,r5,1
+        SUB     r3,r3,1
+        REF     r2,clink,r5
+        SET!    acc,r3,r2
+        CMPIS?  tmp,r5,r6       Found a frame pointer?
+        JUMPNOT tmp,@Primitive/break/next-stack-object
+        CONS    r7,r3,r7        Remember its location
+        DELIMITER? tmp,r2
+        JUMPNOT tmp,@1f
+        CAR     r2,r2
+1h      LOAD    r6,r2
+        LOAD    ip,@Primitive/break/next-stack-object
+
+Primitive/break/finish
+        SET!    acc,0,r7        Save frame pointer list
+        LOAD    tmp,'copy-list  Should be 'optional...
         CONS    tmp,tmp,()
-        CLOSURE acc,tmp,acc     two args: sig & array
+        CONS    tmp,(),tmp
+        CONS    tmp,tmp,()      Construct ((() copy-list))
+        CLOSURE acc,tmp,acc
 
+        POP!    r0,clink        Label (was r1 on entrance)
+        CMPIS?  tmp,r0,()
+        JUMPIF  tmp,@2f
         CONS    acc,r0,acc
         EXISTS? tmp,env,r0
         JUMPIF  tmp,@1f
         DEFINE! env,acc
         LOAD    ip,@2f
 1h      REPLACE! env,acc
-2h      LOAD    r0,r1
+2h      POP!    r0,clink        Body (was r2 on entrance)
+        POP!    r7,clink
+        POP!    r6,clink
+        POP!    r5,clink
+        POP!    r4,clink
+        POP!    r3,clink
+        POP!    r2,clink
+        LOAD    acc,r1
         POP!    r1,clink
 
-        POP!    expr,clink      spilled r0 (has body)
-        CAR     tmp,args
-        SET!    clink,0,tmp
-        CDR     fp,args
-        PUSH!   clink,expr
+        POP!    expr,clink      Spilled r0 (real r0 has body for (do))
+        REF     args,clink,acc
+        DELIMITER? tmp,args
+        JUMPNOT tmp,@3f
+        CAR     args,args
+3h      LOAD    fp,args
+        SET!    clink,0,acc
+        PUSH!   clink,expr      Re-spill r0
         LOAD    ip,@!Primitive/do
 
 #       (In) Arguments: ((() . (arg-list)))
@@ -1340,78 +1424,89 @@ Primitive/shift/finish
         CAR     args,args       (() . arg-list)
         CDR     args,args       arg-list; Discard nil binding
         CMPIS?  tmp,args,()     No argument?
-        JUMPIF  tmp,@2f
-        CDR     expr,args
-        CMPIS?  tmp,args,()
+        JUMPIF  tmp,@3f
+        CDR     tmp,args        arg-list
+        CMPIS?  tmp,tmp,()
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
-1h      CAR     expr,args
+1h      CAR     args,args
         PUSH!   clink,expr      Closure from yield!
+        LOAD    expr,args
         LOAD    args,()
-        PUSH!   clink,@1f
+        PUSH!   clink,@2f
         LOAD    ip,@!Evaluate   Evaluate the argument
-1h      POP!    expr,clink      Restore closure
-2h      BODY    expr,expr       Stack to append
+2h      POP!    expr,clink      Restore closure
+3h      BODY    expr,expr       Stack to append
 
 #       delimit fp, skip fp/args/env in saved stack, append and fixup frame pointers
 
-        ARRAY   args,7,#VOID
+        ARRAY   args,6,#VOID
         SET!    args,0,r0
         SET!    args,1,r1
         SET!    args,2,r2
         SET!    args,3,r3
         SET!    args,4,r4
         SET!    args,5,r5
-        SET!    args,6,r6
 
-        REF     r0,expr,0       previous dfp
-        REF     r1,clink,0      sp
-        DELIMIT tmp,r1,fp       new delimiter
-        PUSH!   clink,tmp
-        CAR     r0,r0           old fp
-        SUB     r0,r1,r0        delta
-
-        LOAD    r1,0            read index, skip delimiter, will +1
-        LENGTH  r2,expr         new stack length
-        SUB     r2,r2,1
-        REF     r3,expr,r2      saved env
-        SUB     r2,r2,1
-        REF     r4,expr,r2      frame pointers to fix
-        PAIR?   tmp,r4
+        REF     r0,clink,fp
+        DELIMITER? tmp,r0
         JUMPIF  tmp,@1f
-        LOAD    r5,()           next frame pointer
-        LOAD    ip,@Resume-Continuation/next
-1h      CAR     r5,r4
-Resume-Continuation/next
-        ADD     r1,r1,1
-        CMPIS?  tmp,r1,r2       End of array?
-        JUMPIF  tmp,@Resume-Continuation/finish
-        REF     r6,expr,r1
-        CMPIS?  tmp,r1,r5       At the next frame pointer?
-        JUMPNOT tmp,@3f
-        ADD     r6,r6,r0        Fix pointer to new stack
-        LOAD    fp,r6
-        PAIR?   tmp,r4
-        JUMPNOT tmp,@2f
-        CDR     r4,r4
-        PAIR?   tmp,r4
-        JUMPNOT tmp,@2f
-        CAR     r5,r4
-        LOAD    ip,@3f
-2h      LOAD    r5,()           No more frame pointers
-3h      PUSH!   clink,r6
-        LOAD    ip,@Resume-Continuation/next
+        DELIMIT r0,r0,#t
+        SET!    clink,fp,r0     Replace saved fp with the delimited version
 
-Resume-Continuation/finish
-        LOAD    env,r3
+#       r0: read index
+#       r1: length - 2
+#       r2: Most recently pushed frame pointer
+#       r3: List of frame pointers or ()
+#       r4: Next frame pointer or ()
+#       r5: xfer
+#
+1h      LOAD    r0,2            Read index
+        LENGTH  r1,expr         Length to copy
+        LOAD    r2,fp           Most recent frame pointer
+        DELIMITER? tmp,r2
+        JUMPNOT tmp,@2f
+        TRAP    'lossless-error
+2h      REF     tmp,expr,1
+        DELIMIT tmp,r2,tmp
+        SET!    clink,fp,tmp
+        REF     r3,expr,0       List of frame pointers
+        CMPIS?  tmp,r3,()
+        JUMPNOT tmp,@3f
+        LOAD    r4,()           No more frame pointers
+        LOAD    ip,@Resume-Continuation/next
+3h      CAR     r4,r3           Next frame pointer
+
+Resume-Continuation/next
+        REF     r5,expr,r0      Read from saved stack
+        CMPIS?  tmp,r0,r4       Did we just read a frame pointer?
+        JUMPNOT tmp,@4f
+        DELIMITER? tmp,r5       Is the saved frame pointer a delimiter?
+        JUMPNOT tmp,@1f
+        CDR     tmp,r5          Saved prompt
+        DELIMIT r5,r2,tmp
+        LOAD    ip,@2f
+1h      LOAD    r5,r2           Normal frame header, update real address and continue
+2h      LOAD    r2,r0           This is now the most recent frame pointer
+        CMPIS?  tmp,r3,()
+        JUMPIF  tmp,@3f
+        CDR     r3,r3           Remaining frame pointers to look out for
+        CMPIS?  tmp,r3,()
+        JUMPIF  tmp,@3f
+        CAR     r4,r3           Next frame pointer
+        LOAD    ip,@4f
+3h      LOAD    r4,()           No more frame pointers
+4h      PUSH!   clink,r5
+        ADD     r0,r0,1
+        CMPIS?  tmp,r0,r1
+        JUMPNOT tmp,@Resume-Continuation/next
+
         REF     r0,args,0
         REF     r1,args,1
         REF     r2,args,2
         REF     r3,args,3
         REF     r4,args,4
         REF     r5,args,5
-        REF     r6,args,6
-        LOAD    args,()
         POP!    ip,clink
 
 ########
@@ -1442,8 +1537,11 @@ Primitive/define!/imp
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 1h      CAR     expr,r2
-        LOAD    tmp,@1f
-        PUSH!   clink,tmp
+        PUSH!   clink,@1f
+        PUSH!   clink,r0
+        PUSH!   clink,r1
+        PUSH!   clink,r2
+        PUSH!   clink,@!Restore/r2
         LOAD    ip,@!Evaluate
 1h      ENVIRONMENT? tmp,r0
         JUMPIF  tmp,@1f
@@ -1484,12 +1582,10 @@ Primitive/define!/lambda/continue
         CMPIS?  tmp,r1,()
         JUMPNOT tmp,@1f
         LOAD    expr,r0
-        LOAD    tmp,@!Restore/r1
-        PUSH!   clink,tmp
+        PUSH!   clink,@!Restore/r1
         LOAD    ip,@!Evaluate
 1h      CAR     expr,r1
-        LOAD    tmp,@1f
-        PUSH!   clink,tmp
+        PUSH!   clink,@1f
         LOAD    ip,@!Evaluate
 1h      ENVIRONMENT? tmp,acc
         JUMPIF  tmp,@1f
@@ -1497,8 +1593,7 @@ Primitive/define!/lambda/continue
 1h      PUSH!   clink,env
         LOAD    env,acc
         LOAD    expr,r0
-        LOAD    tmp,@1f
-        PUSH!   clink,tmp
+        PUSH!   clink,@1f
         LOAD    ip,@!Evaluate
 1h      POP!    env,clink
         LOAD    ip,@!Restore/r1
@@ -1518,8 +1613,7 @@ Primitive/define!/lambda/continue
         LOAD    expr,r1         Consequent
         LOAD    ip,@2f
 1h      LOAD    expr,r2         Alternate
-2h      LOAD    tmp,@!Restore/r2
-        PUSH!   clink,tmp
+2h      PUSH!   clink,@!Restore/r2
         LOAD    ip,@!Evaluate
 
 !Primitive/current-environment
@@ -1625,7 +1719,7 @@ Primitive/record/ref/imp
         JUMPIF  tmp,@1f
         TRAP    'incompatible-operand
 
-        INTEGER? tmp,r1
+1h      INTEGER? tmp,r1
         JUMPIF  tmp,@2f
         SYMBOL? tmp,r1
         JUMPIF  tmp,@1f
@@ -1669,6 +1763,15 @@ Primitive/record/ref/imp
         JUMPIF  acc,@1f
         CMPIS?  acc,r0,#t
 1h      LOAD    ip,@!Restore/r0
+!Primitive/closure?
+        CLOSURE? acc,r0
+        LOAD    ip,@!Restore/r0
+!Primitive/continuation?
+        CLOSURE? acc,r0
+        JUMPNOT acc,@!Restore/r0
+        BODY    acc,r0
+        ARRAY?  acc,acc
+        LOAD    ip,@!Restore/r0
 !Primitive/false?
         CMPIS?  acc,r0,#f
         LOAD    ip,@!Restore/r0
@@ -1680,6 +1783,12 @@ Primitive/record/ref/imp
         LOAD    ip,@!Restore/r0
 !Primitive/pair?
         PAIR?   acc,r0
+        LOAD    ip,@!Restore/r0
+!Primitive/primitive?
+        PRIMITIVE? acc,r0
+        LOAD    ip,@!Restore/r0
+!Primitive/prompt?
+        PROMPT? acc,r0
         LOAD    ip,@!Restore/r0
 !Primitive/segment?
         SEGMENT? acc,r0
